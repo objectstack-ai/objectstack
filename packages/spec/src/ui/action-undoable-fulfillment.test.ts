@@ -30,7 +30,6 @@ const shapeByType: Record<string, Record<string, unknown>> = {
   modal: { type: 'modal', target: 'lead_reassign_modal' },
   form: { type: 'form', target: 'lead_reassign_form' },
   api: { type: 'api', target: 'lead' },
-  ask_ai: { type: 'ask_ai' },
 };
 
 /** The two shapes some runtime fulfils — the closed accepted set. */
@@ -76,7 +75,7 @@ describe('ActionSchema — `undoable: true` is refused where no runtime fulfils 
         ...base,
         type: 'api',
         target: 'lead',
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
         params: [{ field: 'assigned_to', required: true }],
         undoable: true,
         successMessage: 'Lead reassigned.',

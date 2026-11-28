@@ -25,6 +25,7 @@ import { makeDriver, parseArgs } from '../../src/runner/cli.js';
 import {
   ApiBillingRefusedError,
   assertSubscriptionLogin,
+  CLAUDE_MEMORY_ENV,
   ClaudeCodeDriver,
   DEFAULT_ASK_MAX_TURNS,
   DEFAULT_AUTHOR_MAX_TURNS,
@@ -1172,8 +1173,8 @@ describe("the seed's load plan — reference cycles found from the card's own lo
  * `claude-opus-5-5`; with no `--model` it serves `stand-in`. `--help` prints
  * the `--effort` entry as Claude Code 2.1.325 does (its level list wrapped onto
  * the next line), or no such entry under `STAND_IN_NO_EFFORT`; an `ENV` turn
- * answers its argument list and the `CLAUDE_CODE_EFFORT_LEVEL` it was started
- * with.
+ * answers its argument list, the `CLAUDE_CODE_EFFORT_LEVEL` it was started
+ * with and which of the host's memory variables it was started with.
  */
 const STAND_IN = `#!/usr/bin/env node
 process.on('SIGTERM', () => { process.stderr.write('stand-in: terminated\\n'); process.exit(143); });
@@ -1197,7 +1198,7 @@ process.stdin.on('end', () => {
   const text = input.startsWith('ARGV')
     ? JSON.stringify(args)
     : input.startsWith('ENV')
-      ? JSON.stringify({ argv: args, effortEnv: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null })
+      ? JSON.stringify({ argv: args, effortEnv: process.env.CLAUDE_CODE_EFFORT_LEVEL ?? null, memoryEnv: ['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES'].filter((k) => process.env[k] !== undefined) })
       : 'stdin ' + input.length + ' · longest argv ' + longest;
   const asked = args.indexOf('--model') === -1 ? undefined : args[args.indexOf('--model') + 1];
   const served = asked === undefined ? 'stand-in' : asked === 'retired' ? 'claude-opus-5-5' : 'claude-' + asked + '-4-5-20250929';
@@ -1394,7 +1395,7 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
     return at === -1 ? undefined : argv[at + 1];
   };
   /** An `ENV` turn's answer: the stand-in's argument list and the effort variable it was started with. */
-  const envOf = (t: ParsedTurn) => JSON.parse(t.replyText) as { argv: string[]; effortEnv: string | null };
+  const envOf = (t: ParsedTurn) => JSON.parse(t.replyText) as { argv: string[]; effortEnv: string | null; memoryEnv: string[] };
   /** The refusal's message, or `undefined` when nothing was refused. */
   const refusalOf = (run: () => unknown): string | undefined => {
     try {
@@ -1451,6 +1452,17 @@ describe('the live driver against a stand-in `claude`: the prompt on stdin, and 
       const asked = await d.ask(ask('ENV'));
       expect([def, effortArg(envOf(asked).argv), envOf(asked).effortEnv, asked.meta.process!.requestedEffort, d.info().askEffort]).toEqual([def, undefined, null, undefined, undefined]);
     }
+  });
+
+  it('the host’s memory variables never reach a turn: a build turn and an ask turn are both started without them', async () => {
+    vi.stubEnv('PATH', `${dir}${delimiter}${process.env.PATH ?? ''}`);
+    vi.stubEnv('CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', '/host/project/memory');
+    vi.stubEnv('CLAUDE_MEMORY_STORES', 'host-store');
+    expect([...CLAUDE_MEMORY_ENV].sort()).toEqual(['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES']);
+    const d = makeDriver('claude', parseArgs([]));
+    const built = (await d.author(task('ENV'))).turn;
+    const asked = await d.ask(ask('ENV'));
+    expect([envOf(built).memoryEnv, envOf(asked).memoryEnv]).toEqual([[], []]);
   });
 
   it('an effort level the CLI’s own `--help` does not list is refused before any turn — the CLI would warn, run at its default and exit 0 — and so is any effort on a CLI with no `--effort`', () => {

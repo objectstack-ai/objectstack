@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.0"
+  version: "19.0.0-next.2"
   domain: ui
   tags: view, app, page, dashboard, report, chart, action, widget, doc
 ---
@@ -133,7 +133,7 @@ reports success and changes nothing. Call the API, with the option `value`,
 never its label ([Actions](./rules/actions.md)):
 
 ```json
-{ "name": "mark_done", "label": "Mark as done", "objectName": "task", "locations": ["record_header"],
+{ "name": "mark_done", "label": "Mark as done", "objectName": "task", "locations": ["record"],
   "type": "script", "body": { "language": "js", "capabilities": ["api.write"],
     "source": "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });" } }
 ```

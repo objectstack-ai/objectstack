@@ -151,6 +151,7 @@ import {
   type SignInPathConfigView,
 } from './boot-sign-in-reachability.js';
 import {
+  emailPasswordHeldOffByHost,
   providerCredentialIndex,
   providerCredentialsFrom,
   registerSignInMethodFloor,
@@ -158,6 +159,7 @@ import {
   ssoProviderDeleteRefusal,
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
+import { describeEmailPasswordLiveStatus, type AuthLiveStatus } from './auth-settings-live-status.js';
 import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -253,6 +255,15 @@ interface SettingsReadSurface {
     key: string,
     predicate: (input: unknown) => unknown,
     options?: { requestHeaders?: readonly string[] },
+  ): void;
+  /**
+   * State what runs at the top of the namespace's page, read on each page
+   * request (`SettingsService.registerLiveStatus`). Optional, like `subscribe`.
+   * See auth-settings-live-status.ts.
+   */
+  registerLiveStatus?(
+    namespace: string,
+    provider: (input: { ctx: Record<string, unknown>; locale?: string }) => Promise<AuthLiveStatus | undefined>,
   ): void;
 }
 
@@ -704,6 +715,8 @@ export class AuthPlugin implements Plugin {
   private allowListUndeterminedWarned = false;
   /** Set once the settings pass has said that `auth.mfa_required` reads a toggle spelling. */
   private legacyMfaRequiredNoted = false;
+  /** Whether the not-applied stored `email_password_enabled` was said (see `bindAuthSettings`). */
+  private heldOffEmailPasswordNoted = false;
   private allowListUntrustedHeaderWarned = false;
   /** The applied allow-list value whose unreadable value or entries were last reported, so one is reported once. */
   private allowListUnreadableReportedFor: string | undefined;
@@ -2430,6 +2443,7 @@ export class AuthPlugin implements Plugin {
       env: () => ((globalThis as any)?.process?.env ?? {}) as Record<string, string | undefined>,
       // [#30312] A cleared toggle returns to the declaration: judge it there.
       declaredEmailPasswordEnabled: () => this.declaredAuthOptions.emailAndPassword?.enabled !== false,
+      cloudManaged: () => isCloudManaged(),
     };
   }
 
@@ -2582,10 +2596,33 @@ export class AuthPlugin implements Plugin {
             options,
           });
         };
+        // A cloud-managed runtime whose deployment declared email and password
+        // off keeps it off: the host refuses every password door there, so a
+        // stored value that reads on would only advertise a form that signs
+        // nobody in. The save door refuses turning it on (sign-in-method-floor.ts);
+        // a row stored before that check, or a re-save of the manifest default
+        // the save door is never asked about, is not applied. An
+        // `OS_AUTH_EMAIL_PASSWORD_ENABLED` value is the deployment's own
+        // declaration and still applies.
+        let emailPasswordHeldOff = false;
         if (isExplicit('email_password_enabled')) {
-          emailAndPasswordField('email_password_enabled', {
-            enabled: asBoolean(values.email_password_enabled, true),
-          });
+          const enabled = asBoolean(values.email_password_enabled, true);
+          emailPasswordHeldOff = enabled && sources.email_password_enabled !== 'env'
+            && emailPasswordHeldOffByHost(this.signInMethodFloorDeps(ctx, authManager));
+          if (!emailPasswordHeldOff) emailAndPasswordField('email_password_enabled', { enabled });
+        }
+        if (emailPasswordHeldOff && !this.heldOffEmailPasswordNoted) {
+          this.heldOffEmailPasswordNoted = true;
+          // `error`, as for the audience settings below: the console shows the
+          // stored value as saved while the runtime does not apply it.
+          ctx.logger.error(
+            '[auth] auth.email_password_enabled is stored on, and NOT APPLIED: this environment is cloud-managed and its '
+              + 'deployment turns email and password sign-in off, so people sign in through the hosting organisation\'s '
+              + 'identity provider and the sign-in page offers no email and password form. Clear '
+              + 'auth.email_password_enabled (or set it off) in the settings console so the page matches what runs.',
+          );
+        } else if (!emailPasswordHeldOff) {
+          this.heldOffEmailPasswordNoted = false;
         }
         if (isExplicit('signup_enabled')) {
           emailAndPasswordField('signup_enabled', {
@@ -3132,10 +3169,41 @@ export class AuthPlugin implements Plugin {
     // the one-off moves of the toggle-era values onto the levels.
     await this.bindOrganizationAccessPolicy(ctx, settings);
 
-    await applySettings();
+    // The pass a change event started, so the page's statement below reads the
+    // running config after it, not mid-way.
+    let pass: Promise<void> = Promise.resolve();
+    const runPass = (): Promise<void> => (pass = applySettings());
+
+    // Setup → Authentication states what runs when the switch says otherwise:
+    // with nothing stored the switch shows the manifest default while the
+    // running config takes the deployment's declaration. See auth-settings-live-status.ts.
+    if (typeof settings.registerLiveStatus === 'function') {
+      const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
+      try {
+        settings.registerLiveStatus('auth', async ({ ctx: pageCtx, locale }) => {
+          await pass;
+          const manager = this.authManager;
+          if (!manager) return undefined;
+          return describeEmailPasswordLiveStatus({
+            running: manager.getPublicConfig().emailPassword.enabled,
+            shown: await settings.get('auth', 'email_password_enabled', pageCtx),
+            heldOffByHost: emailPasswordHeldOffByHost(floorDeps),
+            locale,
+          });
+        });
+      } catch (err: any) {
+        ctx.logger.warn(
+          '[auth] Setup → Authentication: the live status was NOT registered '
+            + `(${String(err?.message ?? err)}), so where the deployment declares email and password sign-in off `
+            + 'with nothing saved, the page shows the switch on with nothing saying it is off.',
+        );
+      }
+    }
+
+    await runPass();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
-        void applySettings();
+        void runPass();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
     }

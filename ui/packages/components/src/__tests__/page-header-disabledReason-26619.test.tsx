@@ -21,6 +21,8 @@ import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 import { I18nProvider, useObjectTranslation } from '@object-ui/i18n';
 // Registers `page:header` at module scope (object-ui/no-dynamic-import-in-test-hook).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 const DEFAULT_EN = 'Not available for this record';
 const DECLARED_EN = 'Finish the checklist before archiving.';
@@ -31,11 +33,11 @@ const ARCHIVE = {
   name: 'showcase_archive_task',
   label: 'Archive',
   type: 'script',
-  locations: ['record_header'],
+  locations: ['record_page'],
   disabled: DONE_GATE,
   disabledReason: DECLARED_EN,
 };
-const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_more'] };
+const ARCHIVE_MORE = { ...ARCHIVE, name: 'showcase_archive_more', label: 'Archive later', locations: ['record_page'], component: 'action:menu' };
 const { disabledReason: _none, ...ARCHIVE_UNDECLARED } = ARCHIVE;
 
 function PageHeader({ schema }: { schema: any }) {

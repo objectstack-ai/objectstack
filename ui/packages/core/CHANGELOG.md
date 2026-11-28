@@ -1,5 +1,137 @@
 # @object-ui/core
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- c3da753: feat(ui): the field hand lock (`uiReadonly` / `uiReadonlyWhen`) holds on the Gantt, the timesheet cell, the calendar quick-create and the palette prefill
+  
+  Clause-②: no
+  Metadata-protocol: semantic
+  
+  A field a person may not edit by hand (`uiReadonly: true`, or `uiReadonlyWhen` true over the record) now stays locked on the console surfaces that still wrote it:
+  
+  - **Gantt.** A bar's drag and edge resize, the progress handle, the title and dates edited in place, the auto-schedule and the conflict reschedule, undo and redo, and a drawn dependency link all read the one verdict of `@object-ui/core` (`fieldReadOnlyByHand`) over the stored record, with the shell's predicate scope. A write that would change a locked field is refused: nothing is sent, the bar goes back and a toast gives the read-only reason. A locked field the write only echoes back (an in-place title edit carries the dates and progress too) is dropped from the write, so the rest still saves. A field locked on every record also closes the gesture before it starts: a move closes when either date is locked, a resize only when both are (the locked edge is refused on the write), and the progress handle and the link tool close with their own field.
+  - **Timesheet.** A cell whose record's value field is locked by hand is drawn read-only, so it cannot be edited or cleared. A row, date or value field locked on every record closes the create, so the empty cells and **Add row** are not offered.
+  - **Calendar quick-create.** A click on an empty day or a range drag no longer writes a field locked by hand on every record. Where the title or a date field the dialog writes is locked, the gesture opens the full create form instead (a locked date field is not prefilled there). A required locked field is left out of the dialog's write so the server applies its `defaultValue`; one with no default sends the gesture to the full form too.
+  - **Command palette.** The create-as prefill skips a field that is `uiReadonly`, as it already skipped a `readonly` one; a create is judged by the static half only, as the create dialog judges it.
+  - **List view.** A kanban board whose block names no `groupByField` takes the object's lifecycle field as its lanes; the operands of that field's lock predicates are now read with the rows too, so a card drag is judged over the whole record.
+  
+  A kanban drag on the swimlane layout writes only the lane (column) field, never the swimlane field; that is now pinned.
+  
+  Not yet covered: the in-app assistant acting for a person. Its writes run in the AI service, which does not read the hand lock, and the field descriptions now say so. Every other console surface a person edits through honours the hand lock, and the `uiReadonly` / `uiReadonlyWhen` descriptions and the MCP `describe_object` guidance say that. Writes through the API, import, actions and flows are unchanged: only the server lock (`readonly` / `readonlyWhen`) binds them.
+- 6e8f663: feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#detectDraftResult, @object-ui/plugin-chatbot#detectProposedPlan, @object-ui/plugin-chatbot#detectProposedChanges, @object-ui/plugin-chatbot#detectBuilderHandoff, @object-ui/plugin-chatbot#detectBuiltAppPackage, @object-ui/plugin-chatbot#detectAuthoringVerdict, @object-ui/plugin-chatbot#detectReplayOutcome, @object-ui/plugin-chatbot#buildProgressFromDraftReview, @object-ui/plugin-chatbot#DraftReview, @object-ui/plugin-chatbot#ProposedPlan, @object-ui/plugin-chatbot#ProposedChanges, @object-ui/plugin-chatbot#BuilderHandoff, @object-ui/plugin-chatbot#ReplayOutcome, @object-ui/plugin-chatbot#PublishOutcome, @object-ui/plugin-chatbot/core#PublishOutcome, @object-ui/plugin-chatbot#FloatingChatbotProps.autoPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffOpenLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffSupersededTitle, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesAppliedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesApplyingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.changesDraftedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesFailedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changeVerbLabels, @object-ui/plugin-chatbot#FloatingChatbotProps.designBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.fetchPendingDraftCount, @object-ui/plugin-chatbot#FloatingChatbotProps.getArtifactAction, @object-ui/plugin-chatbot#FloatingChatbotProps.nextStepsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildMaterialized, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildResult, @object-ui/plugin-chatbot#FloatingChatbotProps.onDesignBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onDiscardDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onDraftArtifacts, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuilder, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPlanApprovalPendingChange, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraftApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.openBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAdjustLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAnswerMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveDefaultsMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planAssumptionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildNewAppMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuiltLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planDeferredLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendExistingMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planQuestionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planReadyLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.previewDraftLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishDraftsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishFromShellBar, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldTypeLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveObjectLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.subscribeMetadataRefresh, @object-ui/plugin-chatbot#FloatingChatbotProps.toolReviewLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.verifiedLabel, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.builderHandoff, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.draftReview, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedChanges, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedPlan, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.replayOutcome, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.blueprintProgress, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.buildProgress, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanHints, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanLabel) the retired operands are functions, types, component props and chat-message fields of the published chat package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and a host still using one is told by its own compiler -->
+  
+  **BREAKING** for a host that imports any export or passes any prop listed below. The console's chat (the dock and the full page `/ai/ask`) and Studio keep working; what goes is the code that drew the build conversation: the "Proposed plan" card, the change card, the build-result checklist and publish line, the builder handoff, the Build Doctor drawer, the pending-drafts bar, the spreadsheet import bar and Studio's copilot panel. An old `/ai/build/…` address still lands on the ask chat.
+  
+  `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
+  
+  In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+  
+  `@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
+  
+  ## What leaves, and what to write instead
+  
+  Every name below leaves `@object-ui/plugin-chatbot`; `PublishOutcome` also leaves `@object-ui/plugin-chatbot/core`. `ChatbotEnhancedProps` loses the same 59 props as `FloatingChatbotProps`, and the seam types `SeamToolInvocation` and `SeamChatMessage`, with `ObjectChatMessage` built on them, lose the same fields as `ChatbotEnhancedToolInvocation` and `ChatbotEnhancedMessage`; the fix for those is the same deletion.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `detectDraftResult`, `detectProposedPlan`, `detectProposedChanges`, `detectBuilderHandoff`, `detectBuiltAppPackage`, `detectAuthoringVerdict`, `detectReplayOutcome` | delete the import; a tool result is read as plain output, and a pending approval still through `detectPendingApproval` |
+  | `buildProgressFromDraftReview` | delete the call; nothing draws a build panel any more |
+  | `DraftReview`, `ProposedPlan`, `ProposedChanges`, `BuilderHandoff`, `ReplayOutcome`, `PublishOutcome` | delete the type import |
+  | `FloatingChatbotProps.onBuildMaterialized`, `FloatingChatbotProps.onBuildResult`, `FloatingChatbotProps.onDesignBuiltApp`, `FloatingChatbotProps.onDiscardDrafts`, `FloatingChatbotProps.onDraftArtifacts`, `FloatingChatbotProps.onOpenBuilder`, `FloatingChatbotProps.onOpenBuiltApp`, `FloatingChatbotProps.onPlanApprovalPendingChange`, `FloatingChatbotProps.onPreviewDraft`, `FloatingChatbotProps.onPreviewDraftApp`, `FloatingChatbotProps.onPublishDrafts`, `FloatingChatbotProps.onReviewDraft`, `FloatingChatbotProps.onReviewDrafts` | delete the handler; the chat raises no build event any more |
+  | `FloatingChatbotProps.builderHandoffOpenLabel`, `FloatingChatbotProps.builderHandoffSupersededTitle`, `FloatingChatbotProps.builderHandoffTitleLabel`, `FloatingChatbotProps.changesAppliedLabel`, `FloatingChatbotProps.changesApplyingLabel`, `FloatingChatbotProps.changesConfirmedLabel`, `FloatingChatbotProps.changesConfirmHintLabel`, `FloatingChatbotProps.changesConfirmLabel`, `FloatingChatbotProps.changesConfirmMessage`, `FloatingChatbotProps.changesDraftedLabel`, `FloatingChatbotProps.changesFailedLabel`, `FloatingChatbotProps.changesTitleLabel`, `FloatingChatbotProps.changeVerbLabels`, `FloatingChatbotProps.designBuiltAppLabel`, `FloatingChatbotProps.nextStepsLabel`, `FloatingChatbotProps.openBuiltAppLabel`, `FloatingChatbotProps.planAdjustLabel`, `FloatingChatbotProps.planAnswerMessage`, `FloatingChatbotProps.planApproveDefaultsMessage`, `FloatingChatbotProps.planApproveHintLabel`, `FloatingChatbotProps.planApproveLabel`, `FloatingChatbotProps.planApproveMessage`, `FloatingChatbotProps.planAssumptionsLabel`, `FloatingChatbotProps.planBuildingLabel`, `FloatingChatbotProps.planBuildNewAppMessage`, `FloatingChatbotProps.planBuiltLabel`, `FloatingChatbotProps.planDeferredLabel`, `FloatingChatbotProps.planExtendExistingMessage`, `FloatingChatbotProps.planExtendLabel`, `FloatingChatbotProps.planQuestionsLabel`, `FloatingChatbotProps.planReadyLabel`, `FloatingChatbotProps.planTitleLabel`, `FloatingChatbotProps.previewDraftLabel`, `FloatingChatbotProps.publishDraftsLabel`, `FloatingChatbotProps.publishedLabel`, `FloatingChatbotProps.resolveAppLabel`, `FloatingChatbotProps.resolveFieldLabel`, `FloatingChatbotProps.resolveFieldTypeLabel`, `FloatingChatbotProps.resolveObjectLabel`, `FloatingChatbotProps.toolReviewLabel`, `FloatingChatbotProps.verifiedLabel` | delete the label or message; the card that read it is gone |
+  | `FloatingChatbotProps.autoPublishDrafts`, `FloatingChatbotProps.fetchPendingDraftCount`, `FloatingChatbotProps.getArtifactAction`, `FloatingChatbotProps.publishFromShellBar`, `FloatingChatbotProps.subscribeMetadataRefresh` | delete the prop; the build panel that read it is gone |
+  | `ChatbotEnhancedToolInvocation.builderHandoff`, `ChatbotEnhancedToolInvocation.draftReview`, `ChatbotEnhancedToolInvocation.proposedChanges`, `ChatbotEnhancedToolInvocation.proposedPlan`, `ChatbotEnhancedToolInvocation.replayOutcome` | stop reading or setting the field; the mapper no longer lifts it out of a tool result |
+  | `ChatbotEnhancedMessage.blueprintProgress`, `ChatbotEnhancedMessage.buildProgress` | stop reading or setting the field; no message carries build progress any more |
+  | `ChatbotLabels.designingPlanHints`, `ChatbotLabels.designingPlanLabel` | delete the label; the plan-design wait is gone |
+  
+  The one-line fix: delete every import, prop and field named above. Keeping one fails `tsc` after the upgrade, because none of them is declared any more.
+- 2980483: fix(core): a list bulk Delete with refused records says why, not only "0 deleted, 4 failed"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The built-in bulk Delete deletes each selected record and reports one summary toast. When records were refused (a restrict delete, a lock, a permission), the toast gave only the two counts and dropped each refusal's reason, which the one-record Delete shows. The summary keeps its counts, and its description now lists the reasons: one line per distinct reason, led by the names of the records it refused (up to three names, then `+N`), at most three reasons and then "And N more". An external datasource's refusal reads as the read-only sentence, as the one-record toast reads it. A refusal with no message adds no line, so a batch with no reason keeps the bare count. The one-record toast is unchanged. Two keys are added to every locale pack: `objectActions.bulkDeleteRefusedNamed` and `objectActions.bulkDeleteMoreReasons`.
+- 1f97fce: fix(plugin-detail): a related list's bulk delete with refused rows says why, not only "2 deleted, 1 failed"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The related list on a record page deletes the selected rows in one batch call, or row by row, and its outcome line gave only the two counts. The count stays, and under it each distinct reason now gets one line, led by the names of the rows it refused, by the same rule as the list page's bulk delete: up to three names, then `+N`, and at most three reasons, then "And N more". The reasons come from the ids a batch delete names, from an error that refuses the whole batch (given for every row), or from each rejected row delete. A batch that names no reason keeps the bare count. `@object-ui/core` exports the rule as `bulkDeleteRefusalLines`, which the list page's summary toast now also builds on.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

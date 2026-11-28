@@ -16,7 +16,7 @@ import React, { forwardRef, useCallback, useState } from 'react';
 import { ComponentRegistry } from '@object-ui/core';
 import type { ActionDef } from '@object-ui/core';
 import type { UIActionSchema } from '@object-ui/types';
-import { useAction, useDrawsAction } from '@object-ui/react';
+import { useAction } from '@object-ui/react';
 import { useCondition, toPredicateInput, usePredicateRecordContext } from '@object-ui/react';
 import { Button } from '../../ui';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '../../ui';
@@ -273,10 +273,7 @@ const ActionIconRenderer = forwardRef<
     // `action:icon` member of an `action:bar` gets the author's `visible`
     // spread onto its own schema, and truthiness read a declared `false` as
     // "no gate". See `hasDeclaredVisibilityGate`.
-    // `ask_ai` is absent, not disabled, where no in-app assistant can take it (objectstack#37142).
-    const drawsAction = useDrawsAction();
     if (hasDeclaredVisibilityGate(schema.visible) && !isVisible) return null;
-    if (!drawsAction(schema)) return null;
 
     const button = (
       <Button
@@ -473,7 +470,7 @@ ComponentRegistry.register('icon', ActionIconRenderer, {
       type: 'array',
       of: 'string',
       description:
-        'The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
+        'The placements the action declares (`list`, `record_row`, `record_page`, …). A `script` or `flow` action declared record-scoped (`record_row`, `record`, `record_page` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
     },
     {
       name: 'toast',

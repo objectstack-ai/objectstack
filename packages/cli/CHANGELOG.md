@@ -1,5 +1,493 @@
 # @objectstack/cli
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- ab04434: feat(spec): a package's display name per locale — the translation bundle's `packages` group, read by Setup's package list and Studio's package switcher
+  
+  Clause-②: yes (widening) — the translation bundle (`TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema`, `TranslationItemSchema`) accepts a new group `packages`, keyed by `manifest.id`, each row `{ name?, description? }`; a bundle that wrote `packages` was refused as an unknown key before. `@object-ui/i18n` `useObjectLabel()` gains `packageName` and `packageDescription`.
+  Metadata-protocol: added — a new translation group `packages.MANIFEST_ID.name` / `.description`
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A package had one name, the plain-string `manifest.name`, so a zh-CN administrator read every package in Setup's package list, and every package with no app of its own in Studio's package switcher, in English, beside a launcher that already named the same apps in Chinese.
+  
+  A package now names itself per locale in the translation bundle it already ships:
+  
+  ```ts
+  export const zhCN: TranslationData = {
+    packages: { 'com.acme.reporting': { name: '报表', description: '经营报表' } },
+  };
+  ```
+  
+  - The key is the package's `manifest.id`. A key that is not a manifest id — a namespace like `crm`, or a display name — is refused at parse, naming the rule, because a row keyed by one would never render. `package`, and the leaf spellings `label`, `title` and `displayName`, are answered with the declared spelling.
+  - The console draws the translated name where a reader sees a package — Setup's package list (row, detail title, description, search, the installed-apps group) and Studio's package switcher for a package that ships no app — and falls back to `manifest.name`. A package that publishes an app is still named by the app's label in the switcher.
+  - `manifest.name` stays exactly as authored on every wire and in every editor: the translation is a display overlay, so the edit dialog that prefills from the listed manifest never saves a translated name back.
+  - A disabled package keeps its translated name: its bundle is loaded at boot whether or not the package is enabled.
+  - `os i18n extract` scaffolds `packages.MANIFEST_ID.name` / `.description` from the manifest, and `os i18n check` / `os lint` report a locale that leaves them out as `i18n/missing-package` — a warning, like every other missing translation. A stack that declares a non-default locale and has never named its package in it sees two new warnings per locale on upgrade; the ObjectStack examples now name theirs.
+  
+  `MANIFEST_ID_PATTERN` is now declared in `kernel/address-grammar.ts` beside `NAMESPACE_PATTERN`; `kernel/manifest.zod.ts` re-exports it, so every existing import keeps working.
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+
+### Patch Changes
+
+- 39d611d: build(cli): `@objectstack/cli` now declares `@oclif/core` `^5.1.12`, the first release on the 5.1 line that depends on minimatch 11
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The previous `^5.1.2` range admitted `@oclif/core` releases that depend on minimatch 10, which GHSA-g3hv-75wg-m249 (a potential denial of service through glob-part amplification) affects up to 11.0.1. An install that resolves the CLI fresh already picks a newer 5.1 release; the raised floor keeps a lockfile that still holds an older one from satisfying the range. No command, flag or output changes.
+  
+  Nothing to migrate.
+- 463c436: fix(cli)!: `os secret rewrap --apply` without `--yes` in a non-interactive shell exits 1
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata, stored shape or export moves; the remedy is a flag on the caller's command line -->
+  
+  **BREAKING** (an exit status narrows), shipped as `patch`: the change is not to the metadata protocol.
+  
+  - **FROM:** `os secret rewrap --apply` on a database with a version-1 `sys_secret` row to re-wrap, without `--yes`, with stdin not a terminal, text face: nothing opened or written, `Aborted — no row was opened or written.`, exit `0`.
+  - **TO:** nothing opened or written, `Confirmation required. Re-run with --yes to re-wrap. No row was opened or written.`, exit `1`.
+  - **Unchanged:** answering `n` at the `[y/N]` prompt in a terminal still prints `Aborted — …` and exits `0`; `--json` without `--yes` already exited `1` with `confirmation_required`; a run with `--yes` re-wraps as before; a dry run, or an `--apply` run with nothing to re-wrap, asks nothing and keeps the exit status it had (`0` when the run is not otherwise refused; a missing data key or an incomplete reference union still exits `1`).
+  - **The fix for a script:** pass `--yes` to re-wrap; drop `--apply` to get only the dry-run report.
+  
+  This is the rule the `os migrate` commands and `os db orphans --delete` / `os secret orphans --delete` already follow: a run that did not get its confirmation is a refused run, so a script, CI job or cron reading `$?` never takes it for a key rotation that happened.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [1f03dc5]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [73d0240]
+- Updated dependencies [724d6f3]
+- Updated dependencies [58be677]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0bfdee9]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [8d598aa]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0ea3093]
+- Updated dependencies [c151c49]
+- Updated dependencies [0c190a8]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/mcp@19.0.0-next.2
+  - @objectstack/service-analytics@19.0.0-next.2
+  - @objectstack/lint@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/metadata-protocol@19.0.0-next.2
+  - @objectstack/service-knowledge@19.0.0-next.2
+  - @objectstack/verify@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-approvals@19.0.0-next.2
+  - @objectstack/knowledge-pgvector@19.0.0-next.2
+  - @objectstack/plugin-auth@19.0.0-next.2
+  - @objectstack/account@19.0.0-next.2
+  - @objectstack/setup@19.0.0-next.2
+  - @objectstack/client@19.0.0-next.2
+  - @objectstack/cloud-connection@19.0.0-next.2
+  - create-objectstack@19.0.0-next.2
+  - @objectstack/driver-memory@19.0.0-next.2
+  - @objectstack/driver-mongodb@19.0.0-next.2
+  - @objectstack/driver-sql@19.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.2
+  - @objectstack/driver-turso@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/observability@19.0.0-next.2
+  - @objectstack/plugin-audit@19.0.0-next.2
+  - @objectstack/plugin-email@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/plugin-pinyin-search@19.0.0-next.2
+  - @objectstack/plugin-security@19.0.0-next.2
+  - @objectstack/plugin-sharing@19.0.0-next.2
+  - @objectstack/plugin-webhooks@19.0.0-next.2
+  - @objectstack/rest@19.0.0-next.2
+  - @objectstack/service-automation@19.0.0-next.2
+  - @objectstack/service-cache@19.0.0-next.2
+  - @objectstack/service-datasource@19.0.0-next.2
+  - @objectstack/service-job@19.0.0-next.2
+  - @objectstack/service-mailbox@19.0.0-next.2
+  - @objectstack/service-messaging@19.0.0-next.2
+  - @objectstack/service-package@19.0.0-next.2
+  - @objectstack/service-push@19.0.0-next.2
+  - @objectstack/service-queue@19.0.0-next.2
+  - @objectstack/service-realtime@19.0.0-next.2
+  - @objectstack/service-record-context@19.0.0-next.2
+  - @objectstack/service-settings@19.0.0-next.2
+  - @objectstack/service-sms@19.0.0-next.2
+  - @objectstack/service-storage@19.0.0-next.2
+  - @objectstack/trigger-api@19.0.0-next.2
+  - @objectstack/trigger-record-change@19.0.0-next.2
+  - @objectstack/trigger-schedule@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+  - @objectstack/console@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+
+### Patch Changes
+
+- c42a045: fix(lint)!: three publish-time checks for seeds, flow nodes and actions that save and do not work
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37814
+  
+  <!-- adr-0087: registered publish-refuses-seeds-and-actions-that-save-and-do-not-work -->
+  
+  **BREAKING** for the publish of a seed, a flow, an action or an object that carries one of the errors below: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored metadata is not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  - `seed-record-unknown-field`: a seed record key, or a seed `columns` key, that the engine's insert door would refuse: a key that names no field of the dataset's object, no system column the platform injects on it (`owner_id`, the tenant and audit columns, unless the object opts out), and none of the columns every table carries (`id`, `created_at`, `updated_at`). The seed load writes each record through that insert, so such a record is dropped while the rest load. An object with no field map is not judged, as the engine's door does not judge it. `defineSeed` already refused such a key when it ran; a plain `data: [{ object, records }]` entry and a `seed` saved at the runtime publish door are now judged too. A field an object extension adds counts. Runs on the runtime `seed` door.
+  - `object-reference-unknown` (and the warning `object-reference-unregistered-platform` for a platform-prefixed name no known package registers), at three more bindings: a seed dataset's `object`, a flow `get_record` / `create_record` / `update_record` / `delete_record` / object-form `screen` node's `config.objectName`, and a standalone action's `objectName`. A seed over a missing object loads nothing, and an action bound to one is carried by no page. A flow node is split as `flow-trigger-unknown-object` is: on `os validate` / `lint` / `build` an unprefixed name the stack does not define is a warning, because a package the stack declares in `dependencies` may define it and a build cannot see that package; at the runtime publish door it is an error, judged against the written package's closure, or against every object the deployment serves for a write that names no package, where a step bound to a missing object fails the run every time it executes. An object the stack extends resolves at these three. At the runtime publish door the seed binding stays with the save door's own refusal of a seed over an unknown object (#34864), which accepts a draft of the object in the same package; the rule now also runs on the runtime `action` door, so an `action` write is therefore also judged for its params' `reference` / `objectOverride` objects, as `os validate` already judged them, and an action saved into a package (`?package=`) is judged against that package's closure, as a flow saved there already was: an object another package owns resolves only when the manifest declares that package in `dependencies`.
+  - `action-body-write-capability-undeclared`: an L2 action body that calls a `ctx.api` write (`insert`, `update`, `delete`, `updateMany`, `deleteMany`, `upsert`) without `api.write` in its `body.capabilities`. The sandbox refuses the call with `403 INSUFFICIENT_PRIVILEGES` every time the action reaches it. Runs on the runtime `action` and `object` doors.
+  
+  `os build` now infers `api.write` for every handler write shape the new check reads: a lone `updateMany` or `deleteMany`, `?.` before the leaf, an `.object(…)` argument holding a call, and a handle bound to `.object(…)` (`const repo = ctx.api.object('x'); repo.update(…)`). Before, such a handler was lowered with no grant and refused at every call.
+  
+  ## FROM → TO
+  
+  - `data: [{ object: 'task', records: [{ name: 'a', stauts: 'open' }] }]` → `status: 'open'`, or declare `stauts` on `task`, or drop the key.
+  - `{ type: 'create_record', config: { objectName: 'invoce', … } }` → `objectName: 'invoice'` (the object's full, namespaced name).
+  - `body: { language: 'js', source: "await ctx.api.object('task').update(…)", capabilities: [] }` → `capabilities: ['api.write']`.
+  
+  `@objectstack/lint` exports two rule id constants, `SEED_RECORD_UNKNOWN_FIELD` and `ACTION_BODY_WRITE_CAPABILITY_UNDECLARED`, so `os explain` carries an entry for each; the rules themselves are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-seeds-and-actions-that-save-and-do-not-work`.
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+- adb65d1: refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that its factory is `defineForm` (question 1, option A). The helper that held the name builds something else: a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`). It is renamed after the translation family its forms feed (`metadataForms`), with the same argument and the same result, and its 18 modules under `packages/spec/src` are renamed with it. `defineForm` is absent from `@objectstack/spec` until the `form` type lands with it, in the same major; it never has two meanings. Nothing a metadata author writes changes: no stack, no stored row and no spec key names the helper, which is why the protocol line is `none`.
+  
+  <!-- adr-0087: registered define-form-studio-helper-renamed-define-metadata-form -->
+  
+  **BREAKING** (a published export is renamed), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - **FROM:** `import { defineForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineForm({ schemaId, … })` in a `NAME.form.ts` module.
+  - **TO:** `import { defineMetadataForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineMetadataForm({ schemaId, … })` in a `NAME.metadata-form.ts` module.
+  - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
+  - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
+  - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+  - `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+- 9ed54cb: fix(service-knowledge, knowledge-pgvector): a build that loses its lease stops at the next page, and a build that stalls is cancelled
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - **A build that loses its cluster lease stops.** Before each page, a build checks that it still holds its cluster lease. The lease counts as lost when the lock says so, or when no renewal has succeeded within the 60-second lease (the lock store is unreachable, or a renewal hangs). The build then stops before reading or embedding another page. It neither purges nor completes, and its record (`buildRecord`, `os knowledge status`) reads the new status `lease-lost`. Before this change the build only logged a warning and went on, so a second node could build the same source and the embedding spend doubled.
+  - **A build that stalls is cancelled.** A build that finishes no page for 15 minutes (a fixed ceiling, not a setting) is cancelled, for example when an embedding call never answers. The walk stops waiting on that call and the lease is released. The record reads the new status `timed-out`, and a new rebuild can usually start without a restart; a purge deletion that never answers is the exception, since the store still lists that document and every later build waits on it in its purge until the deletion answers or the process restarts. The limit applies to the time between two pages (or two purge deletions), not to the whole build, so a large source that keeps making progress is never cut short. The completion (on pgvector, the switch to the new index and the removal of the replaced one) is not bounded: once it has begun the build waits for it, so a switch that began before the limit passed still commits and the record reads `done` or `failed`, and no other build of the source starts on that node until it settles.
+  - **pgvector: a build that lost its builder lock writes and completes nothing.** Each write and removal of a build checks, on the lock's own session, that the source's session advisory lock is still held. Once the lock is gone (freed after `buildLockIdleMs`, or its session ended), the write is refused `LOCK_CONFLICT` (409) before anything is embedded. `completeBuild` completes only the build this adapter began, and only the generation that build began. Otherwise it is refused `LOCK_CONFLICT` and switches, records and deletes nothing, so a build that lost its lock can no longer switch a generation another build has taken up since. A lock kept from an earlier build is re-checked at the next `beginBuild`, so a session that ended is never taken for a lock that is still held. **Behind a transaction-mode connection pooler** (PgBouncer transaction pooling, or a hosted provider's pooled URL), a deployment the store already did not support, the advisory lock does not stay with the session that took it. The check therefore reads a held lock as lost, and every complete build is now refused `LOCK_CONFLICT` at its first page, where before it ran with a release warning. Point the store's `url` at a direct or session-mode endpoint; the refusal's remedy says so.
+  - **pgvector: a search whose source's index was switched under it three times** is now refused `CONCURRENT_MODIFICATION` (409) instead of throwing an error with no code.
+  
+  Widening: the exported `KnowledgeBuildRecord.status` type gains `lease-lost` and `timed-out`. A consumer that switches over it should handle both the way it handles `failed`. No other export changes: the fence and its 15-minute limit are internal to the service.
+  
+  `os knowledge rebuild` and `os knowledge status` know the two new statuses: a followed rebuild that ends `lease-lost` or `timed-out` exits 1 with the build's message, as a `failed` one does.
+- 54b1e76: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(cli): `os knowledge rebuild` and `os knowledge status` give the right answer behind a load balancer
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A build's record lives in memory on the node running the build. `os knowledge rebuild` used to exit 1 as soon as a progress read landed on another node, although the build continued and could succeed. It now falls back to the index state the store reports: when a build was due before the rebuild and the adapter keeps a store shared between nodes (not `memory`, whose index is per process), the index turning `current` means the build completed (exit 0, without the counts). It reports failure only on the build's own recorded failure, or after `--timeout` seconds (new flag, default 600) of reads that reached no record of the build, saying the build may still be running. `os knowledge rebuild` now also reads the index state once before it starts the build. `os knowledge status` says when the node that answered holds no build record.
+- ded9d7d: fix(cli): `os generate object` places its field the way the starter does, through the group's `fields` list
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `objectstack generate object NAME` now writes its field group as `fieldGroups: [{ key: 'details', label: 'Details', fields: ['name'] }]`, after the field map, and the `name` field no longer carries `group: 'details'`. That is how the `npm create objectstack` starter's companies and contacts place every field, so a generated object and the starter's objects are written in one style. Both spellings mean the same placement, and an object generated by an earlier release keeps working unchanged. When you add a field to a generated object, list its name in the group's `fields` too.
+- f07d63a: feat(spec)!: retire an agent's `model.provider` — no runtime read it; the deployment's AI settings choose the provider
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37796
+  
+  <!-- adr-0087: registered agent-model-provider-removed, agent-model-provider-retired -->
+  
+  **BREAKING** key removal on `AIModelConfigSchema` (`@objectstack/spec/ai`), an agent's `model` block. The key declared which provider served the agent, from an enum of `openai`, `azure_openai`, `anthropic` and `local`, and no runtime ever read it: the AI runtime that executes agents applies the model name, `temperature` and `maxTokens` from the block and nothing else, so an agent that declared `anthropic` ran on whatever provider the deployment served. The providers a deployment can turn on are its own AI settings, a list the enum neither matched nor could follow.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `model: { provider: 'anthropic', model: 'claude-sonnet-4' }` | `model: { model: 'claude-sonnet-4' }` — the deployment resolves the name among the providers it has turned on |
+  
+  The one-line fix: delete `provider` from every agent's `model` block; `os migrate meta --from 18 --write` deletes it from agent sources. Writing it after upgrade fails `tsc` (the input type is `never`) and fails the parse with that prescription. `provider: 'openai'`, the default every released 18.x toolchain wrote into a parsed agent's `model` block, is accepted as inert residue and stripped, so agents built and stored by 18.x keep loading. The model name, `temperature`, `maxTokens` and `topP` are unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `provider` is a `retiredKey()` tombstone on `AIModelConfigSchema`, and the 18.x emitted default is stripped by `acceptRetiredDefaultResidue`. The D2 conversion `agent-model-provider-removed` (lossless, retired from the load path) deletes the key from `agents[]` on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `agent-model-provider-retired` names what the upgrade still owes: whether the model each agent names is one the target deployment offers. The key is registered in `RETIRED_KEYS_BY_MAJOR[19]`. The liveness ledger's `model` row records the removal. The agent form's model help text no longer names a provider, and a `provider` written at the agent's top level is answered with the same fact instead of a pointer to `model.provider`. The `AIModelConfigSchema` export is now the residue stage's preprocess pipe with a read-through `shape` (the `ViewSharingSchema` shape), so `.extend()`, `.pick()`, `.omit()` and `.partial()` are no longer available on it; extend the inner shape instead.
+  - **`@objectstack/platform-objects`**: the agent form's regenerated help-text labels.
+  - **`@object-ui/app-shell`**: the agent metadata preview shows the model name alone and never a provider pill.
+  - **`@object-ui/console`**: the agent preview sample no longer writes `provider`.
+  - **`@objectstack/cli`**: `os explain agent` describes the `model` block without `provider`, and its example drops it.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [73d5e34]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [9b622bb]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [9f9db81]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [031a19d]
+- Updated dependencies [302cfda]
+- Updated dependencies [6cb7440]
+- Updated dependencies [c3da753]
+- Updated dependencies [3806b2e]
+- Updated dependencies [9ed54cb]
+- Updated dependencies [e86bf99]
+- Updated dependencies [9a65a48]
+- Updated dependencies [54d6726]
+- Updated dependencies [ddc96d8]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [c9741f4]
+- Updated dependencies [be61425]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [ce4d8c7]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [1490855]
+- Updated dependencies [94843b8]
+- Updated dependencies [7e638ba]
+- Updated dependencies [14badad]
+- Updated dependencies [aca4960]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [ff63b02]
+- Updated dependencies [5d37374]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [2314b0e]
+- Updated dependencies [54dc93a]
+- Updated dependencies [4b8aca2]
+- Updated dependencies [56c9cae]
+- Updated dependencies [5e1d58a]
+- Updated dependencies [3ed97b7]
+- Updated dependencies [f19ae3a]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [94b0314]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [f7f9345]
+- Updated dependencies [babd660]
+  - @objectstack/plugin-audit@19.0.0-next.1
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/verify@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/lint@19.0.0-next.1
+  - @objectstack/plugin-sharing@19.0.0-next.1
+  - @objectstack/plugin-security@19.0.0-next.1
+  - @objectstack/rest@19.0.0-next.1
+  - @objectstack/runtime@19.0.0-next.1
+  - @objectstack/setup@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/service-automation@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/mcp@19.0.0-next.1
+  - @objectstack/service-messaging@19.0.0-next.1
+  - @objectstack/plugin-approvals@19.0.0-next.1
+  - @objectstack/metadata-protocol@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/service-knowledge@19.0.0-next.1
+  - @objectstack/service-settings@19.0.0-next.1
+  - @objectstack/knowledge-pgvector@19.0.0-next.1
+  - @objectstack/client@19.0.0-next.1
+  - @objectstack/service-record-context@19.0.0-next.1
+  - @objectstack/console@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/observability@19.0.0-next.1
+  - @objectstack/service-queue@19.0.0-next.1
+  - @objectstack/service-storage@19.0.0-next.1
+  - @objectstack/cloud-connection@19.0.0-next.1
+  - @objectstack/driver-mongodb@19.0.0-next.1
+  - @objectstack/plugin-auth@19.0.0-next.1
+  - @objectstack/plugin-email@19.0.0-next.1
+  - @objectstack/plugin-pinyin-search@19.0.0-next.1
+  - @objectstack/plugin-webhooks@19.0.0-next.1
+  - @objectstack/service-analytics@19.0.0-next.1
+  - @objectstack/service-datasource@19.0.0-next.1
+  - @objectstack/service-mailbox@19.0.0-next.1
+  - @objectstack/service-package@19.0.0-next.1
+  - @objectstack/trigger-record-change@19.0.0-next.1
+  - @objectstack/account@19.0.0-next.1
+  - create-objectstack@19.0.0-next.1
+  - @objectstack/driver-memory@19.0.0-next.1
+  - @objectstack/driver-sql@19.0.0-next.1
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.1
+  - @objectstack/driver-turso@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+  - @objectstack/service-cache@19.0.0-next.1
+  - @objectstack/service-job@19.0.0-next.1
+  - @objectstack/service-push@19.0.0-next.1
+  - @objectstack/service-realtime@19.0.0-next.1
+  - @objectstack/service-sms@19.0.0-next.1
+  - @objectstack/trigger-api@19.0.0-next.1
+  - @objectstack/trigger-schedule@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

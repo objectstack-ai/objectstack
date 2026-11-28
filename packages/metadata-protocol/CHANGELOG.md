@@ -1,5 +1,265 @@
 # @objectstack/metadata-protocol
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- 0b87f12: fix(metadata-protocol)!: refuse the per-item publish and rollback naming no package of a name only disabled packages hold, with or without a package-less row stored
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a per-item publish or rollback naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
+  
+  <!-- adr-0087: not-required (already-registered disabled-holder-package-less-row-bare-write-refused) the entry the six other writes of this narrowing registered now names these three cells too -->
+  
+  **BREAKING** for a deployment that publishes or rolls back one metadata item, with no package named, at a name whose every holder is disabled and no package-less row is stored for it: the write is now refused where it answered `200`. Fix: send the same publish or rollback naming the package (`?package=ID`, in process `packageId`) where the refusal says "Name the package this publish is for" or "Name the package this rollback is for"; enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`) where it says "Enable the package that holds …".
+  
+  The bare save of such an item already answers `409 RESOURCE_CONFLICT` and writes nothing (a disabled package holds no name). The per-item publish and rollback naming no package asked that judgment only where a package-less row or draft was stored, so they still wrote the disabled package's own row, or stored the package-less row again from its history, and enabling the package again served a body no read had shown.
+  
+  Every moved answer, before → after, for a type the registry reads by package, while every holder of the name is disabled, where the ADR-0146 D11 close leaves the write open:
+  
+  - `POST /api/v1/meta/:type/:name/publish` whose draft address is the disabled package's own draft (beside a package-less row or with none stored): `200` (the draft promoted into that package's active row) → `409 RESOURCE_CONFLICT`, "Name the package this publish is for, then send it again …", nothing written. The publish naming the package still promotes it.
+  - `POST /api/v1/meta/:type/:name/rollback` that restores the disabled package's own row: `200` (that row rewritten to the version's body) → `409 RESOURCE_CONFLICT`, "Name the package this rollback is for, then send it again …", nothing written. The rollback naming the package still restores it.
+  - `POST /api/v1/meta/:type/:name/rollback` with the package-less row's history but no package-less row stored: `200` (a package-less row inserted with the version's body) → `409 RESOURCE_CONFLICT`, "Enable the package that holds …", nothing written.
+  - The same three through the in-process `publishMetaItem` / `rollbackMetaItem` with no `packageId`.
+  
+  Once a holder is enabled again the same publish or rollback answers as before the disable.
+  
+  Not moved: a publish or rollback naming a package, with the package enabled or disabled; a publish with no draft at its address, which keeps its `404 NO_DRAFT`; an item the ADR-0146 D11 close covers, which keeps that close's `403 NOT_OVERRIDABLE`; a name no package holds; a name an enabled package holds; every read. Correction to the note `37608-disabled-holder-publish-rollback-refused`, released in `19.0.0-next.1` and left as released: its "Not moved" list says that a rollback of a package-bound row is not moved, and that two writes on an item only disabled packages hold still land, left open for a separate decision (#37851): a publish whose draft address is the disabled package's own draft, and a rollback with no package-less row stored. From this release on, all three are refused as listed above, while the same publish or rollback naming the package, or sent once a holder is enabled again, answers as before. Migration entry `disabled-holder-package-less-row-bare-write-refused` (`@objectstack/spec`) now carries them for the upgrade guide.
+
+### Patch Changes
+
+- c23e556: fix(metadata-protocol): a `422 INVALID_METADATA` issue entry carries the registered refusal on `params`, so a client of the save door can read the code
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A spec rule that owns a registered error code stamps it on its zod issue as `params.code`, next to the fields that say which fix applies: `CONTROLLED_BY_PARENT_MASTER_INVALID` with `shape` (an object save), and `PLUGIN_UI_REQUIRED_KEY_MISSING` with `key` (`PluginSchema`, which no save-door type parses today). zod reports every such rule with its own issue code `'custom'`. The metadata save door's `422 INVALID_METADATA` built each `issues[]` entry from `path`, `message` and that `'custom'` only, so a client of the door (anything that does not parse locally the way Studio does) could not tell which rule refused the body except by its English message.
+  
+  - **`@objectstack/metadata-protocol`.** The save door's 422 entry gains an optional `params` member: the registered refusal the issue carries, present only when the issue's `params.code` is a registered error code, and holding only its string, finite-number and boolean members. An object save refused for a `controlled_by_parent` master now answers `{ path: 'fields', code: 'custom', message, params: { code: 'CONTROLLED_BY_PARENT_MASTER_INVALID', shape: 'master-not-writable' } }`. Read the registered code from `params.code`. `zodIssuesToMetadataIssues` takes a new option, `refusalParams`, which only the save door sets. The read path's `_diagnostics.errors[]` and the seed refusal's `seedApplied.issues[]` keep exactly `path`, `message` and `code`, the shape their spec schemas publish.
+  - **`@objectstack/spec`.** The `CONTROLLED_BY_PARENT_MASTER_INVALID` docblock and its ledger note now say the save door's 422 carries the code on `params.code`.
+  
+  Nothing to migrate. The entry's `code` is unchanged (still zod's issue code, `'custom'` for these rules), and an entry that carries no registered refusal gets no `params` member, so a client that matches `code` or compares whole entries for other issues reads exactly what it read before.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/lint@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+  - @objectstack/sdui-parser@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- adb65d1: feat(spec)!: `form` is a metadata type of its own — `defineForm`, `*.form.ts` and a stack's `forms:` — and the anonymous form doors read a form over both types (ADR-0159 card ②)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  ADR-0159 makes a public form a `form` item: `name` (`OBJECT.KEY`, the name it is served under), `object` (its one binding) and a form view's body at the top level, its keys taken from `FormViewSchema` by reference. A stack lists them under `forms:`, one per `*.form.ts` module built with `defineForm`. The three old `view` shapes that carry a form (a container's `form`, a `formViews` entry, a `viewKind: 'form'` item) keep loading and serving exactly as before: one projection reads them as `form` items, under the names they are served as today, and nothing an author wrote stops loading.
+  
+  `@objectstack/platform-objects` ships the `form` type's display label in its metadata-form bundles, translated in every bundled locale.
+  
+  <!-- adr-0087: registered form-type-define-form-and-packageless-list-at-form-name -->
+  
+  **BREAKING** (the protocol is narrowed, and a published export changes meaning):
+  
+  - **The export.** `defineForm` on `@objectstack/spec` and `@objectstack/spec/ui` builds a `form` item. FROM: (since the previous change) no `defineForm`; before that, the Studio metadata-form helper. TO: `defineForm({ name: 'crm_lead.web_to_lead', object: 'crm_lead', sections, sharing })`. The fix for a Studio form: `defineMetadataForm`, as the rename's own entry says; the compiler names every call (a Studio body is refused by `FormSchema`: it has no `name` and `object`).
+  - **The refusal.** A package-less `view` write that would store a LIST at a name a read-only package authors as a `form` item is refused with `400 VALIDATION_ERROR`, naming the package — on the save, on the publish of a draft saved before the gate, and on a rollback or revert that restores such a body. Items and container expansions alike. Saves admitted today that it refuses: a list at a name several packages ship; a list at a name whose base has no pair; a re-save of a row the base's pair already holds; a container that overlays the package's own. The door that remains: save the list under another key, or into an app of the environment's own. It bites for a name only from the release in which a package authors it as a `form` item.
+  
+  What lands with the type:
+  
+  - `@objectstack/spec`: `FormSchema`, `defineForm`, the registry row (`*.form.ts|yml|json`, overlay-capable, no environment overlay), `form` in the customization package's listed types, the stack's `forms` collection, the `forms` translation family (`forms.NAME` first, the `_views.KEY` title and thank-you tails as the fallback, `_views.KEY.label` never read; a form's own section copy at `forms.NAME.sections.SECTION`, with `objects.OBJECT._sections.SECTION` as its object-level default), the projection `projectViewForms`, the intake layer `formIntakeLayer` / `openFormAt`, and the error code `FORM_ADDRESS_TAKEN`.
+  - `@objectstack/metadata-protocol`: the effective `form` read resolves a form over both types in the one served-row order (a stored `view` row over a package's form keeps replacing it when the package moves to `forms:`); a `form` save, reset or delete at a package removes, in the same transaction, only that package's old-shape row that carries that same form — named as the `form` read serves it (form content only: a list of the name, and a container member served under another name, are untouched); an undo puts back the rows the publish moved, for the revert of a package commit and for a refused package publish on a runtime that cannot roll back alike, and when one view row a commit edited cannot be put back, every form item of that commit is kept as published and each is listed in `failed[]`; a `form` left open on a public address another form holds is refused with `409 FORM_ADDRESS_TAKEN`, naming both, on the save, on the publish of a draft whose address another form took after it was saved, and on a rollback to a version open on a held address (a switched-off form that keeps its link still holds the address; a write that leaves the form closed is never refused); the override gate accepts a `form` override over a base that ships the form as an old shape; a stored body whose form content cannot be read closes the links it names and is reported once per process, at `error`, the first time the form doors read it, naming the row, the links it closes and the repair save; and after a refused or undone publish the doors and the meta reads answer only committed state.
+  - `@objectstack/rest`: `GET /forms/:slug` and its submit read candidates from the effective `form` read and judge withdrawal across `form` and `view`, effective and per-package, old shapes projected first — narrowing only, in both directions; a body that cannot be read closes the links it names. `/meta/form/NAME` refuses whom `/meta/view/NAME` refuses. `GET /meta/view` answers as before.
+  - `@objectstack/lint`: `form-public-address-taken` (gating), `form-consumer-less` (advisory, never for an `overrides` item), `form-object-outside-closure` / `form-object-unknown`; the i18n walk emits `forms.NAME.*` keys and no `_views` tail for a `form` item, a form's section copy at `forms.NAME.sections.SECTION` with `objects.OBJECT._sections.SECTION` as the address it falls back to; the translation reference lint judges a `forms.NAME.sections` key against the form's named sections and their entries. No new advisory for an old shape.
+  - `@objectstack/metadata`, `@objectstack/metadata-core`, `@objectstack/objectql`, `@objectstack/runtime`, `@objectstack/cli`: the `forms` collection is loaded, typed, registered and counted for i18n coverage like every other; in `@objectstack/cli` a key translated at the address the walk names as its fallback is covered, and `os i18n extract` scaffolds no translated-locale value over one.
+- 9a65a48: fix(metadata-protocol)!: refuse a write naming no package over the package-less row of a name only disabled packages hold
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a save, draft save, delete or draft discard naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
+  
+  <!-- adr-0087: registered disabled-holder-package-less-row-bare-write-refused -->
+  
+  **BREAKING** for a deployment that writes, with no package named, to a metadata name whose every holder is disabled while a package-less row or draft is stored for it: the write is now refused where it answered `200`. Fix: enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`; `GET /api/v1/packages` shows which are disabled), then send the same write again. Naming the package (`?package=`) is not the fix: it addresses that package's own row and leaves the hidden row where it is.
+  
+  A package-less row stored at a name a package holds is that package's customization, and a disabled package's items are hidden from every read naming no package (ADR-0150 D3, its 2026-11-26 note). The writes naming no package still reached the row: an admin could edit, draft, discard or delete an item no read showed, and a delete lost the customization for good, so enabling the package again served its item without it.
+  
+  Every moved answer, before → after, for a type the registry reads by package, while every holder of the name is disabled, where the ADR-0146 D11 close leaves the package-less write open (a base with no pair, a member the package never ships, a holder that is not a read-only code package, among the cells that close lists):
+  
+  - `PUT /api/v1/meta/:type/:name` over a stored package-less row: `200` (the hidden row edited) → `409 RESOURCE_CONFLICT`, nothing written.
+  - `PUT /api/v1/meta/:type/:name?mode=draft` over a stored package-less row or draft: `200` (a draft stored that the draft read answered `404` for) → `409 RESOURCE_CONFLICT`, nothing written.
+  - `DELETE /api/v1/meta/:type/:name` over a stored package-less row: `200` (the row removed) → `409 RESOURCE_CONFLICT`, nothing deleted.
+  - `DELETE /api/v1/meta/:type/:name?state=draft` over a stored package-less draft: `200` (the draft removed) → `409 RESOURCE_CONFLICT`, nothing deleted. With a package-less row stored and no draft, the discard answers the same refusal, where it answered the `?package=` refusal or a no-op receipt.
+  - The same four through the in-process `saveMetaItem` / `deleteMetaItem` with no `packageId`.
+  
+  The refusal's message starts with the fix ("Enable the package that holds …") and names no package. Once a holder is enabled again the read naming no package serves the package-less row as it was stored, and the same writes answer as before the disable.
+  
+  Not moved: an item the ADR-0146 D11 close covers (one read-only code package ships it, with a pair, and `os migrate packageless-overlays` would move its package-less row) keeps that close's answer for the save, the draft save and the delete naming no package, `403 NOT_OVERRIDABLE` with that close's own remedy, with the package enabled or disabled; there only the draft discard moves: over a stored package-less draft from `200` to the `409` above, and over a stored package-less row with no draft from the `409` with the `?package=` sentence to the same `409` with the enable sentence. Also not moved: a name no package holds (the environment's own item) saves, drafts, discards and deletes as before beside a disabled package; a package-less row at a name an enabled package holds; a name only disabled packages hold with no package-less row or draft stored, which keeps its `409` with the `?package=` remedy; the sealed types (`doc`, `action`), which answer `403 NOT_OVERRIDABLE` as before; every read. Migration entry `disabled-holder-package-less-row-bare-write-refused` (`@objectstack/spec`) carries the same fix for the upgrade guide.
+- 91875c7: fix(metadata-protocol)!: refuse the per-item publish and rollback naming no package over the package-less row of a name only disabled packages hold
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a per-item publish or rollback naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
+  
+  <!-- adr-0087: not-required (already-registered disabled-holder-package-less-row-bare-write-refused) the entry the four other writes of this narrowing registered now names the per-item publish and rollback too -->
+  
+  **BREAKING** for a deployment that publishes or rolls back one metadata item, with no package named, at a name whose every holder is disabled while a package-less row or draft is stored for it: the write is now refused where it answered `200`. Fix: enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`; `GET /api/v1/packages` shows which are disabled), then send the same publish or rollback again. Naming the package (`?package=`) is not the fix: it addresses that package's own row and leaves the hidden row where it is.
+  
+  The save, the draft save, the delete and the draft discard naming no package already refuse there (ADR-0150 D3, its 2026-11-26 note): a package-less row stored at a name a package holds is that package's customization, hidden with it. The per-item publish and the per-item rollback did not ask that judgment, so a publish promoted a package-less draft into the hidden row and a rollback rewrote it, and enabling the package again served a body no read had shown.
+  
+  Every moved answer, before → after, for a type the registry reads by package, while every holder of the name is disabled, where the ADR-0146 D11 close leaves the package-less write open (a base with no pair, a member the package never ships, a holder that is not a read-only code package, among the cells that close lists):
+  
+  - `POST /api/v1/meta/:type/:name/publish` whose draft address is the package-less draft (beside a package-less row or with none stored): `200` (the package-less draft promoted into the hidden package-less row, or, beside the disabled package's own active row, adopted into that row) → `409 RESOURCE_CONFLICT`, nothing written.
+  - `POST /api/v1/meta/:type/:name/rollback` with a package-less row stored: `200` (the hidden row rewritten to the version's body) → `409 RESOURCE_CONFLICT`, nothing written.
+  - The same two through the in-process `publishMetaItem` / `rollbackMetaItem` with no `packageId`.
+  
+  The refusal's message is the one the save and the delete answer there: it starts with the fix ("Enable the package that holds …"), names no package, and says "send this publish again" or "send this rollback again". Once a holder is enabled again the read naming no package serves the package-less row as it was stored, and the same publish or rollback answers as before the disable.
+  
+  Not moved: an item the ADR-0146 D11 close covers keeps that close's `403 NOT_OVERRIDABLE` for the publish and the rollback naming no package, with the package enabled or disabled; a publish or rollback naming a package; a publish with no draft at its address, which keeps its `404 NO_DRAFT`; a rollback of a package-bound row; two writes that still land on an item only disabled packages hold, left open for a separate decision (#37851): a publish whose draft address is the disabled package's own draft, promoted into that package's own row (beside a package-less row or not), and a rollback with no package-less row stored, which stores the package-less row again from its history; a name no package holds; a name an enabled package holds; every read. Migration entry `disabled-holder-package-less-row-bare-write-refused` (`@objectstack/spec`), which already carried the four other writes, now carries these two for the upgrade guide.
+
+### Patch Changes
+
+- adb65d1: refactor(spec)!: the Studio metadata-form helper `defineForm` is renamed `defineMetadataForm`, and its modules move from `*.form.ts` to `*.metadata-form.ts`, so the name and the suffix are free for the `form` metadata type (ADR-0159)
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  ADR-0159 makes `form` a metadata type of its own, and the maintainer ruled that its factory is `defineForm` (question 1, option A). The helper that held the name builds something else: a schema-bound form for Studio's metadata editors (`data.provider: 'schema'`). It is renamed after the translation family its forms feed (`metadataForms`), with the same argument and the same result, and its 18 modules under `packages/spec/src` are renamed with it. `defineForm` is absent from `@objectstack/spec` until the `form` type lands with it, in the same major; it never has two meanings. Nothing a metadata author writes changes: no stack, no stored row and no spec key names the helper, which is why the protocol line is `none`.
+  
+  <!-- adr-0087: registered define-form-studio-helper-renamed-define-metadata-form -->
+  
+  **BREAKING** (a published export is renamed), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - **FROM:** `import { defineForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineForm({ schemaId, … })` in a `NAME.form.ts` module.
+  - **TO:** `import { defineMetadataForm } from '@objectstack/spec'` (or `@objectstack/spec/ui`), `defineMetadataForm({ schemaId, … })` in a `NAME.metadata-form.ts` module.
+  - **The fix:** rename the import and the call; rename a module that builds one to `*.metadata-form.ts`. The compiler names every call site (`TS2305` / `TS2724`).
+  - **Outside use, read before the rename:** no import or call of `defineForm` in any public repository of the organization, nor in the cloud repository.
+  - `@objectstack/lint`: the explanation of `visibility-root-mislayered` and the `data`-root message of the field-rule check name the Studio modules by their new suffix (`*.metadata-form.ts`); what each rule reports is unchanged.
+  - `@objectstack/cli`, `@objectstack/metadata-protocol`, `@objectstack/platform-objects`: comments and docblocks that cite the Studio modules name them by their new file names; no behaviour changes.
+- 031a19d: refactor(metadata-protocol): the Data API's sort door judges a computed field type by the predicate the sortability projection reads
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /data/:object?sort=<field>` and every other sort that reaches `findData` refuse an order by a field whose type is computed on read (`400 INVALID_SORT`). The door decided "computed on read" from a set of its own, `formula` alone. The sortability projection served on `GET /meta/object/:name` (`resolveObjectSortability`, `reason: 'virtual-type'`) decided the same thing from `@objectstack/spec/data`'s `isVirtualSearchField`. The door now reads that predicate too, as its filter and search checks already did, so one place answers which field types have no column to order by.
+  
+  Nothing changes for a caller: both sets held `formula` and nothing else, so every sort is accepted or refused as before, with the same code, status and message. What changes is what happens when a computed type is added: it is added in the spec's `SEARCH_VIRTUAL_TYPES`, and the Data API door, the projection, the list header and the Sort picker follow together. Before, a type added to one set alone left the grid offering a sort the Data API refused, or the Data API refusing a computed type in the words it uses for a field that declares `sortable: false`.
+  
+  What to do: nothing.
+- 6679160: fix(metadata)!: a version the platform registered is never restored into a package's row, and adopting orphans leaves the platform's own record where the platform keeps it
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  Skills-docs: none — no `skills/` page teaches restoring a platform-registered version, adopting orphans over the platform's record, or `listPackageBindings`
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped, and no stored row is rewritten. What moves is that the three restore doors refuse a restore they wrote before, and that the adoption of orphans leaves one kind of row it rebound before; there is nothing for a migration to rewrite and no tombstone. -->
+  
+  **BREAKING**, in two places, each a write that happened before and is now refused or left out:
+  
+  - **A version the platform registered is never restored into a package's row**, at all three restore doors: the metadata service's `rollback`, and the metadata protocol's `rollbackMetaItem` and the restore limb of `revertCommit`. Refused with `409 RESOURCE_CONFLICT`, naming the fix, nothing written (`revertCommit` reports the item in `failed[]` and still reverts the commit's other items). Before, once the platform had withdrawn its record of a name, the name's one remaining holder was a package, a version attributed to the environment counted as that package's, and a rollback (naming the package or bare) wrote the platform's body into the package's row; `revertCommit` of a package's commit did the same wherever the commit's version was one the platform registered.
+    What to do: to make that body the package's item, save it again naming the package.
+  - **`POST /api/v1/packages/:id/adopt-orphans` (`reassignOrphanedMetadata`) leaves the platform's own record**, the package-less row whose body carries the platform's mark: it is the record the platform registers at every boot, not an orphan. Before, the adoption rebound it to the target package, mark and all. Every other orphan is adopted as before.
+    What to do: nothing.
+  
+  Also in `@objectstack/metadata`:
+  
+  - `isPlatformRecordRow(row)` is exported: the one reader of whether a stored row is the platform's own record (its package column names no package, its body carries the platform's mark and names none), asked by `refusePlatformRecordRestore`, the metadata protocol's overlay census and its adoption of orphans, so they cannot disagree. `refusePlatformRecordRestore` now reads a row bound to a package by its column as that package's, whatever its body keeps, and takes an optional fourth argument, the version a restore would write and the package whose row it writes.
+  - The refusal of a restore whose row is the platform's own record now says that re-saving a version's body as the environment's own item holds until the platform's next registration at boot writes its record back.
+  - `listPackageBindings` names a loader that the read lost once in `errors`, and does not read that loader's rows a second time.
+- 92b4167: Clause-②: no
+  Metadata-protocol: none
+  
+  A first draft save of a published item, pinned with the `version` a read of the published row served, is accepted. With no draft row at the address yet, the save door compared the token with the draft head, which is `null`, so every such save was refused `409 METADATA_CONFLICT` ("current is null") and the caller had to drop the pin to get through. The token is now compared with the published head the draft would replace; on a match the draft is written as a first draft, and the repository's lock still refuses a draft another caller wrote in between. A published row that changed since the read is still refused `409 METADATA_CONFLICT`, now naming its current version, which a retry may send. Every draft save door goes through this one comparison: the MCP `save_metadata_draft` tool's `ifMatch`, and `If-Match` on the `/meta` draft save that Studio and REST clients use.
+  
+  The MCP authoring tools say so (`@objectstack/runtime`): `get_metadata_item` states that a read with `state` answers the `version` that `save_metadata_draft` takes as `ifMatch` and a read without `state` answers none, and `ifMatch` states that the save is refused when the pending draft, or the published item while it has no draft, changed since.
+- f7f9345: Clause-②: no
+  Metadata-protocol: none
+  
+  Docblocks of the `$expand` and nested-relation target checks now name the
+  disabled-package predicate beside the exposure decision: a lookup from an
+  enabled object into a disabled package's object keeps its stored id under
+  `$expand`, and a condition on that object's fields is refused `404
+  OBJECT_PACKAGE_DISABLED`, before (and instead of) the exposure refusal when the
+  target is also unexposed. No behaviour change; a new pin holds the order.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [302cfda]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [54d6726]
+- Updated dependencies [ddc96d8]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [4b8aca2]
+- Updated dependencies [56c9cae]
+- Updated dependencies [3ed97b7]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/lint@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/sdui-parser@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

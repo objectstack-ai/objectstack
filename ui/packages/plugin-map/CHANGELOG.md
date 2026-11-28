@@ -1,5 +1,37 @@
 # @object-ui/plugin-map
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [27ee984]
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/plugin-detail@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [f722411]
+- Updated dependencies [c3da753]
+- Updated dependencies [3eb778d]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [8fbae19]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [1f97fce]
+  - @object-ui/plugin-detail@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

@@ -144,8 +144,8 @@ describe('PageHeaderProps icon is retired — no renderer reads it', () => {
 });
 
 // #30018 (ruling record 6624172200 on #29951, letter A): `placedActions` is the
-// explicit opt-in to every action of the bound object placed at `record_header`
-// / `record_more`, read live, beside the authored `actions` list, which keeps
+// explicit opt-in to every action of the bound object placed at `record_page`
+// (or `record`), inline or folded, read live, beside the authored `actions` list, which keeps
 // its #11592 meaning (an authored list is the whole set). The two are refused
 // together. Each refusal is asserted by code AND path, so a refusal for another
 // reason (a closed-shape `unrecognized_keys`, a type miss) cannot pass it; and

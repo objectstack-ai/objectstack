@@ -18,8 +18,8 @@ import { recordsOf } from './object-graph.js';
  * - `object-action-layout-unknown`: no action of that name is declared on the
  *   object (its own `actions`, or a stack action whose `objectName` is it);
  * - `object-action-layout-not-placed`: the action is declared but not placed
- *   in that scope: `list_toolbar` for the `list` arm, `record_header` or
- *   `record_more` for the `record` arm (the record header draws both). A
+ *   in that scope: `list` for the `list` arm, `record` or `record_page`
+ *   for the `record` arm (the record header draws both). A
  *   record action named in the `list` arm, or the reverse, is this.
  *
  * Both object positions are judged: an object's own `actionLayout`, and an
@@ -59,8 +59,8 @@ type AnyRec = Record<string, unknown>;
 
 /** The locations an arm's actions are placed at: the page's header draws an action placed at one of them. */
 const ARM_LOCATIONS: Readonly<Record<'list' | 'record', readonly string[]>> = {
-  list: ['list_toolbar'],
-  record: ['record_header', 'record_more'],
+  list: ['list'],
+  record: ['record', 'record_page'],
 };
 
 function strName(v: unknown): string | undefined {

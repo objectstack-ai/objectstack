@@ -1,6 +1,5 @@
 # Actions
 
-Actions are user-triggered operations on an object or a view.
 Register them under `defineStack({ actions: [...] })`; the six types:
 [Action Types](../SKILL.md#action-types).
 
@@ -12,27 +11,30 @@ is refused at validate and publish (`action-no-object-binding`; set it, or
 that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
-`capabilities: ['api.write']`: without it the sandbox throws on a write.
+`capabilities: ['api.write']`; without that grant, a write is refused too
+(`action-body-write-capability-undeclared`).
 
 ## Where Actions Appear (`locations`)
 
-| Value            | Surface |
+| Value            | Acts on, and where |
 |:-----------------|:--------|
-| `record_header`  | Detail page header |
-| `record_more`    | Detail page overflow menu (⋯) |
+| `list`           | No record: the list page toolbar; one ticked row is its `recordId`, several are refused (no `_selectedIds`) |
+| `record`         | One record, the default: the record page and each list row |
+| `record_page`    | The record page only; `component: 'action:menu'` puts it in the ⋯ menu |
+| `record_row`     | Each list row only |
 | `record_related` | Related-list section in a record |
 | `record_section` | Body section/tab of a record |
-| `list_item`      | Per-row action in list views |
-| `list_toolbar`   | Toolbar button; one ticked row is its `recordId`, several are refused (no `_selectedIds`) |
+
+Until protocol 19: `list_toolbar` (now `list`), `list_item` (`record_row`), `record_header` / `record_more` (`record_page`).
 
 ## Button Order (`actionLayout`)
 
 The object's `actionLayout` arranges one scope per arm:
 `{ record: { pinned: ['crm_convert_lead'], more: ['crm_print_a3'] } }`. `pinned`
 (required; `[]` pins none) names at most 3 buttons, in order; every other action
-goes to the ⋯ menu, those `more` names first. `record` takes `record_header` /
-`record_more` actions wherever that header draws (record page, side preview,
-phone bar, a row's ⋮ menu order); `list` takes `list_toolbar` actions and may
+goes to the ⋯ menu, those `more` names first. `record` takes `record` /
+`record_page` actions wherever that header draws (record page, side preview,
+phone bar, a row's ⋮ menu order); `list` takes `list` actions and may
 pin `$import` / `$export` (pinned only). `os validate` refuses a name the arm's
 scope does not place, on the object or an extension of one the same stack
 defines. On an installed object only its paired `.custom` package's extension
@@ -44,7 +46,7 @@ there: a wrong name draws nothing.
 - `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false it is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true it **shows but greys out**. A bare field ref in either (`done` for `record.done`) fails `os validate`.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate or a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
-- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
+- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused, and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
 - `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. It gates no AI call: an `ai.exposed` one also sets `ai.requiresConfirmation: true`. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
@@ -64,9 +66,9 @@ export const ReassignLeadAction = defineAction({
   name: 'crm_reassign_lead',
   label: 'Reassign Lead',
   objectName: 'lead',
+  locations: ['record'],
   type: 'api',
   target: 'lead',
-  locations: ['record_header', 'list_item'],
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'owner_id', required: true }],
@@ -90,10 +92,10 @@ export const ConvertLeadAction = defineAction({
   name: 'crm_convert_lead',
   label: 'Convert Lead',
   objectName: 'lead',
+  locations: ['record'],
   icon: 'arrow-right-circle',
   type: 'flow',
   target: 'crm_lead_conversion',
-  locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Convert this lead?',
   successMessage: 'Lead converted.',
@@ -174,10 +176,10 @@ export const PrintA3Action = defineAction({
   name: 'crm_print_a3',
   label: 'Print A3',
   objectName: 'lead',
+  locations: ['record_page'],
   type: 'url',
   target: '/print/a3?id=${ctx.recordId}',   // interpolated at click
   openIn: 'new-tab',
-  locations: ['record_header'],
 });
 ```
 
@@ -198,11 +200,11 @@ export const OpenInvoicePdfAction = defineAction({
   name: 'crm_open_invoice_pdf',
   label: 'Open PDF',
   objectName: 'invoice',
+  locations: ['record'],
   type: 'script',
   target: 'crm_open_invoice_pdf',
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
-  locations: ['record_header'],
 });
 ```
 
@@ -219,7 +221,7 @@ placeholder and widget come from the object metadata
 (`widget` only while the param keeps or restates the field's `type`; a param
 that overrides `type` names its own `widget`);
 `objectOverride` borrows a field of another object, and `defaultFromRow: true`
-pre-fills from the selected row in `list_item`.
+pre-fills from the list row it runs on (`record` / `record_row`).
 
 **An action that adds a child line sets its price.** `lookupAutofill` fills only
 the form and the grid, and a stored `expression` reads only its own row, so a
@@ -235,8 +237,8 @@ export const AddInvoiceLineAction = defineAction({
   name: 'crm_add_invoice_line',
   label: 'Add Line',
   objectName: 'invoice',
+  locations: ['record'],
   type: 'script',
-  locations: ['record_header'],
   params: [
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },

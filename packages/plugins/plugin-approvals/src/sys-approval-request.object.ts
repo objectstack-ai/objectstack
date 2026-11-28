@@ -725,7 +725,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       visible:
         'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
         ' || has(record.viewer) && has(record.viewer.can_override_approve) && record.viewer.can_override_approve == true',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       // Names what was approved, in the inbox's inline Approve wording. The
       // decide route answers `ApprovalDecisionResult`, whose `request` is the
       // read-back row with its display enrichment, so `record_title` is the
@@ -780,7 +780,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       visible:
         'has(record.viewer) && has(record.viewer.can_act) && record.viewer.can_act == true' +
         ' || has(record.viewer) && has(record.viewer.can_override) && record.viewer.can_override == true',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Rejected "{{ result.request.record_title }}"',
       refreshAfter: true,
       ai: {

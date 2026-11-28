@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.0"
+  version: "19.0.0-next.2"
   domain: api
   tags: rest, endpoint, auth, realtime, server
 ---

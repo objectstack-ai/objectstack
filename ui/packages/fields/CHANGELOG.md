@@ -1,5 +1,159 @@
 # @object-ui/fields
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/mobile@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+- c2bfa3e: feat(fields): read the headings a markdown value's document face draws, from the face's own parse
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `@object-ui/fields` exports `loadDrawnMarkdownHeadings()`, which loads on demand and answers `drawnMarkdownHeadings(value)`: each heading the markdown `document` face draws, with its text and where it starts in the value (none for the footnote section's `Footnotes` label, which the pipeline adds), and the `DrawnMarkdownHeading` type. It runs the face's own pipeline (react-markdown with the GitHub Flavored Markdown and sanitize plugins `MarkdownContent` draws with), so a reader that must agree with the drawn page counts what is drawn by construction, and react-markdown stays in the lazy chunk the face already lives in. The face draws exactly as before.
+- 0a3ea67: fix(ui): long-text fields on the record page read label-on-top across the whole column, and a rich-text body's headings draw one step smaller
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On the record page's field list every field drew its label in a 112 px column to the left of its value, so a long body (a `textarea`, `markdown`, `html` or `richtext` field, or a `file` / `image` field declared `multiple: true`) was set in what that column left over. Those fields, the same set the detail layout already spans across a full row, now draw the label above the value and give the value the whole column. Every other field keeps its label-left row, and a click on the value still edits it.
+  
+  A `markdown`, `html` or `richtext` value drawn in full (the record page, a readonly form field) draws `h1` at 18 px, `h2` at 16 px and `h3` at 14 px instead of 30, 20 and 18 px. The headings are still heading elements, so a link to a cited section still finds them; a value drawn in a grid cell is unchanged. No metadata changes.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/mobile@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

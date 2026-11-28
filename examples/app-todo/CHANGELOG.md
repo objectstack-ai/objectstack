@@ -1,5 +1,109 @@
 # @objectstack/example-todo
 
+## 4.0.107-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [1f03dc5]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [73d0240]
+- Updated dependencies [724d6f3]
+- Updated dependencies [58be677]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [8d598aa]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0ea3093]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/mcp@19.0.0-next.2
+  - @objectstack/service-knowledge@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/client@19.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/knowledge-memory@19.0.0-next.2
+  - @objectstack/service-i18n@19.0.0-next.2
+
+## 4.0.107-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [73d5e34]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [6cb7440]
+- Updated dependencies [c3da753]
+- Updated dependencies [9ed54cb]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [be61425]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [1490855]
+- Updated dependencies [94843b8]
+- Updated dependencies [14badad]
+- Updated dependencies [aca4960]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [5e1d58a]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/runtime@19.0.0-next.1
+  - @objectstack/mcp@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/service-knowledge@19.0.0-next.1
+  - @objectstack/knowledge-memory@19.0.0-next.1
+  - @objectstack/client@19.0.0-next.1
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.1
+  - @objectstack/service-i18n@19.0.0-next.1
+
 ## 4.0.107-next.0
 
 ### Patch Changes

@@ -7,7 +7,7 @@
  *
  * Both pages were `kind: 'slotted'` until the `tabs` slot retired (#27053);
  * the synthesized header they rendered read every object action placed at
- * `record_header` or `record_more` at render time, an action another package
+ * `record` or `record_page` at render time, an action another package
  * places on the object included. Rebuilt as `kind: 'full'` pages they named
  * the platform's own ids instead, and an authored id list is the whole set
  * (#11592), so an installed package's header action on `sys_user` stopped
@@ -34,7 +34,7 @@ function headerPlacedIds(object: { actions?: unknown }): string[] {
   for (const action of (object.actions ?? []) as Rec[]) {
     const locations = (action.locations ?? []) as string[];
     const name = action.name as string;
-    if (!locations.includes('record_header') && !locations.includes('record_more')) continue;
+    if (!locations.includes('record_page') && !locations.includes('record')) continue;
     if (!ids.includes(name)) ids.push(name);
   }
   return ids;

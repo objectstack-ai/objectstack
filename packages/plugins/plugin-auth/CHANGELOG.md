@@ -1,5 +1,109 @@
 # Changelog
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 0c190a8: fix(plugin-auth)!: a cloud-managed runtime keeps email and password sign-in off when its deployment declares it off
+  
+  Clause-②: yes (narrowing) — narrowed: on a cloud-managed runtime (`OS_CLOUD_MANAGED=1`) whose deployment declares `emailAndPassword.enabled: false`, an auth settings save (`PUT /api/settings/auth`, `SettingsService.setMany('auth', …)`) that changes `email_password_enabled` to a value that reads on answers `400 SETTINGS_VALIDATION` (`invalid_value` at the key) and saves nothing in the batch, where it saved; a stored `email_password_enabled` that reads on is no longer applied there, so `GET /api/v1/auth/config` keeps answering `emailPassword.enabled: false`; and there a Google change no longer counts email and password as a way in, whatever the same save sets it to. Widened: on that runtime, a save that turns `email_password_enabled` off or clears it answers `200` and saves, where the sign-in method floor refused it `400 SETTINGS_VALIDATION`, because the host holds email and password off either way; the field error at that key can carry `constraint: { cloudManaged: true, declaredEmailPassword: false }`; a `managedEmailPassword` key on the sign-in floor copy, in all 11 locales; a module export (not on the package entry) `emailPasswordHeldOffByHost`.
+  Metadata-protocol: none
+  Skills-docs: none — no skill under `skills/**` teaches the auth settings save or the email and password switch; `content/docs/deployment/self-hosting.mdx` and `content/docs/permissions/sso.mdx` gain the cloud-managed case in this change.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed, renamed or re-shaped: `auth.email_password_enabled` is a settings value, runtime state, not authorable metadata. The moved answers are a runtime refusal of one settings save, and one stored value not applied, on a cloud-managed runtime whose deployment declares email and password off; stored rows are left in place, so there is nothing for `objectstack migrate meta` to rewrite and no tombstone. -->
+  
+  **BREAKING** for a cloud-managed runtime whose deployment declares email and password off: saving the auth settings with `email_password_enabled` changed to on is refused `400 SETTINGS_VALIDATION` and nothing in that save is written, and a value stored on earlier no longer turns email and password sign-in on. Self-hosted deployments, and cloud-managed ones whose deployment declares email and password on, are unchanged.
+  
+  On a cloud-managed runtime (`OS_CLOUD_MANAGED=1`) the host refuses every password door. When such a runtime's deployment declared `emailAndPassword.enabled: false`, a stored `auth.email_password_enabled` that read on still overrode the declaration: `GET /api/v1/auth/config` answered `emailPassword.enabled: true`, and the sign-in page drew an email and password form whose every submit was refused.
+  
+  - **The settings pass.** On such a runtime a stored `auth.email_password_enabled` that reads on is not applied, and the server says so once at `error`, with the remedy: clear the setting (or set it off) in the settings console. An `OS_AUTH_EMAIL_PASSWORD_ENABLED` value is the deployment's own declaration and still applies.
+  - **The save door.** A save that turns `auth.email_password_enabled` on there is refused with `400 SETTINGS_VALIDATION` and an `invalid_value` field error at the key, in the caller's language. Turning it off or clearing it is accepted there: the host holds it off either way, so the sign-in method floor no longer refuses that save.
+  
+  Self-hosted deployments, and cloud-managed ones whose deployment declares email and password on, keep the toggle exactly as before.
+  
+  What to do: nothing to migrate. On such a runtime, clear `auth.email_password_enabled` (or set it off) in the settings console if the server reports it stored on and not applied.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/rest@19.0.0-next.2
+  - @objectstack/service-messaging@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [9b622bb]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/rest@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/service-messaging@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

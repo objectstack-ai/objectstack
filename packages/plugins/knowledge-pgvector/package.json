@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/knowledge-pgvector",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.2",
   "license": "Apache-2.0",
   "description": "PostgreSQL + pgvector knowledge adapter for ObjectStack: an open vector store for self-hosted deployments.",
   "type": "commonjs",

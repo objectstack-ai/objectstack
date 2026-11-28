@@ -1665,7 +1665,10 @@ export class ProtocolSaveFacet {
                 // every other body is judged as stored.
                 const parsed = schema.safeParse(flowGateVerdictBody ?? request.item);
                 if (!parsed.success) {
-                    const issues = zodIssuesToMetadataIssues(parsed.error.issues);
+                    // [#36594] The 422 alone carries each issue's registered
+                    // refusal (`params.code` and its siblings); the read path
+                    // and the seed refusal publish a closed entry shape.
+                    const issues = zodIssuesToMetadataIssues(parsed.error.issues, { refusalParams: true });
                     // [#10524 → commit d806081dd] The findings clause is rendered PER
                     // FACE — see {@link specValidationFindings}. #10524's
                     // headline is applied on the faces that carry the same
@@ -2950,6 +2953,26 @@ export class ProtocolSaveFacet {
                 ...echoNotices,
             ];
 
+            // ADR-0160 D7, seventh amendment: the chain yields no item of the
+            // row — a stored `action` row of the retired action type IS the
+            // action the conversion deletes. The reads serve and register
+            // nothing for it already; this pass lists it on a preview and an
+            // apply run alike and deletes no row, because deleting it is the
+            // operator's, by name, through the metadata API's delete door.
+            if (!flowResult && item === undefined) {
+                record({
+                    ...base,
+                    notices: flattened,
+                    todos: flattenedTodos,
+                    outcome: 'skipped',
+                    reason: 'the conversion chain leaves nothing of this row: the row is itself the item a '
+                        + 'conversion removes, so the reads serve and register nothing for it and there is no '
+                        + 'body to re-save. Delete the row by name through the metadata API (DELETE '
+                        + `/api/v1/meta/${singular}/${base.name}) once nothing needs it.`,
+                });
+                continue;
+            }
+
             if (!apply) {
                 record({ ...base, notices: flattened, todos: flattenedTodos, outcome: 'pending' });
                 continue;
@@ -3532,8 +3555,12 @@ export async function packagelessRowHeldBaseDraftAddress(
  * whether or not a row is stored at the address (over none, the delete and
  * the discard are refused too, not answered the no-op receipt).
  * [ADR-0150 D3, the 2026-11-26 note] The bare per-item publish and the bare
- * per-item rollback ask the second state only (`arms: 'disabled-holders'`),
- * after the ADR-0146 D11 close, so they write nothing a disabled holder hides.
+ * per-item rollback ask the disabled-holders judgment only
+ * (`arms: 'disabled-holders'`), after the ADR-0146 D11 close, so they write
+ * nothing a disabled holder hides: [#37851 ruling A] its first state where
+ * they write a package's own row (the publish of its own draft, the rollback
+ * of its own row), its second where they write the package-unbound row,
+ * stored or not.
  * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
  * disabled package both hold) and after the rows' own refusal (two or more
  * bindings), so neither answer moves.

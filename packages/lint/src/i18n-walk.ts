@@ -87,8 +87,12 @@
  *   objects.<name>._validations.<rule>.message
  *   objects.<name>._milestones.<field>.<value>.summary   (an `activityMilestones`
  *                                                entry's summary template)
- *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
- *                                                entry that authors a `label`)
+ *   objects.<name>._relatedLists.<list>.label   (a record-page tab the served
+ *                                                object titles: an owner entry
+ *                                                that authors a `label`, as the
+ *                                                `.custom` arrangement leaves
+ *                                                it, or an arrangement entry
+ *                                                that authors one)
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
@@ -163,6 +167,7 @@
  *   books.<book>.label / .description
  *   books.<book>.groups.<group_key>.label   (a doc book's section title, #26690)
  *   mappings.<mapping>.label                (a named import mapping's label)
+ *   packages.<manifest id>.name / .description  (a package's display name, #35513)
  *   metadataForms.<type>.label / .description
  *   metadataForms.<type>.sections.<section>.label / .description
  *   metadataForms.<type>.fields.<dotPath>.label / .helpText / .placeholder
@@ -201,6 +206,8 @@ import { APPROVAL_NODE_TYPE, flowDecisionEdgeBranch, isFlowTechnicalNodeType } f
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
+import { objectExtensionsByTarget } from './object-graph.js';
+import { addOwnerRelatedLists, emptyRelatedListTitles, foldRelatedListExtensions } from './related-list-titles.js';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
@@ -289,6 +296,7 @@ export interface ExpectedEntry {
     | 'permission'
     | 'book'
     | 'mapping'
+    | 'package'
     | 'metadataType'
     | 'metadataFormSection'
     | 'metadataFormField';
@@ -1045,23 +1053,34 @@ function pushMilestoneSummaries(out: ExpectedEntry[], objectName: string, milest
 }
 
 /**
- * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
- * `relatedLists` entry of an object that authors a `label` (the record page's
- * tab title and table heading for that list, which wins over the child FK's
- * `relatedListTitle`). The key is the entry's literal `list`, a dotted
- * `object.field` included, indexed as is. Only an AUTHORED label is emitted:
- * `translateObject` translates that label and swaps nothing in for an entry
- * that has none, so a key for one would ask a translator for a string no
- * screen shows.
+ * Emit `objects.<object>._relatedLists.<list>.label` for every record-page
+ * tab the SERVED object titles with a `label` (the tab title and table heading
+ * for that list, which wins over the child FK's `relatedListTitle`). The key
+ * is the entry's literal `list`, a dotted `object.field` included, indexed as
+ * is. Only an AUTHORED label is emitted: `translateObject` translates that
+ * label and swaps nothing in for an entry that has none, so a key for one
+ * would ask a translator for a string no screen shows.
+ *
+ * [#37622] The owner's entries are folded with the extensions of this stack
+ * that target the object ({@link foldRelatedListExtensions}, the fold the
+ * `translation-target-unknown` rule of `os validate` reads), so a list the
+ * paired `.custom` arrangement hides, names bare or re-states without a
+ * `label` gets no key, and a list the arrangement labels gets one, carrying
+ * the arrangement's text. A label only a code extender's `place` entry gives
+ * is not emitted: the rule accepts its key, but the registry may not apply the
+ * placement, so asking for it could ask for a string no screen shows.
  */
-function pushRelatedListLabels(out: ExpectedEntry[], objectName: string, entries: unknown): void {
-  if (!Array.isArray(entries)) return;
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const list = (entry as any).list;
-    if (typeof list !== 'string' || list.length === 0) continue;
-    const label = (entry as any).label;
-    if (typeof label !== 'string' || label.length === 0) continue;
+function pushRelatedListLabels(
+  out: ExpectedEntry[],
+  objectName: string,
+  entries: unknown,
+  extensions: Parameters<typeof foldRelatedListExtensions>[1],
+): void {
+  const titles = emptyRelatedListTitles();
+  addOwnerRelatedLists(titles, entries);
+  foldRelatedListExtensions(titles, extensions);
+  for (const [list, { label, layer }] of titles.labels) {
+    if (layer === 'place') continue;
     pushEntry(out, ['objects', objectName, '_relatedLists', list, 'label'], label, 'object', { objectName });
   }
 }
@@ -1578,6 +1597,8 @@ export function collectExpectedEntries(
 
   // ── Objects ───────────────────────────────────────────────────────
   const objects: any[] = Array.isArray(config?.objects) ? config.objects : [];
+  // [#37622] The extensions each object's served tab list folds in, read once.
+  const extensionsByTarget = objectExtensionsByTarget(config);
   for (const obj of objects) {
     if (!obj?.name) continue;
     const objectName = obj.name as string;
@@ -1708,11 +1729,12 @@ export function collectExpectedEntries(
 
     // Record-page related-list titles (`_relatedLists.<list>.label`): the
     // `label` an object-form `relatedLists` entry authors on this parent,
-    // keyed by the entry's literal `list` (`object.field` is one key).
+    // keyed by the entry's literal `list` (`object.field` is one key), after
+    // the paired `.custom` arrangement this stack carries is folded in.
     // `translateObject` overlays only an authored label, so an entry without
     // one — and a bare-string entry or built-in tab — gets no key: its title
     // is the child FK's `relatedListTitle`, keyed on the child above.
-    pushRelatedListLabels(out, objectName, obj.relatedLists);
+    pushRelatedListLabels(out, objectName, obj.relatedLists, extensionsByTarget.get(objectName) ?? []);
   }
 
   // ── Top-level views ──────────────────────────────────────────────
@@ -1898,6 +1920,9 @@ export function collectExpectedEntries(
 
   // ── Import mappings (`mappings.<name>.label`) ─────────────────────
   walkMappings(config, out);
+
+  // ── Package display names (`packages.<manifest id>.…`) ─────────────
+  walkPackages(config, out);
 
   // ── [ADR-0159 D8] `form` items (`forms.<name>.…`) ─────────────────
   walkForms(config, out);
@@ -2270,6 +2295,36 @@ function walkMappings(config: any, out: ExpectedEntry[]): void {
     const name = mapping.name;
     if (typeof name !== 'string' || name.length === 0) continue;
     pushOptional(out, ['mappings', name, 'label'], mapping.label, 'mapping');
+  }
+}
+
+// ─── Package display names (`packages.<manifest id>.…`) ────────────────────
+
+/**
+ * Emit a package's display name and description:
+ * `packages.<manifest id>.name` / `.description`, the keys the console reads
+ * where it lists packages (Setup's package list, Studio's package switcher;
+ * objectstack#35513). Read from the same two carriers
+ * {@link navigationContributionsOf} reads: the top-level `manifest` of a
+ * single-`defineStack` project, and each `packages[].manifest` of a composed
+ * artifact. `name` is required on a manifest and `description` optional, so
+ * both are recorded with {@link pushOptional}; a manifest without a string
+ * `id` names no package and is skipped.
+ */
+function walkPackages(config: any, out: ExpectedEntry[]): void {
+  const manifests: unknown[] = [config?.manifest];
+  const packages: unknown[] = Array.isArray(config?.packages) ? config.packages : [];
+  for (const entry of packages) manifests.push((entry as any)?.manifest);
+  // A composed stack restates one package's manifest at its top level and again
+  // in `packages[]`: one package, one name, walked once.
+  const seen = new Set<string>();
+  for (const manifest of manifests) {
+    if (!manifest || typeof manifest !== 'object') continue;
+    const id = (manifest as any).id;
+    if (typeof id !== 'string' || id.length === 0 || seen.has(id)) continue;
+    seen.add(id);
+    pushOptional(out, ['packages', id, 'name'], (manifest as any).name, 'package');
+    pushOptional(out, ['packages', id, 'description'], (manifest as any).description, 'package');
   }
 }
 

@@ -522,6 +522,71 @@ export function PendingQuestion({ messageId, onSend, onDismiss }: {
 - Strings come from the `chatbot.questionCard.*` keys of `@object-ui/i18n`; the
   card is right-to-left in Arabic.
 
+`ChatbotEnhanced` draws the card itself. When a turn ends on a question tool's
+result that `parseAskQuestionEnvelope` (`@objectstack/spec/ai`) reads — the
+question envelope, or a legacy `ask_which` result — and the envelope's `reply`
+is the turn's last text, the card takes the composer's place:
+
+- It shows only once the stream has ended, and never while a typed message is
+  queued, while a write approval waits in the same turn, after a skip, or on a
+  `readOnly` transcript.
+- The composer is not unmounted: it is hidden and `inert`, so a draft and its
+  attachments come back after Skip or an answer.
+- An answer is sent through `onSendMessage` as the next user message. If the
+  send fails and the message is rolled back, the card returns with its choice.
+- Skip is remembered on this device, per conversation, when the host passes
+  `conversationId`: the key is `QUESTION_SKIP_STORAGE_PREFIX` followed by
+  `:` and the conversation id. A host's sign-out cleanup should clear that
+  prefix.
+- The conversation draws the question from its envelope: pending, the question
+  alone; answered or skipped, a collapsed "AI asks: …" that expands to its
+  options. Copy still copies the full reply, and a pending question has no
+  Regenerate.
+
+### Draft review card
+
+`DraftReviewCard` lists the drafts an ask turn saved, under the answer. A host
+whose admin skill saves metadata drafts from the chat ends such a turn with one
+`data-draft-review` part (`DRAFT_REVIEW_PART_TYPE`, whose data is a
+`DraftReviewListSchema` list from `@objectstack/spec/ai`). `ChatbotEnhanced`
+reads the part through that schema (`extractDraftReview`) and draws the card
+itself; a part the schema refuses draws nothing.
+
+```tsx
+import { DraftReviewCard } from '@object-ui/plugin-chatbot';
+import type { DraftReviewListParsed } from '@objectstack/spec/ai';
+
+export function TurnDrafts({ review, navigate }: {
+  review: DraftReviewListParsed;
+  navigate: (path: string) => void;
+}) {
+  return (
+    <DraftReviewCard
+      review={review}
+      onOpenReviewLink={navigate}                     // in-app navigation keeps the live conversation
+      reviewLinkHref={(path) => `/_console${path}`}  // the router's basename, for a new tab
+    />
+  );
+}
+```
+
+- One row per draft: its label (or name), its type, the verdict as a badge
+  ("Will publish", "N problems", or "Verdict withheld" when no verdict was
+  read) and a Review link to the draft's own review in Studio. A verdict read
+  by the save rather than at the turn's end says "checked when saved".
+- Rows are grouped by package, in save order; each package has one "Review and
+  publish" link to its Changes drawer. `omitted` shows as "+N more".
+- The card has no publish and no discard control: a person publishes or
+  discards in Studio, through the links.
+- A plain click on a link calls `onOpenReviewLink` with the Console path; a
+  modified or middle click keeps the browser's own behaviour, on the href
+  `reviewLinkHref` returns. Without either prop the links are ordinary anchors
+  on the path itself.
+- The card is drawn on a live answer only: the part is not one of
+  `STORED_ANSWER_DATA_PARTS`, so a conversation reloaded from history shows no
+  card.
+- Strings come from the `chatbot.draftReview.*` keys of `@object-ui/i18n`.
+
 ## Bundle considerations
 
 This package depends on `streamdown`, `shiki`, `mermaid`, and `katex`

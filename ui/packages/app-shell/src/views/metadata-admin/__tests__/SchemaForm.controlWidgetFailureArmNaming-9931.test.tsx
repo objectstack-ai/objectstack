@@ -87,14 +87,14 @@ const TITLE = 'Probe';
 const SUB = 'trailing_stop';
 const COLUMN = 'Trailing Stop';
 
-/** The object `field-selector`'s raw `fetch` loader is pointed at. */
+/** The object `field-selector`'s own catalog read is pointed at. */
 const OBJECT = 'showcase_account';
 
 /**
  * Every "still asking" copy in this registry. A picker that is still LOADING
  * also renders a named control, so an assertion taken before the arm settles
  * would pass while measuring the wrong branch — `field-selector` is
- * genuinely asynchronous (a raw `fetch`, not a `WidgetContext` catalog).
+ * genuinely asynchronous (its own read, not a `WidgetContext` catalog).
  */
 const STILL_LOADING = [
   t('engine.form.loadingObjects', 'en-US'),
@@ -174,7 +174,7 @@ const CASES: ControlCase[] = [
 
 /**
  * `field-selector` is the one loader here that does not read a
- * `WidgetContext` catalog — it `fetch`es its own. Both modes are stubbed, so
+ * `WidgetContext` catalog — it reads the served object document itself. Both modes are stubbed, so
  * the failed leg fails for a stated reason and the loaded leg is a real
  * completed load rather than an unresolved promise.
  */
@@ -183,13 +183,12 @@ function stubFetch(mode: 'failed' | 'loaded') {
     'fetch',
     mode === 'failed'
       ? vi.fn().mockRejectedValue(new Error('NetworkError: failed to fetch'))
-      : vi.fn().mockResolvedValue({
-          ok: true,
-          status: 200,
-          // The authenticated fetch reads a rotated token off every answer (objectstack#37225).
-          headers: new Headers(),
-          json: async () => ({ fields: [{ name: 'status', label: 'Status', type: 'text' }] }),
-        } as unknown as Response),
+      : vi.fn().mockResolvedValue(
+          new Response(
+            JSON.stringify({ type: 'object', name: OBJECT, item: { name: OBJECT, fields: { status: { type: 'text', label: 'Status' } } } }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          ),
+        ),
   );
 }
 

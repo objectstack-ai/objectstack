@@ -1081,13 +1081,19 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 && declinesPackageLessRowAt(host, request.type, request.name, draftRec as ServedOverrideRow)) {
                 draftRec = undefined;
             }
-            if (draftRec) {
-                const draftItem = host.convertStoredItem(
+            const draftItem = draftRec
+                ? host.convertStoredItem(
                     String(draftRec.type ?? request.type),
                     typeof draftRec.metadata === 'string'
                         ? JSON.parse(draftRec.metadata)
                         : draftRec.metadata,
-                ) as any;
+                ) as any
+                : undefined;
+            // ADR-0160 D7: the stored seam yields no item of a draft row of the
+            // retired action type, so there is no draft to preview and the
+            // active read below answers, as the list read's draft arm does.
+            if (draftItem === undefined) draftRec = undefined;
+            if (draftRec) {
                 let previewed = draftItem;
                 if (previewed && typeof previewed === 'object') {
                     const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;

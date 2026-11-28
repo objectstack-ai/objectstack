@@ -65,6 +65,7 @@ import { createAiDomain, handleAIRequest } from './domains/ai.js';
 import { createActionsDomain, handleActionsRequest } from './domains/actions.js';
 import { dispatchActionRequest, type ActionDispatchAnswer, type ActionDispatchRequest, type ActionResumeRequest } from './action-dispatch.js';
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge, resumeActionRunRequest } from './domains/mcp.js';
+import { inProcessAuthoringRegistryRequest, type InProcessAuthoringRegistry, type InProcessAuthoringRequest } from './in-process-authoring.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
 
@@ -170,6 +171,15 @@ export interface HttpDispatcherResult {
          * (#27506: the api-action forward relays a target's cookie rotation).
          */
         headers?: Record<string, string | string[]>;
+        /**
+         * [#37864] The sentence the operator's fault log prints for this
+         * answer when it is not the body's `error.message`. Never written to
+         * the wire. A `501` whose body is in the caller's language sets it to
+         * the English, so the one line a declared capability absence earns per
+         * route per process (`logServerFault`, `@objectstack/types`) does not
+         * take the language of whichever request reached the route first.
+         */
+        faultLogMessage?: string;
     };
     result?: any; // For flexible return types or direct response objects (Response/NextResponse)
 }
@@ -2956,6 +2966,16 @@ export class HttpDispatcher {
      */
     async resumeHostActionRun(request: ActionResumeRequest): Promise<ActionDispatchAnswer> {
         return resumeActionRunRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
+    }
+
+    /**
+     * [#37944] A host's in-process authoring entry over this dispatcher's deps —
+     * the MCP draft door's five tools as the signed-in person
+     * (`./in-process-authoring.ts#createInProcessAuthoringRegistry`,
+     * the published entry), placed as {@link dispatchHostAction} places its call.
+     */
+    async hostAuthoringRegistry(request: InProcessAuthoringRequest): Promise<InProcessAuthoringRegistry> {
+        return inProcessAuthoringRegistryRequest(this.domainDeps, request, (context, hints) => this.placeHostActionRequest(context, hints));
     }
 
     /**

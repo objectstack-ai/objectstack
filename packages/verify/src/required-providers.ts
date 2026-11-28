@@ -17,7 +17,9 @@
 //
 //   · WHICH tokens: `resolveServedCapabilities` over the tokens the app
 //     declares as `stackDeclaredCapabilities` reads them (the top-level
-//     `requires` when the stack carries one, otherwise each package body's) —
+//     `requires` when the stack carries one, otherwise each package body's)
+//     and the tokens its items mount (`stackItemCapabilities`: a
+//     `knowledge_source` mounts `knowledge`) —
 //     `email` for a declared `auth`, the always-on slate
 //     (`PLATFORM_ALWAYS_ON_CAPABILITIES`), and `job` / `queue` ahead of the
 //     tokens that schedule background work. No preset: `bootStack` takes none,
@@ -72,11 +74,13 @@ import {
   type CapabilityDatabase,
   resolveServedCapabilities,
   stackDeclaredCapabilities,
+  stackItemCapabilities,
 } from '@objectstack/core';
 
 /** Why this boot constructs a provider, as a refusal names it. */
-function reasonFor(token: string, declared: ReadonlySet<string>): string {
-  return declared.has(token)
+function reasonFor(token: string, served: { declared: ReadonlySet<string>; byItems: ReadonlySet<string> }): string {
+  if (served.byItems.has(token)) return `the stack's items, which mount the '${token}' capability as requires: ['${token}'] does`;
+  return served.declared.has(token)
     ? `requires: ['${token}']`
     : `the always-on '${token}' capability (objectstack serve mounts it for every app)`;
 }
@@ -149,7 +153,13 @@ export async function constructServedProviders(opts: {
    */
   database?: CapabilityDatabase;
 }): Promise<unknown[]> {
-  const { tokens, declared } = resolveServedCapabilities(stackDeclaredCapabilities(opts.config));
+  // [ADR-0161 K8 item 12] A stack that ships a `knowledge_source` mounts the
+  // knowledge service and the store as `serve` mounts them (`stackItemCapabilities`).
+  const served = resolveServedCapabilities(stackDeclaredCapabilities(opts.config), {
+    itemTokens: stackItemCapabilities(opts.config),
+  });
+  const { tokens } = served;
+  const database = opts.database ?? { driver: 'sqlite-wasm', url: ':memory:' };
   const constructed: unknown[] = [];
   const all = (): unknown[] => [...opts.held, ...constructed];
 
@@ -157,7 +167,7 @@ export async function constructServedProviders(opts: {
     const spec = CAPABILITY_PROVIDERS[token];
     if (!spec) continue;
     if (providesCapability(all(), spec.identities)) continue;
-    const reason = reasonFor(token, declared);
+    const reason = reasonFor(token, served);
     constructed.push(
       await constructProvider({
         reason,
@@ -168,13 +178,14 @@ export async function constructServedProviders(opts: {
             stack: opts.config,
             packageRoot: opts.packageRoot,
             providerModule: mod,
+            database,
           }).argument,
       }),
     );
     const extras = resolveCapabilityExtras(token, {
       stack: opts.config,
       packageRoot: opts.packageRoot,
-      database: opts.database ?? { driver: 'sqlite-wasm', url: ':memory:' },
+      database,
     });
     for (const extra of extras) {
       if (providesCapability(all(), extra.identities)) continue;

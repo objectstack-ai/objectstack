@@ -1,5 +1,91 @@
 # @objectstack/client
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 6cb7440: fix(client, app-shell): every draft-then-publish Save publishes only the draft it wrote
+  
+  Clause-②: yes (widening: `@objectstack/client` `meta.publishItem` accepts `draftVersion` and `parentVersion` beside `message` and `packageId`)
+  Metadata-protocol: none
+  
+  `client.meta.publishItem(type, name, opts)` takes two optional pins. `draftVersion` (sent in the publish body beside `message`) names the pending draft the publish means to promote: pass your own draft save's receipt `version`, and a draft another writer changed after it is refused `409 METADATA_CONFLICT` with nothing published. `parentVersion` names the live row the publish means to replace (sent as `If-Match`; `null` asserts that no live row is stored, sent as `If-None-Match: *`). Omitted, the request is byte-identical to before and the publish is unpinned.
+  
+  In the console, every Save that writes a draft and publishes it at once now pins that publish to the draft its own write returned: the Studio top bar's Save (objects, object extensions, flows and their on/off switch, hooks, an installed object's actions, permission sets, a new app, a new object or flow), the item page's Save, each row of the package's sharing-defaults table, 「Configure tabs」, an installed object's field arrangement, the design mode's header pins, menu and menu labels. When someone else's draft write lands on the same item between that draft write and the publish, nothing is published and the draft, which now holds their change, is kept pending instead of discarded; the Save says a draft is pending (the next Studio Save asks to reload or overwrite). The take-back of a refused Save's own draft is pinned to the same version, so it never removes a draft someone else changed. Against a server whose draft save returns no version, all of these publish unpinned, as before.
+- 94843b8: fix(app-shell): the view settings draft bar publishes the reloaded draft after a conflict is resolved with "reload"
+  
+  When a view settings Save was refused because the draft moved and the author chose "reload" in the conflict dialog, the panel re-read the stored view but the draft bar kept the draft version it had read before the reload. Its Publish was then pinned to a draft that no longer existed and was refused until the panel was reopened. The panel now hands the bar the version its reload read found (`RuntimeDraftBar`'s new `reloadedSignal`, `reloadedDraftVersion` and `reloadedHasDraft`), so the Publish promotes the draft now shown, and a reload that found no pending draft takes the bar's indicator down. A reload whose read fails hands the bar nothing, so its Publish stays pinned and is refused rather than sent unpinned.
+  
+  `client.meta.publishItem`'s `parentVersion` JSDoc now says an empty string pins nothing and is not sent, as `draftVersion`'s does, and the client SDK page shows a publish pinned with `draftVersion` and `parentVersion`.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

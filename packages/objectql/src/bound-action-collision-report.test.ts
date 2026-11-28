@@ -36,14 +36,14 @@ const OWNER = {
     objects: [ObjectSchema.create({
         name: 'bc_org', label: 'Org',
         fields: { name: { name: 'name', type: 'text', label: 'Name' } },
-        actions: [{ name: 'rename', label: 'Rename', type: 'url', target: 'https://example.com/own', locations: ['record_header'] }],
+        actions: [{ name: 'rename', label: 'Rename', type: 'url', target: 'https://example.com/own', locations: ['record_page'] }],
     } as any)],
 };
 
 /** Another package binding an action of the same NAME to the owner's object — a different declaration. */
 const TWIN = {
     id: 'com.test.twin', name: 'twin',
-    actions: [{ name: 'rename', label: 'Rename (twin)', objectName: 'bc_org', type: 'url', target: 'https://example.com/twin', locations: ['record_header'] }],
+    actions: [{ name: 'rename', label: 'Rename (twin)', objectName: 'bc_org', type: 'url', target: 'https://example.com/twin', locations: ['record_page'] }],
 };
 
 /** Another package carrying the owner's declaration itself, bound by `objectName` — one declaration, two packages. */
@@ -92,7 +92,7 @@ describe('the registry\'s bound-action collision audit', () => {
         const stack = defineStack({
             manifest: { id: 'com.test.same', name: 'same', version: '1.0.0', type: 'app' },
             objects: [{ name: 'bc_same', label: 'Same', fields: { name: { name: 'name', type: 'text', label: 'Name' } } }],
-            actions: [{ name: 'same_action', label: 'Same', objectName: 'bc_same', type: 'url', target: 'https://example.com', locations: ['record_header'] }],
+            actions: [{ name: 'same_action', label: 'Same', objectName: 'bc_same', type: 'url', target: 'https://example.com', locations: ['record_page'] }],
         } as any);
         // The JSON round trip is the compiled artifact's shape: two copies, not one reference.
         const engine = await engineWith([JSON.parse(JSON.stringify({ ...stack, ...stack.manifest }))]);

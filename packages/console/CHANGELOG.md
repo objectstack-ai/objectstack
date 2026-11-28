@@ -1,5 +1,55 @@
 # @objectstack/console
 
+## 19.0.0-next.2
+
+No changes in this release.
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 50b4bf8: perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console's first load (the chunks every page fetches before it can draw) is 97,612 bytes smaller gzipped: 1,899,348 across 123 chunks, from 1,996,960 across 124 on `main`.
+  
+  - **`@objectstack/spec`.** The build now marks each module-scope initializer it cannot otherwise prove side-effect free (a spread of another schema's shape, an `.extend()` / `.pick()` chain, a table derived from a schema) as droppable, so a bundler that tree-shakes leaves out the ones an application never reads, together with the schema graphs they hold. Initializers that write into an object that already exists (`Object.assign(Existing, …)`, `Object.defineProperty(Existing, …)`) are never marked. Nothing changes for code that reads an export: every export that is used evaluates exactly as before. `TRANSLATABLE_METADATA_TYPES` is now built from a plain list of names instead of from the translator table, so reading it no longer keeps every metadata translator.
+  - **`@object-ui/plugin-form`.** One new export on the published `@object-ui/plugin-form/core` subpath, `createKeepsField` (the same function the package root already exports); nothing is removed or renamed, and the package root exports the same names as before. This is the widening the `Clause-②` line names; `@objectstack/spec`'s public surface does not change.
+  - **`@object-ui/app-shell`.** The record page's related-record actions read `createKeepsField` from `@object-ui/plugin-form/core`, so the form package is no longer part of the first load.
+  - **`@object-ui/console`, `@objectstack/console`.** The Console's `plugin-form-core` chunk group also claims `createKeepsField`, so it lands with the other side-effect-free form helpers; the Console build `@objectstack/console` ships carries the smaller first load.
+  
+  Nothing to migrate.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- ce4d8c7: perf(console): the sidebar no longer redraws every entry each time the console re-renders during first load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While a console page first loads, the shell re-renders about ten times as its boot reads land. Each time, the sidebar redrew every navigation entry, and with each entry its ⋯ menu and tooltip: about 2,700 components per pass, several passes before the page could paint.
+  
+  Now an entry is redrawn only when what it shows changes: its label, icon, colour, address, or the gates that decide whether it shows. The ⋯ menu redraws its menu tree only when its own text or entries change. The console's expression evaluator is no longer rebuilt on every render, because that rebuild alone made every entry redraw.
+  
+  On a list page's first load this halves the components drawn before first paint. Nothing changes in what the sidebar shows or does.
+
 ## 19.0.0-next.0
 
 ### Patch Changes

@@ -582,7 +582,7 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       const write = (objectName: string) =>
         runRuntimeAuthoringRules({
           type: 'action',
-          item: { name: 'go', label: 'Go', objectName, type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          item: { name: 'go', label: 'Go', objectName, type: 'script', locations: ['record_page'], body: { language: 'js', source: 'return 1;' } },
           context: { objects },
         });
       expect(objectRefErrors(write('crm_laed'))).toEqual(['actions[0].objectName']);
@@ -593,7 +593,7 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       const write = (packageScope?: { packageId: string; dependencies: string[] }) =>
         runRuntimeAuthoringRules({
           type: 'action',
-          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_page'], body: { language: 'js', source: 'return 1;' } },
           context: { objects: [] },
           ...(packageScope ? { packageScope } : {}),
         });
@@ -607,7 +607,7 @@ describe('[#35143] validateObjectReferences — the object a seed, a flow node o
       const write = (dependencies: string[]) =>
         runRuntimeAuthoringRules({
           type: 'action',
-          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_header'], body: { language: 'js', source: 'return 1;' } },
+          item: { name: 'go', label: 'Go', objectName: 'crm_lead', type: 'script', locations: ['record_page'], body: { language: 'js', source: 'return 1;' } },
           context: { objects: owned },
           packageScope: { packageId: 'com.acme.ext', dependencies },
         });

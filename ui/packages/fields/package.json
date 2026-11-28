@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/fields",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.2",
   "description": "Field renderers and registry for ObjectUI",
   "license": "MIT",
   "type": "module",

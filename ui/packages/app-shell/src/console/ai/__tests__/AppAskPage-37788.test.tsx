@@ -26,7 +26,7 @@ import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
 
 const PKG = 'com.acme.policy';
 
-let surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+let surface = { enabled: true, isLoading: false, buildServed: true };
 let agents: Array<{ name: string; label?: string }> = [{ name: 'ask' }, { name: 'build' }];
 let apps: unknown[] = [];
 
@@ -111,7 +111,7 @@ const creates = () =>
 
 beforeEach(() => {
   localStorage.clear();
-  surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+  surface = { enabled: true, isLoading: false, buildServed: true };
   agents = [{ name: 'ask' }, { name: 'build' }];
   apps = [appWith({ title: 'Ask about our policies', subtitle: 'Rules, forms and deadlines.', placeholder: 'Type a question', suggestions: ['How do I apply?', 'What is the deadline?'] })];
   fetchMock = vi.fn();
@@ -131,8 +131,8 @@ describe('AppAskPage (objectstack#37788)', () => {
 
   it('draws the copy the entry declares', () => {
     mount();
-    expect(screen.getByTestId('app-ask-title')).toHaveTextContent('Ask about our policies');
-    expect(screen.getByTestId('app-ask-subtitle')).toHaveTextContent('Rules, forms and deadlines.');
+    expect(screen.getByTestId('empty-conversation-heading')).toHaveTextContent('Ask about our policies');
+    expect(screen.getByTestId('empty-conversation-subtitle')).toHaveTextContent('Rules, forms and deadlines.');
     expect(screen.getByTestId('app-ask-input')).toHaveAttribute('placeholder', 'Type a question');
     expect(screen.getByTestId('app-ask-scope')).toHaveTextContent('Answers prefer this app');
     expect(screen.getByRole('button', { name: 'How do I apply?' })).toBeInTheDocument();
@@ -143,14 +143,20 @@ describe('AppAskPage (objectstack#37788)', () => {
   it('falls back to the neutral copy for every key the entry omits', () => {
     apps = [appWith()];
     mount();
-    expect(screen.getByTestId('app-ask-title')).toHaveTextContent('Ask your data');
+    // objectstack#37862 — with no declared title the home state greets by
+    // the time of day (the seat's ruling on the claim); the subtitle keeps the
+    // neutral platform line.
+    expect(screen.getByTestId('empty-conversation-heading').textContent).toMatch(
+      /^(Good morning|Good afternoon|Good evening|Working late)\.$/,
+    );
+    expect(screen.getByTestId('empty-conversation-subtitle')).toHaveTextContent(/Ask questions about your records/);
     expect(screen.getByTestId('app-ask-input')).toHaveAttribute('placeholder', 'Ask anything…');
-    expect(screen.queryByTestId('app-ask-suggestions')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('empty-conversation-suggestions')).not.toBeInTheDocument();
   });
 
   it('never reads its copy from the URL', () => {
     mount('/apps/brightrule/component/ai/chat?title=Injected');
-    expect(screen.getByTestId('app-ask-title')).toHaveTextContent('Ask about our policies');
+    expect(screen.getByTestId('empty-conversation-heading')).toHaveTextContent('Ask about our policies');
   });
 
   it('a suggestion asks it: the pane mounts on ask, bound to the package, and the create records the app', async () => {
@@ -219,7 +225,7 @@ describe('AppAskPage (objectstack#37788)', () => {
   });
 
   it('renders the unavailable state where this person has no AI', () => {
-    surface = { enabled: false, isLoading: false, buildServed: false, focusServed: false };
+    surface = { enabled: false, isLoading: false, buildServed: false };
     agents = [];
     mount();
     expect(screen.getByTestId('ai-unavailable')).toBeInTheDocument();
@@ -255,7 +261,7 @@ describe('AppAskPage recent conversations (objectstack#37790)', () => {
       ...[2, 3, 4, 5, 6].map((n) => row(`p${n}`, `Question ${n}`, `2026-11-2${n}T10:00:00Z`, { activePackageId: PKG })),
     ]);
     mount();
-    const items = await screen.findAllByTestId('app-ask-recent-item');
+    const items = await screen.findAllByTestId('empty-conversation-recent-item');
     expect(items.map((i) => i.getAttribute('data-conversation'))).toEqual(['p6', 'p5', 'p4', 'p3', 'p2']);
     expect(screen.queryByText('Other app thread')).not.toBeInTheDocument();
     expect(screen.queryByText('Drawer thread')).not.toBeInTheDocument();
@@ -270,8 +276,8 @@ describe('AppAskPage recent conversations (objectstack#37790)', () => {
       row('d1', 'Drawer thread', '2026-11-26T09:00:00Z'),
     ]);
     mount();
-    expect(await screen.findByTestId('app-ask-recent-empty')).toHaveTextContent('Questions you ask here will appear here.');
-    expect(screen.queryByTestId('app-ask-recent-item')).not.toBeInTheDocument();
+    expect(await screen.findByTestId('empty-conversation-recent-empty')).toHaveTextContent('Questions you ask here will appear here.');
+    expect(screen.queryByTestId('empty-conversation-recent-item')).not.toBeInTheDocument();
   });
 
   it('draws nothing while the list fails, never an empty state', async () => {
@@ -279,7 +285,7 @@ describe('AppAskPage recent conversations (objectstack#37790)', () => {
     mount();
     await waitFor(() => expect(lists()).toHaveLength(1));
     await act(async () => {});
-    expect(screen.queryByTestId('app-ask-recent')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('empty-conversation-recent')).not.toBeInTheDocument();
   });
 
   it('a click opens the conversation in the page through ?c=', async () => {

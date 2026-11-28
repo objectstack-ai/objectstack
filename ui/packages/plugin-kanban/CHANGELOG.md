@@ -1,5 +1,89 @@
 # @object-ui/plugin-kanban
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [27ee984]
+- Updated dependencies [8361dfc]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [7e4df28]
+  - @object-ui/i18n@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/fields@19.0.0-next.2
+  - @object-ui/plugin-detail@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- f722411: feat(kanban): a card footer with each record's open comment threads and attachments (`kanban.cardFooter`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains one optional key with no default; a view that does not declare it renders as before, and reads nothing more:
+  
+  - `cardFooter: { comments?: boolean, attachments?: boolean }` — the counts each card shows at its foot. `comments: true` shows how many of the record's comment threads are open (top-level and not resolved), the number the record page's comments icon shows with two exceptions: a reply whose parent was deleted is not counted (the record page shows it as a thread of its own), and a comment written before the record pair (`object_name` + `record_id`) existed is not counted until `os migrate comment-parent-pair --apply` has stamped it (the record page reads by `thread_id`). `attachments: true` shows how many files are attached to the record. A count of zero draws nothing. An unknown member is refused by name, so a later foot item is one more member.
+  
+  Each count is read once for the whole board, in one grouped read per counted object over the cards the board has loaded, never one read per card, and under the reader's permissions: `sys_comment` grouped by `record_id`, asked only on an object whose discussion is on (`enable.feeds`), and `sys_attachment` grouped by `parent_id`, asked only on an object that takes files (`enable.files`). A refused read draws no count. A cut answer (the door's default page size, `OS_DATA_DEFAULT_PAGE_SIZE`) is never read as the whole set: the reader asks again, still grouped, over the cards the answer did not name, up to `MAX_COUNT_ROUNDS` (20) reads in all; a card still unnamed after that draws no count. The counts are asked again when the board reloads and when a comment or an attachment is written (the data-invalidation bus), and a card already counted keeps its count while a new set of cards is asked. The record Attachments panel now announces an upload and the uploader's own delete on that bus, since both go through the storage route rather than the data source; the record page announces a thread resolved or reopened (the resolution door) and a member's delete of their own comment (the own-comment door) the same way. The reader is shared in `@object-ui/plugin-detail` (`useRecordCounts`, with `askRecordCounts` and its bound `MAX_COUNT_ROUNDS`, `compileCommentCountQuery`, `compileAttachmentCountQuery` and `readRecordCounts`), so a list row can use it next.
+  
+  On a board, 视图设置 offers 「显示评论数」 and 「显示附件数」 beside the two card toggles, each only where the object has that count; both start off. Both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) and the Console relay the key.
+
+### Patch Changes
+
+- 0f8e13b: fix(plugin-kanban): a kanban drawn in swimlanes shows the lane statistic the view settings offer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A board drawn in swimlanes (a view with grouping, or `swimlaneField`) drew no lane statistic, although the view settings offer count, sum, avg, min and max on every kanban. A picked "Sum of amount" showed nothing. The board now draws the statistic once per column, in a foot row under every swimlane. The figure is the column's across every swimlane, the same one the flat board draws, read by the same grouped lane read (grouped by the column field alone). No cell (column × swimlane) draws a figure of its own, because no read groups by the swimlane field.
+  
+  On a board whose host hands it one page of rows with their query (lanes over a lookup field in a list view), the swimlane layout's column counts and header totals are now the whole lane's from that same read. While the read is pending, refused or cut, they are the page's figures marked `+`. A swimlane row's own count is the cards drawn, and it carries `+` unless the page holds every record of the query. A swimlane board does not add the lanes that exist only past the page, unlike the flat board, which adds them.
+- Updated dependencies [81c68b3]
+- Updated dependencies [f722411]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [adb65d1]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [712df42]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [3eb778d]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/plugin-detail@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

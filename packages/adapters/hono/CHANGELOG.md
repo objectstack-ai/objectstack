@@ -1,5 +1,38 @@
 # @objectstack/hono
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [dbe0716]
+- Updated dependencies [ecd10e9]
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [81c68b3]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [adb65d1]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [712df42]
+- Updated dependencies [be61425]
+- Updated dependencies [6b7b305]
+- Updated dependencies [1bc265f]
+- Updated dependencies [92b4167]
+- Updated dependencies [14badad]
+- Updated dependencies [54dc93a]
+- Updated dependencies [5e1d58a]
+- Updated dependencies [b620c4b]
+  - @objectstack/runtime@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

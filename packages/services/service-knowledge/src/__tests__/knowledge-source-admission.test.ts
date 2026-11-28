@@ -16,11 +16,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
-import type { IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
+import type { AdapterContext, AdapterIndexStatus, IDataEngine, IKnowledgeAdapter } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { KnowledgeHit, KnowledgeSource, ObjectKnowledgeSource } from '@objectstack/spec/ai';
-import { KnowledgeService, type KnowledgeLogger } from '../knowledge-service.js';
-import type { KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
+import { KnowledgeService, recordToDocument, type KnowledgeLogger } from '../knowledge-service.js';
+import { mayServeEarlierRuleTitle, type KnowledgeFieldSecurity } from '../knowledge-source-admission.js';
 import { KnowledgeServicePlugin, isServiceNotRegisteredError } from '../knowledge-service-plugin.js';
 
 const MEMBER: ExecutionContext = { userId: 'u_member', positions: ['member'], permissions: [], isSystem: false };
@@ -48,9 +48,53 @@ function hitFor(sourceId: string, recordId = 'rec_1'): KnowledgeHit {
   return { chunkId: `${sourceId}-c`, documentId: `${sourceId}:${recordId}`, sourceId, sourceRecordId: recordId, score: 0.9, snippet: 'passage' };
 }
 
-function makeAdapter(): IKnowledgeAdapter & { searchSpy: ReturnType<typeof vi.fn> } {
+/**
+ * What the adapter's `indexStatus` answers (absent: it has none). `true`: the
+ * fingerprint and recipe hash the call carries — an index built under the
+ * current recipe. `'stateful'`: it holds what its writes and its last
+ * `completeBuild` recorded, the way a generation-keeping adapter does.
+ */
+type IndexHeld = true | 'no-recipe' | 'other-recipe' | 'other-fingerprint' | 'throws' | 'stateful' | 'no-list' | 'no-complete';
+
+function makeAdapter(proven?: IndexHeld): IKnowledgeAdapter & {
+  searchSpy: ReturnType<typeof vi.fn>;
+  indexStatus?: ReturnType<typeof vi.fn>;
+} {
   const searchSpy = vi.fn(async (_q: string, opts: { source: KnowledgeSource }) => [hitFor(opts.source.name)]);
-  return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  const adapter = { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  if (proven === undefined) return adapter;
+  const recorded: AdapterIndexStatus = {};
+  const indexStatus = vi.fn(async (ctx: AdapterContext): Promise<AdapterIndexStatus> => {
+    const index = ctx.index!;
+    switch (proven) {
+      case true:
+      case 'no-list':
+      case 'no-complete':
+        return { fingerprint: index.fingerprint, recipeHash: index.recipeHash };
+      case 'no-recipe': return { fingerprint: index.fingerprint };
+      case 'other-recipe': return { fingerprint: index.fingerprint, recipeHash: 'rh1:earlier' };
+      case 'other-fingerprint': return { fingerprint: 'fp1:earlier', recipeHash: index.recipeHash };
+      case 'throws': throw new Error('store unreachable');
+      // Documents written before any complete build: the active generation, no recipe hash.
+      default: return recorded.recipeHash === undefined ? { fingerprint: index.fingerprint } : { ...recorded };
+    }
+  });
+  // A store that lists its documents and records a complete build: what a proof needs besides the status.
+  const listDocuments = vi.fn(async () => ({ documents: [] }));
+  const completeBuildStub = vi.fn(async () => undefined);
+  if (proven === 'no-list') return { ...adapter, indexStatus, completeBuild: completeBuildStub };
+  if (proven === 'no-complete') return { ...adapter, indexStatus, listDocuments };
+  if (proven !== 'stateful') return { ...adapter, indexStatus, listDocuments, completeBuild: completeBuildStub };
+  return {
+    ...adapter,
+    indexStatus,
+    listDocuments,
+    beginBuild: vi.fn(async () => undefined),
+    completeBuild: vi.fn(async (ctx: AdapterContext) => {
+      recorded.fingerprint = ctx.index!.fingerprint;
+      recorded.recipeHash = ctx.index!.recipeHash;
+    }),
+  };
 }
 
 function objectSource(id: string, object: string, content: string[], metadataFields?: string[]): KnowledgeSource {
@@ -62,12 +106,35 @@ function objectSource(id: string, object: string, content: string[], metadataFie
   };
 }
 
+/**
+ * How the engine double answers a system-context read (the check of a hit
+ * against its record): `row` gives the record as it reads now (`undefined`:
+ * none), `throws` makes the read fail. A caller's read answers `{ id }` rows.
+ */
+interface SystemReads {
+  row?: (object: string, id: string) => Record<string, unknown> | undefined;
+  throws?: boolean;
+}
+
 /** A data engine whose row re-check admits every row, with a schema registry and a disabled-package predicate. */
-function makeEngine(objects: ObjectDef[], opts: { disabled?: string[]; schemaThrows?: boolean } = {}) {
+function makeEngine(objects: ObjectDef[], opts: { disabled?: string[]; schemaThrows?: boolean; system?: SystemReads } = {}) {
   const byName = new Map(objects.map((o) => [o.name, o]));
-  const findSpy = vi.fn(async (_object: string, q: { where?: { id?: { $in?: string[] } } }) =>
-    (q.where?.id?.$in ?? []).map((id) => ({ id })),
-  );
+  type Where = { id?: { $in?: string[] }; $and?: Array<Record<string, unknown>> } & Record<string, unknown>;
+  const idsOf = (where?: Where): string[] =>
+    where?.id?.$in ?? ((where?.$and ?? []).find((c) => 'id' in c) as Where | undefined)?.id?.$in ?? [];
+  const findSpy = vi.fn(async (object: string, q: { where?: Where }, o?: { context?: ExecutionContext }) => {
+    if (o?.context?.isSystem === true && opts.system) {
+      if (opts.system.throws) throw new Error('system read failed');
+      const row = opts.system.row ?? ((_obj: string, id: string) => ({ id }));
+      // An equality conjunct beside the id list is applied, as a driver would.
+      const conditions = (q.where?.$and ?? []).filter((c) => !('id' in c));
+      return idsOf(q.where)
+        .map((id) => row(object, id))
+        .filter((r): r is Record<string, unknown> => r !== undefined)
+        .filter((r) => conditions.every((c) => Object.entries(c).every(([k, v]) => r[k] === v)));
+    }
+    return idsOf(q.where).map((id) => ({ id }));
+  });
   return {
     find: findSpy,
     getSchema: (name: string) => {
@@ -99,18 +166,35 @@ function setup(options: {
   disabled?: string[];
   schemaThrows?: boolean;
   logger?: KnowledgeLogger;
+  /** What the adapter's `indexStatus` answers; absent, it has none. */
+  proven?: IndexHeld;
+  system?: SystemReads;
+  resolveTenancyPosture?: () => Promise<undefined>;
 }) {
-  const adapter = makeAdapter();
-  const engine = makeEngine(options.objects ?? [TICKET], { disabled: options.disabled, schemaThrows: options.schemaThrows });
+  const adapter = makeAdapter(options.proven);
+  const engine = makeEngine(options.objects ?? [TICKET], {
+    disabled: options.disabled,
+    schemaThrows: options.schemaThrows,
+    system: options.system ?? {},
+  });
+  // The store holds the document the current recipe assembles from the record as it reads now.
+  adapter.searchSpy.mockImplementation(async (_q: string, o: { source: KnowledgeSource }) => [currentHit(o.source)]);
+  const currentHit = (source: KnowledgeSource, recordId = 'rec_1'): KnowledgeHit => {
+    const objSource = source.source as ObjectKnowledgeSource;
+    const row = (options.system?.row ?? ((_o: string, id: string) => ({ id })))(objSource.object, recordId) ?? { id: recordId };
+    const schema = (options.objects ?? [TICKET]).find((o) => o.name === objSource.object);
+    return { ...hitFor(source.name, recordId), docHash: recordToDocument(source, objSource, row, schema).docHash };
+  };
   const svc = new KnowledgeService({
     dataEngine: engine,
     logger: options.logger,
     resolveSecurity: options.security ? () => options.security : undefined,
+    ...(options.resolveTenancyPosture ? { resolveTenancyPosture: options.resolveTenancyPosture } : {}),
   });
   svc.registerAdapter('memory', adapter);
   for (const s of options.sources) svc.registerSource(s);
   const searched = () => adapter.searchSpy.mock.calls.map((c) => (c[1] as { source: KnowledgeSource }).source.name);
-  return { svc, adapter, engine, searched };
+  return { svc, adapter, engine, searched, currentHit };
 }
 
 const ids = (hits: KnowledgeHit[]) => hits.map((h) => h.sourceId).sort();
@@ -408,21 +492,393 @@ describe('field gate — the title field is the object\'s display field', () => 
     expect(searched()).toEqual([]);
   });
 
-  // A document indexed before the title became the display field carries the
-  // value of the field named `title`, and stays in the index until a complete
-  // reindex writes it again: the gate still asks about a declared `title`.
-  it('refusal: a declared `title` the caller may not query still refuses the source — a stored hit may carry its value', async () => {
-    const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
-    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle });
-    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-old-rule-title-4e1a' }]);
+  it('preservation: a caller who may query the display field gets the hit', async () => {
+    const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
+    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all, proven: true });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+});
+
+// The gate's former `title` arm: a document indexed before the title became
+// the display field carries the value of a field named `title`. The gate no
+// longer asks about that field; instead a source over which such a document
+// could be served is searched only once its index is proven built under the
+// current recipe (the adapter's `indexStatus` reports the fingerprint and the
+// recipe hash the service computes now), and is refused
+// KNOWLEDGE_REBUILD_REQUIRED (409) until then — never served through a gate
+// that asks about `title`.
+describe('field gate — the earlier title rule: searched only once the index is proven built under the current recipe', () => {
+  const ACCOUNT: ObjectDef = {
+    name: 'account',
+    fields: { id: { type: 'text' }, name: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } },
+  };
+  const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
+  const queryAll = makeSecurity(() => ['id', 'name', 'title', 'body']);
+
+  it('proven: a caller who may not query `title` is served — the arm is gone for a source built under the current recipe', async () => {
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: true });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+    expect(searched()).toEqual(['s']);
+    expect(adapter.indexStatus).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ['an adapter with no indexStatus', undefined, 'never'],
+    ['an adapter with no completeBuild, whose status reads current', 'no-complete' as const, 'never'],
+    ['an adapter with no listDocuments, whose status reads current: its builds purge nothing', 'no-list' as const, 'never'],
+    ['an index that records no recipe hash (no complete build completed)', 'no-recipe' as const, 'rebuild'],
+    ['an index last completed under another recipe', 'other-recipe' as const, 'rebuild'],
+    ['an index under another fingerprint', 'other-fingerprint' as const, 'rebuild'],
+    ['an indexStatus that throws', 'throws' as const, 'unreadable'],
+  ])('unproven (%s): refused KNOWLEDGE_REBUILD_REQUIRED / 409 for every non-system caller, never searched', async (_label, held, ends) => {
+    for (const security of [hideTitle, queryAll]) {
+      const warn = vi.fn();
+      const { svc, searched } = setup({
+        objects: [ACCOUNT],
+        sources: [objectSource('s', 'account', ['body'])],
+        security,
+        ...(held === undefined ? {} : { proven: held }),
+        logger: { warn, error: vi.fn() },
+      });
+      let thrown: unknown;
+      try {
+        await svc.searchWithRefusals('q', { executionContext: MEMBER });
+      } catch (err) {
+        thrown = err;
+      }
+      expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+      expect((thrown as { refused: unknown[] }).refused).toEqual([
+        expect.objectContaining({ sourceId: 's', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
+      ]);
+      expect(searched()).toEqual([]);
+      const line = String(warn.mock.calls[warn.mock.calls.length - 1]?.[0]);
+      expect(line).toContain("source 's' not searched (KNOWLEDGE_REBUILD_REQUIRED)");
+      // A refusal no rebuild can end never promises one, to the caller or the operator.
+      const said = (thrown as { refused: Array<{ message: string }> }).refused[0].message;
+      if (ends === 'never') {
+        expect(said).toContain('No rebuild changes that');
+        expect(line).toContain('No rebuild can prove it');
+      } else {
+        expect(said).not.toContain('No rebuild');
+        expect(line).not.toContain('No rebuild');
+      }
+      // Preservation: the system context bypasses every gate, this one too.
+      expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    }
+  });
+
+  it('a source with `refresh.onRecordChange: false` is never proven, whatever its status reads: its builds purge nothing', async () => {
+    const optedOut = objectSource('s', 'account', ['body']);
+    const source = { ...optedOut, refresh: { onRecordChange: false } } as KnowledgeSource;
+    const warn = vi.fn();
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [source], security: queryAll, proven: true, logger: { warn, error: vi.fn() } });
+    const thrown = await svc.searchWithRefusals('q', { executionContext: MEMBER }).catch((err: unknown) => err);
+    expect(thrown).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect((thrown as { refused: Array<{ message: string }> }).refused[0].message).toContain('No rebuild changes that');
+    expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain('refresh.onRecordChange is false');
+    expect(adapter.indexStatus).not.toHaveBeenCalled();
+    expect(searched()).toEqual([]);
+    // Preservation: the system context bypasses it, and the same source synced by the service is proven.
+    expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    const synced = setup({ objects: [ACCOUNT], sources: [optedOut], security: queryAll, proven: true });
+    expect(ids(await synced.svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+
+  it('beside a searchable source, the unproven one is named in `refused` and the other still answers', async () => {
+    const { svc, searched } = setup({
+      objects: [ACCOUNT, TICKET],
+      sources: [objectSource('unproven', 'account', ['body']), objectSource('tickets', 'ticket', ['body'])],
+      security: queryAll,
+    });
+    const report = await svc.searchWithRefusals('q', { executionContext: MEMBER });
+    expect(ids(report.hits)).toEqual(['tickets']);
+    expect(report.refused).toEqual([
+      expect.objectContaining({ sourceId: 'unproven', code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 }),
+    ]);
+    expect(searched()).toEqual(['tickets']);
+  });
+
+  it('a source the earlier rule served nothing extra for is searched without asking for the proof', async () => {
+    // TICKET's display field IS `title`; a source listing `title` serves it; an object with no `title` field.
+    const NOTE: ObjectDef = { name: 'note', fields: { id: { type: 'text' }, name: { type: 'text' }, body: { type: 'textarea' } } };
+    const { svc, adapter, searched } = setup({
+      objects: [ACCOUNT, TICKET, NOTE],
+      sources: [
+        objectSource('tickets', 'ticket', ['body']),
+        objectSource('titled', 'account', ['body', 'title']),
+        objectSource('notes', 'note', ['body']),
+      ],
+      security: makeSecurity((object) => (object === 'note' ? ['id', 'name', 'body'] : ['id', 'name', 'title', 'body'])),
+      proven: 'throws',
+    });
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['notes', 'tickets', 'titled']);
+    expect(searched().sort()).toEqual(['notes', 'tickets', 'titled']);
+    expect(adapter.indexStatus).not.toHaveBeenCalled();
+  });
+
+  it('rebuilt: a source refused for want of proof is served once a complete build has completed', async () => {
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'stateful' });
+    await expect(svc.search('q', { executionContext: MEMBER })).rejects.toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(searched()).toEqual([]);
+    // A refused search starts no build and writes nothing.
+    for (const member of ['beginBuild', 'upsert', 'completeBuild'] as const) {
+      expect((adapter as unknown as Record<string, ReturnType<typeof vi.fn>>)[member]).not.toHaveBeenCalled();
+    }
+    const record = await svc.rebuildSource('s', { trigger: 'operator' });
+    expect(record.status).toBe('done');
+    expect((await svc.readIndexState('s')).state).toBe('current');
+    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  });
+
+  // Reverse pins: with the proof in hand, no other arm is weakened — a field
+  // the caller may not query still never reaches a hit.
+  it.each([
+    ['the display field', ['id', 'title', 'body'], ['body']],
+    ['a content field', ['id', 'name', 'title'], ['body']],
+    ['a metadata field', ['id', 'name', 'title', 'body'], ['body'], ['status']],
+  ])('reverse pin, proven index: %s the caller may not query still refuses the source', async (_label, queryable, content, metadata?: string[]) => {
+    const withStatus: ObjectDef = { ...ACCOUNT, fields: { ...ACCOUNT.fields, status: { type: 'select' } } };
+    const { svc, adapter, searched } = setup({
+      objects: [withStatus],
+      sources: [objectSource('s', 'account', content, metadata)],
+      security: makeSecurity(() => queryable),
+      proven: true,
+    });
+    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-hidden-name-7c2d', metadata: { status: 'hidden' } }]);
     expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
     expect(searched()).toEqual([]);
   });
 
-  it('preservation: a caller who may query both the display field and `title` gets the hit', async () => {
-    const all = makeSecurity(() => ['id', 'name', 'title', 'body']);
-    const { svc } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: all });
-    expect(ids(await svc.search('q', { executionContext: MEMBER }))).toEqual(['s']);
+  // A proven source's hits are each checked against the record as it reads
+  // now (ADR-0161 K7): a write the store has not caught up with — a record
+  // whose stored document is not the one the current recipe assembles — is
+  // never served, and every way the check cannot be made drops the hit.
+  describe('per-hit check: a proven source serves only documents the current recipe assembles from the live record', () => {
+    const SECRET = 'synthetic-live-secret-5d8e';
+    const live = (_o: string, id: string) => ({ id, name: 'Acme', title: 'synthetic-earlier-title-2b9c', body: 'current body', secret_note: SECRET });
+    const proven = (extra: Partial<Parameters<typeof setup>[0]> = {}) =>
+      setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: true, system: { row: live }, ...extra });
+
+    it('CONTROL: a stored document matching the live record is served, as the store answered it', async () => {
+      const { svc, engine, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([stored]);
+      const systemReads = engine.find.mock.calls.filter((c) => (c[2] as { context?: ExecutionContext } | undefined)?.context?.isSystem === true);
+      expect(systemReads).toHaveLength(1);
+      expect(systemReads[0][1]).toMatchObject({ where: { id: { $in: ['rec_1'] } } });
+    });
+
+    it('the read decides survival only: no field it returns reaches the caller', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      adapter.searchSpy.mockImplementation(async () => [{ ...stored }]);
+      const served = await svc.search('q', { executionContext: MEMBER });
+      expect(served).toEqual([stored]);
+      const text = JSON.stringify(served);
+      for (const value of [SECRET, 'synthetic-earlier-title-2b9c', 'current body', 'Acme']) expect(text).not.toContain(value);
+    });
+
+    it.each([
+      ['a write the store has not caught up with (S1): the stored hash is not the current one', (h: KnowledgeHit) => ({ ...h, docHash: 'dh1:written-before-the-edit' })],
+      ['a document a complete build kept: its record reads differently now', (h: KnowledgeHit) => ({ ...h, docHash: 'dh1:kept-from-an-earlier-build' })],
+      ['a foreign document: its id is not the one the source derives from the record', (h: KnowledgeHit) => ({ ...h, documentId: 'foreign:rec_1' })],
+      ['a stored document with no hash', (h: KnowledgeHit) => ({ ...h, docHash: undefined })],
+      ['a stored document with an empty hash', (h: KnowledgeHit) => ({ ...h, docHash: '' })],
+    ])('dropped: %s', async (_label, alter) => {
+      const { svc, adapter, currentHit } = proven();
+      const stored = currentHit(svc.getSource('s')!);
+      adapter.searchSpy.mockImplementation(async () => [alter(stored)]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+      // Preservation: the system context is not checked, as every gate.
+      expect(ids(await svc.search('q', { executionContext: SYSTEM }))).toEqual(['s']);
+    });
+
+    it('dropped: a hit whose stored docHash differs from the record\'s current build inputs', async () => {
+      const { svc, adapter } = proven();
+      const source = svc.getSource('s')!;
+      const objSource = source.source as ObjectKnowledgeSource;
+      // The index proves current throughout: no complete build ran between the change and the change-back.
+      const whileTitle = { ...ACCOUNT, nameField: 'title' };
+      const synced = recordToDocument(source, objSource, live('account', 'rec_1'), whileTitle);
+      expect(synced.title).toBe('synthetic-earlier-title-2b9c');
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: synced.title, docHash: synced.docHash }]);
+      const served = await svc.search('q', { executionContext: MEMBER });
+      expect(served).toEqual([]);
+      expect(JSON.stringify(served)).not.toContain('synthetic-earlier-title-2b9c');
+    });
+
+    it('a source with a `where`: the system read asks for the conjunction of `where` and the hits\' ids, and a record outside `where` is dropped', async () => {
+      const SCOPED: ObjectDef = { ...ACCOUNT, fields: { ...ACCOUNT.fields, status: { type: 'select' } } };
+      const where = { status: 'open' };
+      const source = { ...objectSource('s', 'account', ['body']), source: { kind: 'object', object: 'account', content: ['body'], where } } as KnowledgeSource;
+      for (const status of ['open', 'closed']) {
+        const row = (o: string, id: string) => ({ ...live(o, id), status });
+        const { svc, engine, currentHit } = setup({
+          objects: [SCOPED],
+          sources: [source],
+          security: makeSecurity(() => ['id', 'name', 'body', 'status']),
+          proven: true,
+          system: { row },
+        });
+        const served = await svc.search('q', { executionContext: MEMBER });
+        expect(served).toEqual(status === 'open' ? [currentHit(source)] : []);
+        const systemReads = engine.find.mock.calls.filter((c) => (c[2] as { context?: ExecutionContext } | undefined)?.context?.isSystem === true);
+        // The check's own read comes first; a record found outside `where` then has its document repaired.
+        expect((systemReads[0][1] as { where: unknown }).where).toEqual({ $and: [where, { id: { $in: ['rec_1'] } }] });
+      }
+    });
+
+    it('the refill round is checked too: a stale hit the second round answers is dropped', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const source = svc.getSource('s')!;
+      const stale = (n: number): KnowledgeHit => ({ ...currentHit(source, `rec_${n}`), chunkId: `s-c${n}`, docHash: 'dh1:written-before-the-edit' });
+      const asked: number[] = [];
+      adapter.searchSpy.mockImplementation(async (_q: string, o: { topK: number }) => {
+        asked.push(o.topK);
+        // The first round answers as many as it was asked, every one stale, so nothing survives it and
+        // the source is refilled; the refill answers the same stale hits again and one current hit.
+        const hits = Array.from({ length: 5 }, (_v, i) => stale(i + 2));
+        return asked.length === 1 ? hits : [...hits, { ...currentHit(source, 'rec_1'), chunkId: 's-c1', score: 0.1 }];
+      });
+      const served = await svc.search('q', { executionContext: MEMBER, topK: 1 });
+      expect(asked).toEqual([5, 20]);
+      expect(served.map((hit) => hit.sourceRecordId)).toEqual(['rec_1']);
+    });
+
+    it('dropped: a record the system read no longer answers (deleted, or outside the source\'s `where`)', async () => {
+      const gone = (o: string, id: string) => (id === 'rec_1' ? undefined : live(o, id));
+      const { svc, adapter, currentHit } = proven({ system: { row: gone } });
+      adapter.searchSpy.mockImplementation(async () => [{ ...currentHit(svc.getSource('s')!), docHash: recordToDocument(svc.getSource('s')!, svc.getSource('s')!.source as ObjectKnowledgeSource, live('account', 'rec_1'), ACCOUNT).docHash }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('fails closed: a system read that throws, or answers no list, drops every hit of the source', async () => {
+      for (const system of [{ row: live, throws: true }, { row: live }] as SystemReads[]) {
+        const warn = vi.fn();
+        const { svc, engine } = proven({ system, logger: { warn, error: vi.fn() } });
+        if (system.throws !== true) {
+          const callerRead = engine.find.getMockImplementation()!;
+          engine.find.mockImplementation(async (object, q, o) => (o?.context?.isSystem === true ? ({ rows: [] } as never) : callerRead(object, q, o)));
+        }
+        expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+        expect(String(warn.mock.calls[warn.mock.calls.length - 1]?.[0])).toContain('could not be read to check its hits');
+      }
+    });
+
+    it('fails closed: a tenancy posture that cannot be read drops every hit of a checked source', async () => {
+      const warn = vi.fn();
+      // The organization scoping reads the posture first and answers; the check's own read is the one that fails.
+      let reads = 0;
+      const { svc, searched } = proven({
+        logger: { warn, error: vi.fn() },
+        resolveTenancyPosture: async () => {
+          reads += 1;
+          if (reads > 1) throw new Error('posture store unreachable');
+          return undefined;
+        },
+      });
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+      expect(searched()).toEqual(['s']);
+      expect(warn.mock.calls.map((c) => String(c[0])).join('\n')).toContain('the tenancy posture could not be read');
+    });
+
+    it('fails closed: a hash that cannot be recomputed from the live row drops the hit', async () => {
+      const poisoned = (_o: string, id: string) => ({
+        id,
+        name: 'Acme',
+        body: {
+          toString(): string {
+            throw new Error('unreadable value');
+          },
+          toJSON(): never {
+            throw new Error('unreadable value');
+          },
+        },
+      });
+      const { svc, adapter } = proven({ system: { row: poisoned } });
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), docHash: 'dh1:anything' }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('fails closed: a hit with no `sourceRecordId` is dropped even where every other check would pass', async () => {
+      const { svc, adapter } = proven();
+      const source = svc.getSource('s')!;
+      // The worst case: its document id and hash are the ones a record id of `undefined` would give.
+      const docHash = recordToDocument(source, source.source as ObjectKnowledgeSource, live('account', 'undefined'), ACCOUNT).docHash;
+      adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), documentId: 's:undefined', sourceRecordId: undefined, docHash }]);
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([]);
+    });
+
+    it('a source that needs the index proof is never searched without it: the round searches the adapter the proof was read from', async () => {
+      const { svc, adapter, currentHit } = proven();
+      const source = svc.getSource('s')!;
+      const unproven = makeAdapter();
+      unproven.searchSpy.mockImplementation(async () => [currentHit(source)]);
+      const readStatus = adapter.indexStatus!.getMockImplementation() as (ctx: AdapterContext) => Promise<AdapterIndexStatus>;
+      // Another instance takes the adapter id while the proof is being read.
+      adapter.indexStatus!.mockImplementation(async (ctx: AdapterContext) => {
+        svc.registerAdapter('memory', unproven);
+        return readStatus(ctx);
+      });
+      expect(await svc.search('q', { executionContext: MEMBER })).toEqual([currentHit(source)]);
+      expect(adapter.searchSpy).toHaveBeenCalledOnce();
+      expect(unproven.searchSpy).not.toHaveBeenCalled();
+    });
+
+    it('a source that needs the index proof is never searched without it: an adapter that resolves only after the plan is not searched', async () => {
+      const late = { ...objectSource('late', 'account', ['body']), adapter: 'late' } as KnowledgeSource;
+      const { svc, adapter } = proven({ sources: [late, objectSource('s', 'account', ['body'])] });
+      const lateAdapter = makeAdapter(true);
+      const readStatus = adapter.indexStatus!.getMockImplementation() as (ctx: AdapterContext) => Promise<AdapterIndexStatus>;
+      // The adapter `late` names registers after its source was planned, while another source's proof is read.
+      adapter.indexStatus!.mockImplementation(async (ctx: AdapterContext) => {
+        if (!svc.listAdapters().includes('late')) svc.registerAdapter('late', lateAdapter);
+        return readStatus(ctx);
+      });
+      const report = await svc.searchWithRefusals('q', { executionContext: MEMBER });
+      expect(ids(report.hits)).toEqual(['s']);
+      expect(report.refused).toEqual([expect.objectContaining({ sourceId: 'late', code: 'SERVICE_UNAVAILABLE', status: 503 })]);
+      expect(lateAdapter.searchSpy).not.toHaveBeenCalled();
+      expect(lateAdapter.indexStatus).not.toHaveBeenCalled();
+    });
+
+    it('only a proven source is checked: a source searched without the proof is served as the store answered it', async () => {
+      const { svc, adapter, currentHit } = setup({
+        objects: [ACCOUNT, TICKET],
+        sources: [objectSource('s', 'account', ['body']), objectSource('tickets', 'ticket', ['body'])],
+        security: makeSecurity((object) => (object === 'ticket' ? Object.keys(TICKET.fields) : ['id', 'name', 'body'])),
+        proven: true,
+        system: { row: live },
+      });
+      adapter.searchSpy.mockImplementation(async (_q: string, o: { source: KnowledgeSource }) =>
+        o.source.name === 'tickets' ? [{ ...hitFor('tickets'), docHash: undefined }] : [currentHit(o.source)],
+      );
+      expect(ids(await svc.search('q', { executionContext: MEMBER })).sort()).toEqual(['s', 'tickets']);
+    });
+  });
+
+  it('reverse pin, unproven index: a stored hit carrying an earlier-rule `title` never reaches a caller who may not query it', async () => {
+    const { svc, adapter, searched } = setup({ objects: [ACCOUNT], sources: [objectSource('s', 'account', ['body'])], security: hideTitle, proven: 'no-recipe' });
+    adapter.searchSpy.mockImplementation(async () => [{ ...hitFor('s'), title: 'synthetic-old-rule-title-4e1a' }]);
+    const out = await svc.search('q', { executionContext: MEMBER }).catch((err: unknown) => err);
+    expect(out).toMatchObject({ code: 'KNOWLEDGE_REBUILD_REQUIRED', status: 409 });
+    expect(JSON.stringify(out)).not.toContain('synthetic-old-rule-title-4e1a');
+    expect(searched()).toEqual([]);
+  });
+});
+
+describe('mayServeEarlierRuleTitle — whether an earlier-rule index could serve a field the gate does not ask about', () => {
+  const src = (content: string[], metadataFields?: string[]) => objectSource('s', 'x', content, metadataFields).source as ObjectKnowledgeSource;
+  it.each([
+    ['an object declaring `title` beside a `name` display field', { fields: { name: { type: 'text' }, title: { type: 'text' } } }, ['body'], true],
+    ['an object whose display field is `title`', { fields: { title: { type: 'text' }, body: { type: 'textarea' } } }, ['body'], false],
+    ['an object declaring no `title` field', { fields: { name: { type: 'text' }, body: { type: 'textarea' } } }, ['body'], false],
+    ['a source that serves `title` itself', { fields: { name: { type: 'text' }, title: { type: 'text' } } }, ['title'], false],
+    ['an `internal` `title` the index never carries', { fields: { name: { type: 'text' }, title: { type: 'text', internal: true } } }, ['body'], false],
+    ['fields that cannot be enumerated, display field elsewhere', { nameField: 'subject' }, ['body'], true],
+    ['no object definition (the title is read from `title`)', undefined, ['body'], false],
+  ])('%s → %s', (_label, schema, content, expected) => {
+    expect(mayServeEarlierRuleTitle(src(content), schema)).toBe(expected);
   });
 });
 
@@ -435,6 +891,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
   });
   const sealed: ObjectDef = { ...TICKET, name: 'sealed', enable: { apiEnabled: false } };
   const getOnly: ObjectDef = { ...TICKET, name: 'get_only', enable: { apiMethods: ['get'] } };
+  const unsearchable: ObjectDef = { ...TICKET, name: 'unsearchable', enable: { apiMethods: ['list'], searchable: false } };
   const sysClosed: ObjectDef = { ...TICKET, name: 'sys_closed_note' };
   const sysOpen: ObjectDef = { ...TICKET, name: 'sys_open_note', enable: { aiReadable: true } };
 
@@ -498,10 +955,25 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect((verdict as { message: string }).message).toContain("display field");
   });
 
+  it('a declared `title` that is not the display field is not indexed, so it is not asked at save; the display field still is', async () => {
+    const ACCOUNT: ObjectDef = {
+      name: 'account',
+      fields: { id: { type: 'text' }, name: { type: 'text' }, title: { type: 'text' }, body: { type: 'textarea' } },
+    };
+    const hideTitle = makeSecurity(() => ['id', 'name', 'body']);
+    const admitted = setup({ objects: [ACCOUNT], sources: [], security: hideTitle });
+    expect(await admitted.svc.admitAuthoredSource(item('account', ['body']), MEMBER)).toEqual({ admitted: true });
+    const hideName = makeSecurity(() => ['id', 'title', 'body']);
+    const refused = setup({ objects: [ACCOUNT], sources: [], security: hideName });
+    expect(await refused.svc.admitAuthoredSource(item('account', ['body']), MEMBER))
+      .toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object: 'account', field: 'name' });
+  });
+
   it.each([
     ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
     ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
-    ['an object whose `apiMethods` do not grant `search`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object whose `apiMethods` do not grant `list`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object granting `list` beside `searchable: false`', { objects: [unsearchable] }, 'unsearchable', 'does not serve object'],
     ['a system object without `enable.aiReadable`', { objects: [sysClosed] }, 'sys_closed_note', 'does not opt into AI reads'],
   ])('%s is refused PERMISSION_DENIED / 403, naming the object', async (_label, opts, object, said) => {
     const { svc } = setup({ sources: [], ...opts });
@@ -511,6 +983,20 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect((verdict as { message: string }).message).toContain(said);
     // The engine's own write is admitted: a package install is judged at validate and publish.
     expect(await svc.admitAuthoredSource(item(object, ['body']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('the not-served refusal names `list` and `searchable` as cause and fix, never a `search` grant', async () => {
+    for (const object of ['sealed', 'get_only', 'unsearchable']) {
+      const { svc } = setup({ sources: [], objects: [sealed, getOnly, unsearchable] });
+      const verdict = await svc.admitAuthoredSource(item(object, ['body']), MANAGER);
+      expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('does not grant `list`');
+      expect(message).toContain('include `list` with `enable.searchable` not false');
+      // `search` is a retired `apiMethods` value the parse strips: never prescribed as a grant.
+      expect(message).not.toMatch(/(include|grant)s? `search`/);
+      expect(message).not.toContain('Serve the object for `search`');
+    }
   });
 
   it('CONTROL: a served object, and a system object that opts into AI reads, are admitted', async () => {
@@ -530,6 +1016,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
 
     const noEngine = new KnowledgeService({});
+    noEngine.registerAdapter('memory', makeAdapter());
     expect(await noEngine.admitAuthoredSource(item('ticket', ['body']), MANAGER))
       .toMatchObject({ admitted: false, code: 'SERVICE_UNAVAILABLE', status: 503 });
   });
@@ -541,6 +1028,51 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     for (const shapeless of [null, {}, { name: 'x' }, { name: 'x', source: { kind: 'object' } }, { name: 'x', source: 'ticket' }]) {
       expect(await svc.admitAuthoredSource(shapeless, MANAGER), JSON.stringify(shapeless)).toEqual({ admitted: true });
     }
+  });
+
+  // [ADR-0161 K4] The store a source names must be one this deployment mounts:
+  // a retired adapter ('ragflow') or a typo is refused at the save, not left to
+  // the boot's error line and a search's 503.
+  it('a source naming an adapter the deployment does not mount is refused VALIDATION_ERROR / 400, naming the source, the adapter and the mounted ones', async () => {
+    const { svc } = setup({ sources: [], security: salaryHiddenFromMembers });
+    for (const adapter of ['ragflow', 'memroy', '']) {
+      const verdict = await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter }, MANAGER);
+      expect(verdict, adapter).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400, object: 'ticket' });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('knowledge source "authored" was not saved');
+      expect(message).toContain(`names adapter '${adapter}', which this deployment does not mount (mounted: memory)`);
+    }
+    // Refused before the gates are asked: an author the field gate would refuse hears the adapter first.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body', 'salary_note']), adapter: 'ragflow' }, MEMBER))
+      .toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+    // The engine's own write (a package install) is not judged at this door.
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'ragflow' }, SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('with no adapter mounted, a named one is refused naming none mounted; with two, both are named', async () => {
+    const bare = new KnowledgeService({ dataEngine: makeEngine([TICKET]) });
+    expect(await bare.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("names adapter 'memory', which this deployment does not mount (mounted: none)"),
+    });
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'pgvector' }, MANAGER)).toMatchObject({
+      admitted: false, code: 'VALIDATION_ERROR', status: 400,
+      message: expect.stringContaining("(mounted: memory, turso)"),
+    });
+  });
+
+  it('CONTROL: a source naming a mounted adapter, and one that leaves `adapter` out, are admitted', async () => {
+    const { svc } = setup({ sources: [] });
+    svc.registerAdapter('turso', makeAdapter());
+    expect(await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER)).toEqual({ admitted: true });
+    expect(await svc.admitAuthoredSource({ ...item('ticket', ['body']), adapter: 'turso' }, MANAGER)).toEqual({ admitted: true });
+    const placed = new KnowledgeService({ dataEngine: makeEngine([TICKET]), deploymentAdapter: 'turso' });
+    placed.registerAdapter('turso', makeAdapter());
+    placed.registerAdapter('memory', makeAdapter());
+    const { adapter: _omitted, ...omitted } = item('ticket', ['body']);
+    expect(await placed.admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
   });
 
   it('registers nothing and searches nothing: the verdict is a read', async () => {

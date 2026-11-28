@@ -134,11 +134,15 @@ describe('KnowledgeService — permission-aware search', () => {
       executionContext: { userId: 'u1', positions: ['member'], permissions: [], isSystem: false },
     });
     expect(out.map((h) => h.documentId)).toEqual(['d1']);
-    expect(findSpy).toHaveBeenCalledOnce();
-    const [obj, opts] = findSpy.mock.calls[0];
-    expect(obj).toBe('task');
-    expect(opts.context.isSystem).toBe(false);
-    expect(opts.where).toEqual({ id: { $in: ['rec_1', 'rec_2'] } });
+    // Two reads, both as the caller: the records they may read (which narrows
+    // the search to rec_1), then the re-check of the hits that search answered.
+    expect(findSpy).toHaveBeenCalledTimes(2);
+    for (const [obj, opts] of findSpy.mock.calls) {
+      expect(obj).toBe('task');
+      expect(opts.context.isSystem).toBe(false);
+    }
+    expect(findSpy.mock.calls[0][1]).toEqual({ fields: ['id'], limit: 501, context: expect.objectContaining({ userId: 'u1' }) });
+    expect(findSpy.mock.calls[1][1].where).toEqual({ id: { $in: ['rec_1'] } });
   });
 
   it('topK honoured + hits sorted by score desc', async () => {
@@ -1800,6 +1804,175 @@ describe('KnowledgeService — search scope (ADR-0161 K8, item 17)', () => {
   });
 });
 
+describe('KnowledgeService — a narrow caller\'s search ranks only the records they may read', () => {
+  const MEMBER = { userId: 'u1', tenantId: 'org_a', accessible_org_ids: ['org_a'], positions: ['member'], permissions: [], isSystem: false };
+  const SYSTEM = { positions: [], permissions: [], isSystem: true };
+  type Term = { kind: 'record'; ids: string[] } | { kind: 'metadata'; field: string; ids: string[] };
+  type Query = { where?: Record<string, unknown>; fields?: string[]; limit?: number; context?: { isSystem?: boolean } };
+
+  /** 1,000 records of `task`, one passage each: `rec_i` ranks i-th, in policy `p${i % 4}`. */
+  const corpus: KnowledgeHit[] = Array.from({ length: 1000 }, (_, i) => ({
+    chunkId: `s1:rec_${i}#0`, documentId: `s1:rec_${i}`, sourceId: 's1', sourceRecordId: `rec_${i}`,
+    score: 1 - i / 10_000, snippet: `passage ${i}`, metadata: { status: 'open', policy: `p${i % 4}` },
+  }));
+  /** The 20 records the member may read: they rank 900th to 919th, far below 20 × topK. */
+  const READABLE = Array.from({ length: 20 }, (_, i) => `rec_${900 + i}`);
+
+  /** An adapter that ranks like a real one: the terms it is handed are a union, applied before `topK`. */
+  function rankingAdapter() {
+    const holds = (hit: KnowledgeHit, scope: Term[]): boolean =>
+      scope.some((t) => (t.kind === 'record' ? t.ids.includes(String(hit.sourceRecordId)) : t.ids.includes(String(hit.metadata?.[t.field]))));
+    const searchSpy = vi.fn(async (_q: string, opts: { topK: number; scope?: Term[] }) =>
+      (opts.scope === undefined ? corpus : corpus.filter((h) => holds(h, opts.scope!))).slice(0, opts.topK));
+    return { id: 'memory', upsert: vi.fn(async () => undefined), delete: vi.fn(async () => undefined), search: searchSpy, searchSpy };
+  }
+
+  /**
+   * An engine whose caller reads admit only `readable`: the re-check (`id: { $in }`) and the read of the
+   * records the caller may read (ids, at most `limit`). `visible` overrides what that second read answers.
+   */
+  function engineReading(readable: string[], visible?: (q: Query) => Array<{ id: string }>) {
+    const find = vi.fn(async (_obj: string, q: Query) => {
+      const inIds = (q.where?.id as { $in?: string[] } | undefined)?.$in;
+      if (inIds !== undefined) return inIds.filter((id) => q.context?.isSystem || readable.includes(id)).map((id) => ({ id }));
+      if (visible !== undefined) return visible(q);
+      return readable.slice(0, q.limit).map((id) => ({ id }));
+    });
+    return { find, getSchema: () => undefined } as unknown as IDataEngine & { find: typeof find };
+  }
+
+  function setup(opts: {
+    readable?: string[];
+    visible?: (q: Query) => Array<{ id: string }>;
+    sources?: KnowledgeSource[];
+    posture?: 'isolated';
+  } = {}) {
+    const adapter = rankingAdapter();
+    const engine = engineReading(opts.readable ?? READABLE, opts.visible);
+    const warn = vi.fn();
+    const svc = new KnowledgeService({
+      dataEngine: engine,
+      logger: { warn, debug: vi.fn(), error: vi.fn() },
+      ...(opts.posture === undefined ? {} : { resolveTenancyPosture: async () => opts.posture }),
+    });
+    svc.registerAdapter('memory', adapter);
+    for (const s of opts.sources ?? [objectSource('s1', 'task')]) svc.registerSource(s);
+    const handed = () => adapter.searchSpy.mock.calls.map((c) => c[1] as { topK: number; scope?: Term[]; organizationIds?: string[] });
+    const visibleReads = () => engine.find.mock.calls.filter(([, q]) => (q.where?.id as { $in?: unknown } | undefined)?.$in === undefined);
+    return { svc, adapter, engine, warn, handed, visibleReads };
+  }
+
+  const recordsOf = (hits: KnowledgeHit[]) => hits.map((h) => h.sourceRecordId);
+
+  it('a caller who may read 20 of 1,000 records is answered from their 20, though all rank below topK × 20', async () => {
+    const { svc, handed, visibleReads } = setup();
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(recordsOf(out)).toEqual(['rec_900', 'rec_901', 'rec_902', 'rec_903', 'rec_904']);
+    // The read: as the caller, ids only, one more than the bound.
+    expect(visibleReads()).toHaveLength(1);
+    expect(visibleReads()[0][1]).toEqual({ fields: ['id'], limit: 501, context: MEMBER });
+    // One round: the adapter ranked only the 20, so every hit survived the re-check.
+    expect(handed()).toEqual([expect.objectContaining({ topK: 25, scope: [{ kind: 'record', ids: READABLE }] })]);
+  });
+
+  it('control: a caller who may read more than 500 records takes the path before — the 20 are not reached', async () => {
+    const many = (q: Query) => Array.from({ length: q.limit ?? 0 }, (_, i) => ({ id: `other_${i}` }));
+    const { svc, handed } = setup({ visible: many });
+    expect(await svc.search('q', { topK: 5, executionContext: MEMBER })).toEqual([]);
+    expect(handed().map((o) => o.scope)).toEqual([undefined, undefined]);
+    expect(handed().map((o) => o.topK)).toEqual([25, 100]);
+  });
+
+  it('exactly 500 readable records still narrow; 501 do not', async () => {
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `rec_${999 - i}`);
+    const at500 = setup({ readable: ids(500) });
+    await at500.svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(at500.handed()[0].scope).toEqual([{ kind: 'record', ids: ids(500) }]);
+    const at501 = setup({ readable: ids(501) });
+    await at501.svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(at501.handed()[0].scope).toBeUndefined();
+  });
+
+  it('a caller\'s one-record scope stays one record: the visible ids are intersected with it, never added to it', async () => {
+    const { svc, handed } = setup();
+    const out = await svc.search('q', { topK: 5, scope: [{ object: 'task', ids: ['rec_905'] }], executionContext: MEMBER });
+    expect(recordsOf(out)).toEqual(['rec_905']);
+    expect(handed().map((o) => o.scope)).toEqual([[{ kind: 'record', ids: ['rec_905'] }]]);
+  });
+
+  it('a caller scope naming readable and unreadable records: only the readable ones, in the caller\'s order', async () => {
+    const { svc, handed } = setup();
+    const scope = [{ object: 'task', ids: ['rec_910', 'rec_3', 'rec_902'] }, { object: 'task', ids: ['rec_902', 'rec_7'] }];
+    const out = await svc.search('q', { topK: 5, scope, executionContext: MEMBER });
+    expect(recordsOf(out)).toEqual(['rec_902', 'rec_910']);
+    expect(handed()[0].scope).toEqual([{ kind: 'record', ids: ['rec_910', 'rec_902'] }]);
+  });
+
+  it('a caller scope naming no readable record is searched on the caller\'s terms, as before, and answers nothing', async () => {
+    const { svc, handed } = setup();
+    expect(await svc.search('q', { topK: 5, scope: [{ object: 'task', ids: ['rec_3'] }], executionContext: MEMBER })).toEqual([]);
+    expect(handed()[0].scope).toEqual([{ kind: 'record', ids: ['rec_3'] }]);
+  });
+
+  it('a caller who may read no record of the source is searched as before', async () => {
+    const { svc, handed } = setup({ readable: [] });
+    expect(await svc.search('q', { topK: 5, executionContext: MEMBER })).toEqual([]);
+    expect(handed().map((o) => o.scope)).toEqual([undefined, undefined]);
+  });
+
+  it('a parent (metadata) term in the caller\'s scope: no read, and the caller\'s terms are handed unchanged', async () => {
+    const source: KnowledgeSource = { ...objectSource('s1', 'task'), source: { ...objectSource('s1', 'task').source, metadataFields: ['status', 'policy'] } as ObjectKnowledgeSource };
+    const { svc, engine, handed, visibleReads } = setup({ sources: [source] });
+    (engine as unknown as { getSchema: () => unknown }).getSchema = () => ({
+      name: 'task', fields: { title: { type: 'text' }, notes: { type: 'textarea' }, status: { type: 'select' }, policy: { type: 'lookup', reference: 'policy' } },
+    });
+    await svc.search('q', { topK: 5, scope: [{ object: 'policy', ids: ['p0'] }], executionContext: MEMBER });
+    expect(visibleReads()).toEqual([]);
+    for (const o of handed()) expect(o.scope).toEqual([{ kind: 'metadata', field: 'policy', ids: ['p0'] }]);
+  });
+
+  it('the system identity: no read, no scope handed, one round of topK', async () => {
+    const { svc, engine, handed } = setup();
+    expect(await svc.search('q', { topK: 5, executionContext: SYSTEM })).toHaveLength(5);
+    expect(engine.find).not.toHaveBeenCalled();
+    expect(handed()).toEqual([expect.not.objectContaining({ scope: expect.anything() })]);
+    expect(handed()[0].topK).toBe(5);
+  });
+
+  it('the organization filter is handed as before beside the narrowed term', async () => {
+    const narrowed = setup({ posture: 'isolated' });
+    await narrowed.svc.search('q', { topK: 5, executionContext: MEMBER });
+    const wide = setup({ posture: 'isolated', visible: (q) => Array.from({ length: q.limit ?? 0 }, (_, i) => ({ id: `o${i}` })) });
+    await wide.svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(narrowed.handed()[0].organizationIds).toEqual(['org_a']);
+    expect(narrowed.handed()[0].organizationIds).toEqual(wide.handed()[0].organizationIds);
+    expect(narrowed.handed()[0].scope).toEqual([{ kind: 'record', ids: READABLE }]);
+  });
+
+  it('the source\'s where is the read\'s where, and two sources over one object and where share one read', async () => {
+    const where = { status: 'open' };
+    const over = (id: string): KnowledgeSource => ({ ...objectSource(id, 'task'), source: { ...objectSource(id, 'task').source, where } as ObjectKnowledgeSource });
+    const { svc, visibleReads } = setup({ sources: [over('s1'), over('s2')] });
+    await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(visibleReads()).toHaveLength(1);
+    expect(visibleReads()[0][1]).toEqual({ where, fields: ['id'], limit: 501, context: MEMBER });
+  });
+
+  it('a read that fails: reported at warn, and the source is searched as before', async () => {
+    const { svc, warn, handed } = setup({ visible: () => { throw new Error('db down'); } });
+    expect(await svc.search('q', { topK: 5, executionContext: MEMBER })).toEqual([]);
+    expect(handed().map((o) => o.scope)).toEqual([undefined, undefined]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be read (db down)'));
+  });
+
+  it('every hit is still re-checked: a record the read answered but the re-check refuses is not served', async () => {
+    // The read answers rec_900 too, the re-check does not admit it (it changed between the two reads).
+    const { svc } = setup({ readable: READABLE.slice(1), visible: () => READABLE.map((id) => ({ id })) });
+    const out = await svc.search('q', { topK: 5, executionContext: MEMBER });
+    expect(recordsOf(out)).toEqual(['rec_901', 'rec_902', 'rec_903', 'rec_904', 'rec_905']);
+  });
+});
+
 describe('recordToDocument reads the title from the object\'s display field', () => {
   const src: KnowledgeSource = {
     name: 's1', label: 's1', adapter: 'memory',
@@ -2144,9 +2317,11 @@ describe('KnowledgeService — record-level search (granularity, groupBy, freshn
     });
     const out = await h.svc.search('q', { granularity: 'record', executionContext: MEMBER });
     expect(out.map((x) => x.title)).toEqual(['Leave policy (2026)']);
+    // As the caller: the records they may read (ids only), then ONE re-read of the hits.
     const callerReads = h.engine!.find.mock.calls.filter((c) => !isSystemCall(c));
-    expect(callerReads).toHaveLength(1);
-    expect(callerReads[0][1]).toMatchObject({ where: { id: { $in: ['c1'] } }, fields: ['id', 'name'], context: MEMBER });
+    expect(callerReads).toHaveLength(2);
+    expect(callerReads[0][1]).toMatchObject({ fields: ['id'], limit: 501, context: MEMBER });
+    expect(callerReads[1][1]).toMatchObject({ where: { id: { $in: ['c1'] } }, fields: ['id', 'name'], context: MEMBER });
     // The freshness read is projected to the fields assembly reads.
     expect(h.freshnessReads()[0][1]).toEqual({ where: { id: { $in: ['c1'] } }, fields: ['id', 'body', 'policy', 'name'] });
     expect(h.freshnessReads()[0][2]).toEqual({ context: expect.objectContaining({ isSystem: true }) });
@@ -2320,6 +2495,121 @@ describe('KnowledgeService — a source naming an adapter that is not mounted', 
       await kernel.shutdown();
     } finally {
       reading.mockRestore();
+    }
+  });
+});
+
+/**
+ * [ADR-0161 K4 ◆] A source that names no `adapter` binds to the deployment's
+ * adapter — the store the runtime marked when it mounted it
+ * (`deploymentAdapter`) — else to the only adapter registered. Several
+ * registered and none the deployment's: refused at registration, naming them.
+ */
+describe('KnowledgeService — a source that names no adapter (the deployment\'s store)', () => {
+  const ec = { positions: [], permissions: [], isSystem: true };
+  /** `objectSource` with its `adapter` left out, as an author may now write it. */
+  function unnamed(id: string, object = 'task'): KnowledgeSource {
+    const { adapter: _omitted, ...source } = objectSource(id, object);
+    return source as KnowledgeSource;
+  }
+
+  it('binds to the deployment\'s store when the runtime marked one, beside an adapter application code registered', async () => {
+    const deployment = makeAdapter('turso');
+    const app = makeAdapter('memory');
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerAdapter('memory', app);
+    svc.registerAdapter('turso', deployment);
+    svc.registerSource(unnamed('s1'));
+    expect(svc.adapterIdFor(svc.getSource('s1')!)).toBe('turso');
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(deployment.searchSpy).toHaveBeenCalledOnce();
+    expect(app.searchSpy).not.toHaveBeenCalled();
+    await svc.handleRecordUpsert('task', { id: 'r1', title: 'T', notes: 'N' });
+    expect(deployment.upsertSpy).toHaveBeenCalledOnce();
+    expect(app.upsertSpy).not.toHaveBeenCalled();
+  });
+
+  it('a named adapter is kept as named, whatever the deployment\'s store is', async () => {
+    const deployment = makeAdapter('turso');
+    const app = makeAdapter('memory');
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerAdapter('turso', deployment);
+    svc.registerAdapter('memory', app);
+    svc.registerSource(objectSource('s1', 'task', 'memory'));
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(app.searchSpy).toHaveBeenCalledOnce();
+    expect(deployment.searchSpy).not.toHaveBeenCalled();
+  });
+
+  it('with no mark, binds to the only adapter registered — placed where it is used, so a store registering after the source is found', async () => {
+    const svc = new KnowledgeService();
+    // A source registered in code at init(), before any store's start().
+    svc.registerSource(unnamed('s1'));
+    const only = makeAdapter('memory');
+    svc.registerAdapter('memory', only);
+    await svc.search('q', { sourceIds: ['s1'], executionContext: ec });
+    expect(only.searchSpy).toHaveBeenCalledOnce();
+  });
+
+  it('two adapters registered by application code and none the deployment\'s: refused at registration, naming both', () => {
+    const svc = new KnowledgeService();
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    let refused: unknown;
+    try {
+      svc.registerSource(unnamed('s1'));
+    } catch (err) {
+      refused = err;
+    }
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(String((refused as Error).message)).toContain("source 's1' names no adapter, and 2 adapters are registered (memory, pgvector)");
+    expect(svc.getSource('s1')).toBeUndefined();
+    // The metadata door refuses the same way.
+    expect(() => svc.registerMetadataSource(unnamed('s2'))).toThrow(/Name one of 'memory', 'pgvector'/);
+    expect(svc.getSource('s2')).toBeUndefined();
+  });
+
+  it('two adapters registered after the source, none the deployment\'s: the search refuses it with the same code, naming both', async () => {
+    const svc = new KnowledgeService();
+    svc.registerSource(unnamed('s1'));
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    // The only source asked for cannot be searched, so the search answers its refusal.
+    const refused = await svc.search('q', { sourceIds: ['s1'], executionContext: ec }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
+    expect(String((refused as Error).message)).toContain('2 adapters are registered (memory, pgvector)');
+    expect(svc.reportUnmountedAdapters()).toEqual(['s1']);
+  });
+
+  it('the deployment\'s store marked but not mounted, and nothing else: SERVICE_UNAVAILABLE naming the store', async () => {
+    const svc = new KnowledgeService({ deploymentAdapter: 'turso' });
+    svc.registerSource(unnamed('s1'));
+    expect(() => svc.adapterFor(svc.getSource('s1')!)).toThrow(/the deployment's store 'turso' is not mounted/);
+    const refused = await svc.search('q', { sourceIds: ['s1'], executionContext: ec }).catch((e: unknown) => e);
+    expect(refused).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+  });
+
+  it('the save of an unplaceable source is refused to its author, naming the adapters', async () => {
+    const svc = new KnowledgeService({ dataEngine: {} as IDataEngine });
+    svc.registerAdapter('memory', makeAdapter('memory'));
+    svc.registerAdapter('pgvector', makeAdapter('pgvector'));
+    const verdict = await svc.admitAuthoredSource(unnamed('s1'), { userId: 'u1', positions: [], permissions: [] } as never);
+    expect(verdict).toMatchObject({ admitted: false, code: 'VALIDATION_ERROR', status: 400 });
+    expect((verdict as { message: string }).message).toContain("Name one of 'memory', 'pgvector'");
+  });
+
+  it('KnowledgeServicePlugin hands its `deploymentAdapter` option to the service', async () => {
+    const kernel = new LiteKernel();
+    await kernel.use(new KnowledgeServicePlugin({ deploymentAdapter: 'turso', enableEventSync: false, buildAtBoot: false }));
+    await kernel.bootstrap();
+    try {
+      const svc = kernel.getService<KnowledgeService>('knowledge');
+      svc.registerAdapter('memory', makeAdapter('memory'));
+      svc.registerAdapter('turso', makeAdapter('turso'));
+      svc.registerSource(unnamed('s1'));
+      expect(svc.adapterIdFor(svc.getSource('s1')!)).toBe('turso');
+    } finally {
+      await kernel.shutdown();
     }
   });
 });

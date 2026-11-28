@@ -16,7 +16,7 @@
  *   ActionSchema[] → ActionEngine → ActionRunner → ActionResult
  */
 
-import { ActionRunner, isAskAiAction, type ActionDef, type ActionContext, type ActionResult } from './ActionRunner.js';
+import { ActionRunner, type ActionDef, type ActionContext, type ActionResult } from './ActionRunner.js';
 import { toPredicateInput } from '../evaluator/predicateInput.js';
 import { hasDeclaredPredicate } from '../evaluator/declaredPredicate.js';
 import { isActionSwitchedOff } from '../utils/action-activation.js';
@@ -30,7 +30,7 @@ import { isActionSwitchedOff } from '../utils/action-activation.js';
  */
 export type { ActionLocation } from '@object-ui/types';
 export { ACTION_LOCATIONS } from '@object-ui/types';
-import type { ActionLocation } from '@object-ui/types';
+import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 
 /** Registered action with metadata */
 export interface RegisteredAction {
@@ -228,13 +228,12 @@ export class ActionEngine {
   getActionsForLocation(location: ActionLocation): ActionDef[] {
     const evaluator = this.runner.getEvaluator();
     return Array.from(this.actions.values())
-      .filter(ra => ra.locations.includes(location))
+      // Placement is `actionRendersAt`'s (objectui#3142): `record` is drawn at
+      // `record_page` and at `record_row` (objectstack#36495).
+      .filter(ra => actionRendersAt(ra, location))
       // [objectstack#27504] An action this installation switched off is not
       // offered (the served activation state — see `utils/action-activation`).
       .filter(ra => !isActionSwitchedOff(ra.action))
-      // [ADR-0160 D7] An `ask_ai` action is absent where the runner has no
-      // in-app assistant to hand its record to.
-      .filter(ra => this.runner.drawsAction(ra.action))
       .filter(ra => {
         // [ADR-0066 D4] Capability gate (UI half — the server enforces the
         // source of truth). Hide an action whose `requiredPermissions` are not
@@ -308,13 +307,10 @@ export class ActionEngine {
       .map(ra => ra.action);
   }
 
-  /**
-   * Get actions that support bulk operations. An `ask_ai` action never does:
-   * it runs on one record (ADR-0160 D7), so it is left out whatever it declares.
-   */
+  /** Get actions that support bulk operations */
   getBulkActions(): ActionDef[] {
     return Array.from(this.actions.values())
-      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action) && !isAskAiAction(ra.action))
+      .filter(ra => ra.bulkEnabled && !isActionSwitchedOff(ra.action))
       .sort((a, b) => (a.priority ?? 100) - (b.priority ?? 100))
       .map(ra => ra.action);
   }
@@ -363,10 +359,6 @@ export class ActionEngine {
     }
     if (!registered.bulkEnabled) {
       return { total: 0, succeeded: 0, failed: 0, results: [{ success: false, error: `Action ${actionName} does not support bulk operations` }] };
-    }
-    const bulkRefusal = this.runner.bulkRefusal(registered.action);
-    if (bulkRefusal) {
-      return { total: 0, succeeded: 0, failed: 0, results: [{ success: false, error: bulkRefusal }] };
     }
 
     const results: ActionResult[] = [];

@@ -34,9 +34,9 @@ const SERVED = {
   label: 'Lead',
   _packageId: 'com.acme.crm',
   actions: [
-    { name: 'convert', locations: ['record_header'] },
-    { name: 'log_call', locations: ['record_more'] },
-    { name: 'mass_assign', locations: ['list_toolbar'] },
+    { name: 'convert', locations: ['record_page'] },
+    { name: 'log_call', locations: ['record_page'], component: 'action:menu' },
+    { name: 'mass_assign', locations: ['list'] },
   ],
 };
 
@@ -89,7 +89,7 @@ beforeEach(() => emitMetadataRefresh.mockReset());
 
 describe('saving the header pins (objectstack#36366)', () => {
   it('a writable package: the object as its author wrote it, with the new pins, saved as a draft and published', async () => {
-    const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_header'] }] };
+    const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_page'] }] };
     const { d, calls } = doors({ writable: true, layers: { code: authored } });
     await saveObjectPins(input({ record: { pinned: ['log_call', 'convert'] } }), TEXTS, d);
     expect(calls).toEqual([
@@ -237,7 +237,7 @@ describe('saving the header pins (objectstack#36366)', () => {
 });
 
 describe('the header pins Save publishes only the draft it wrote (objectstack#37440)', () => {
-  const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_header'] }] };
+  const authored = { name: 'crm_lead', label: 'Lead', actions: [{ name: 'convert', locations: ['record_page'] }] };
   function doorDoors() {
     const door = draftPublishDoor();
     door.seedLive('object', 'crm_lead', 'com.acme.crm', authored);

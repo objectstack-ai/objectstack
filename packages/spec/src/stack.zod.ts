@@ -1232,7 +1232,7 @@ const STACK_DEFINITION_COLLECTIONS_SHAPE = {
    * that does neither serves no such tool, whatever packs it holds.
    */
   aiContexts: z.array(AiContextSchema).optional().describe('AI context packs — the material of one record handed to a model, read as the caller by get_record_context (ADR-0160). A host serves that tool only when it mounts the record-context service: the CLI mounts it where `requires` includes `record-context`, and a host that composes its own kernel lists `RecordContextServicePlugin` in `plugins`'),
-  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it where `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
+  knowledgeSources: z.array(KnowledgeSourceSchema).optional().describe('Knowledge sources — which object\'s records the knowledge service indexes, which fields are sent to the embedder as content, and which adapter holds the index (ADR-0161 K4). A host indexes them only when it mounts the knowledge service: the CLI mounts it, with the deployment\'s store, where the stack holds a source or `requires` includes `knowledge`, and a host that composes its own kernel lists `KnowledgeServicePlugin` in `plugins`'),
 
   /**
    * ObjectQL: Data Extensions
@@ -6838,7 +6838,7 @@ function validateCrossReferences(
  * - The sort is STABLE (`Array.prototype.sort` is stable since ES2019), so
  *   actions that tie on `order` — including the overwhelmingly common case where
  *   NOBODY sets `order` — keep their original registration order. This is what
- *   lets `order` promote a `record_header` action into the primary-button slot
+ *   lets `order` promote a record page action into the primary-button slot
  *   without disturbing everything else.
  * - Returns the SAME array reference untouched when no action opts in, so callers
  *   pay zero allocation on the common path and can cheaply detect "unchanged".
@@ -6884,7 +6884,7 @@ function sortActionsByOrder<T extends { order?: number }>(actions: T[]): T[] {
  * `actions`) is stable-sorted by `order` via {@link sortActionsByOrder}. Because
  * that sort is a no-op unless an author sets `order`, this is fully backward
  * compatible — arrays with no `order` keep their exact registration order and
- * reference. Renderers that pick a single primary action from `record_header`
+ * reference. Renderers that pick a single primary action from the record page header
  * (objectui) therefore see approve/reject-style actions in their declared
  * priority rather than in fragile cross-file registration order.
  *

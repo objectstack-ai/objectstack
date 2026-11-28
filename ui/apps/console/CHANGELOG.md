@@ -1,5 +1,170 @@
 # @object-ui/console
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 5b32625: fix(auth): a cloud-managed runtime's password refusal is shown in the session's language and points at the identity provider's button
+  
+  Clause-②: yes (widening) — `@object-ui/auth` `ForgotPasswordFormProps` gains the optional `errorMessages`; `@object-ui/i18n` gains `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset` in every locale
+  Metadata-protocol: none
+  
+  A cloud-managed runtime refuses the password doors (sign-in, forgot password, reset password, set password) with 409 `RESOURCE_CONFLICT`. Its code never reached the pages. The hosted relay and the set-password route answer in the platform's error envelope, `{ success: false, error: { code, message } }`, which the auth client did not read. Forgot and reset dropped the code where the client threw. So each of those pages showed the server's English sentence or `Auth request failed with status 409`, whatever the language.
+  
+  - **`@object-ui/auth`.** The client's error builder reads `code`, `message`, `details` and `userMessage` from the envelope's `error` when the flat body has none; a better-auth refusal answers exactly as before. `forgotPassword`, `resetPassword` and `setInitialPassword` now keep the refusal's code and status too. `ForgotPasswordForm` gains an `errorMessages` prop, the same code-to-text map `LoginForm` takes; without it the server's message is shown as before.
+  - **`@object-ui/app-shell`.** `signInRefusalMessages` maps `RESOURCE_CONFLICT` to a sentence that says the deployment signs people in through its identity provider and points at its button above the form. The new `passwordDoorRefusalMessages` carries the matching sentence for the forgot, reset and set-password doors, and the package's forgot-password page passes it.
+  - **`@object-ui/i18n`.** Two keys, `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset`, in every locale.
+  - **`@object-ui/console`.** The forgot-password, reset-password and set-password pages show the same sentence.
+  
+  On the sign-in door only a cloud-managed runtime answers this code, so a self-hosted sign-in is unchanged. On the reset and set-password doors a self-hosted deployment answers the same 409 `RESOURCE_CONFLICT` in two cases: an account its identity provider provisions while SSO-only mode is on, and a pending SSO person not yet signed in. Those pages now show the same localized sentence in place of the server's English one; it is true for that reader too. Nothing to migrate.
+- 5f48cb0: feat(console): the create-workspace dialog shows the unpaid-organization limit refusal and its next step
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` gains `organization.errors.unpaidOrganizationLimitReached` and `organization.viewPlans` in every locale
+  Metadata-protocol: none
+  
+  The hosted control plane refuses a create past its cap on free organizations with 403 `UNPAID_ORGANIZATION_LIMIT_REACHED`. The body carries a sentence in the request's language (`message` and `userMessage`) and `details.next_step`, either `upgrade_to_team` or `contact_support`. The create-workspace dialog now recognizes this code:
+  
+  - It shows the control plane's own `userMessage`, which names the next step. A refusal that arrives without one shows the console's sentence instead (new key `organization.errors.unpaidOrganizationLimitReached`, in all eleven console locales). That sentence names no number and no plan.
+  - When the next step is `upgrade_to_team` and the host serves its upgrade entry (`upgradeUrl` on `/api/v1/runtime/config`), the dialog also shows a link to it (new key `organization.viewPlans`). The console never builds that address itself. If the host serves no entry, no link is shown and the sentence alone gives the step. A `contact_support` step shows no link, because the sentence already names the contact address.
+  
+  better-auth's own organization-limit refusal (`YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`) and every other code behave as before. Nothing to migrate.
+- 74cd5b6: fix(console): a refused "Set as default" on Setup › Apps no longer leaves the deployment with no default app
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Setting an app as the default first un-sets the current default, then sets the new one. When the second write was refused (for example, the app belongs to a read-only package and the server answers 403), the first write stayed and no app was the default any more. Now, when the server refuses the write (a 4xx answer) or the write fails before it is sent, the page puts each un-set default back, in the package it came from, before it shows the refusal. So a refused set-default leaves the default where it was. If putting it back fails too, a second error names the app that is no longer the default (new key `appManagement.toast.restoreDefaultFailed`, in all eleven console locales). A failure the server did not answer, or a 5xx, may have been written, so it is not undone: the page shows the failure and re-reads the list, which shows the result.
+  
+  Nothing to migrate.
+- cb3f8b9: fix(console): the profile page's password card shows a password refusal in the session's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The profile page's password card (set a local password, change password) now maps a refusal's `code` through `passwordDoorRefusalMessages`, as the set-password and reset-password pages do: a 409 `RESOURCE_CONFLICT` (a cloud-managed runtime, an SSO-only account, a pending SSO person) shows the localized sentence instead of the server's English one. Any other code keeps the server's message.
+  
+  `@object-ui/auth`: `sendVerificationEmail`, `signOut` and `signInWithProvider` now reject through the same error builder as the other doors, so the thrown error carries the refusal's `code` and HTTP `status`, read from better-auth's flat body or from the ADR-0112 envelope. The `message` is unchanged.
+- @objectstack/sdui-parser@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- e2837e7: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(app-shell): a full-height console page gives the impersonation banner its height back
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - While an administrator impersonates a user, the console draws its banner above the page. Where it is drawn in place (every page on a phone, and Studio, Home and the organization pages on a desktop) the page below still took the whole viewport, so the document was taller than the window by the banner's height: a list's footer and bulk action bar sat below the fold and the page gained a second scrollbar. The same held for the read-rate and storage banners beside it.
+  - The banners drawn in place now publish their height as the CSS custom property `--os-chrome-banners` on the document root, and the console's full-height shells take the viewport less it: `AppShell` (`@object-ui/layout`, whose sidebar wrapper's own minimum height is overridden to match), Studio and its access-required screen, Home, the AI chat page, the organization layouts and the app-unavailable and no-app screens. While no banner is drawn in place, and anywhere outside the console, the property is unset and every shell keeps its viewport height. Inside an app on a desktop the banners are drawn into the content area, as before, and publish nothing.
+- 6d106a1: fix(console): a bulk approve or reject that settles after the user left the Approvals inbox and came back reloads the inbox they came back to
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A bulk run keeps going when the user leaves the inbox. If they opened the inbox again before it finished, that fresh inbox kept the rows it had read before the run's decisions landed, and its "My Pending" badge kept the old count, until a manual refresh. Now, when the run settles, every inbox open at that moment reloads its list and badge once: the one the run started on if the user stayed, or the fresh one if they left and came back.
+  - With no inbox open when the run settles, nothing is re-read, as before. The run's toast and its "Show all" action (objectstack#37328) are unchanged.
+- fbcfdfb: fix(console): the named-form page (`/forms/NAME`) sizes each field from its `span`, not only its `colSpan`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A form field with `span: 'full'` now takes the whole row of its section, and with the default `span: 'auto'` a textarea, markdown, html or rich-text field, or a file or image field whose object field declares `multiple: true`, takes the whole row too. An authored `colSpan` still wins over that default, clamped to the section's column count. The page used to read `colSpan` alone, so these fields rendered one cell wide. The width comes from the same resolver the record form uses; `@object-ui/plugin-form` now exports `resolveColSpan` from both the package root and the side-effect-free `@object-ui/plugin-form/core` subpath, so the console can reach it without loading the form renderers.
+- 68aa1be: feat(setup): the environment directory (positions, capabilities, permission sets, sharing rules) moves from Studio's menu to Setup → Access control
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Studio develops one package, and Setup holds what is global (ADR-0084, amended 2026-11-26). The cross-package directory of the environment's access metadata (positions, capabilities, permission sets and sharing rules) is now a Setup page: **Setup → Access control → Positions and Permissions** (`/apps/setup/component/security/access-directory`).
+  
+  - The page shows the same directory and the same per-type lists as before, with the activation switches, Clone and New. Opening an item, creating one, or opening its history still happens in Studio, on the same editor as before.
+  - Studio's left menu no longer has the "Positions and permissions" entry under Access. On the organization-flows scope (`~org`), the menu's access rows open their lists on the Setup page for a user who can open Setup (`setup.access`); for one who cannot, they open the same lists in Studio as before.
+  - Old links keep working and, for a user who can open Setup, land on the Setup page in one hop: `/studio/~all/metadata`, a directory type's list (`/studio/~all/metadata/permission?scope=environment`), a bare `/studio/~all/…` address, and the old Setup metadata URLs that led there. Item links under `/studio/~all/metadata/TYPE/NAME` are unchanged. A user who cannot open Setup keeps these addresses in Studio.
+  - Visibility does not widen. The Setup entry and the page both require `studio.access`, the capability that admitted a user to the directory in Studio, in addition to Setup's own `setup.access`.
+  - A user who can enter Studio but cannot open Setup → Packages, and has no recent package, now lands on Studio's organization-flows scope (`/studio/~org`) instead of the old directory. This is temporary: the scope retires when the door that moves loose items into a package ships, and the landing is decided again then.
+  - One new Setup menu label, "Positions and Permissions", in every Setup locale, and one new message for a user without `studio.access`.
+- 50b4bf8: perf(console): the first load no longer downloads spec schemas the Console never reads, nor the whole form package
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Console's first load (the chunks every page fetches before it can draw) is 97,612 bytes smaller gzipped: 1,899,348 across 123 chunks, from 1,996,960 across 124 on `main`.
+  
+  - **`@objectstack/spec`.** The build now marks each module-scope initializer it cannot otherwise prove side-effect free (a spread of another schema's shape, an `.extend()` / `.pick()` chain, a table derived from a schema) as droppable, so a bundler that tree-shakes leaves out the ones an application never reads, together with the schema graphs they hold. Initializers that write into an object that already exists (`Object.assign(Existing, …)`, `Object.defineProperty(Existing, …)`) are never marked. Nothing changes for code that reads an export: every export that is used evaluates exactly as before. `TRANSLATABLE_METADATA_TYPES` is now built from a plain list of names instead of from the translator table, so reading it no longer keeps every metadata translator.
+  - **`@object-ui/plugin-form`.** One new export on the published `@object-ui/plugin-form/core` subpath, `createKeepsField` (the same function the package root already exports); nothing is removed or renamed, and the package root exports the same names as before. This is the widening the `Clause-②` line names; `@objectstack/spec`'s public surface does not change.
+  - **`@object-ui/app-shell`.** The record page's related-record actions read `createKeepsField` from `@object-ui/plugin-form/core`, so the form package is no longer part of the first load.
+  - **`@object-ui/console`, `@objectstack/console`.** The Console's `plugin-form-core` chunk group also claims `createKeepsField`, so it lands with the other side-effect-free form helpers; the Console build `@objectstack/console` ships carries the smaller first load.
+  
+  Nothing to migrate.
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- ce4d8c7: perf(console): the sidebar no longer redraws every entry each time the console re-renders during first load
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  While a console page first loads, the shell re-renders about ten times as its boot reads land. Each time, the sidebar redrew every navigation entry, and with each entry its ⋯ menu and tooltip: about 2,700 components per pass, several passes before the page could paint.
+  
+  Now an entry is redrawn only when what it shows changes: its label, icon, colour, address, or the gates that decide whether it shows. The ⋯ menu redraws its menu tree only when its own text or entries change. The console's expression evaluator is no longer rebuilt on every render, because that rebuild alone made every entry redraw.
+  
+  On a list page's first load this halves the components drawn before first paint. Nothing changes in what the sidebar shows or does.
+- 5314575: fix(console): a named or public form lays its sections out by the form view's own `columns`, as its Setup preview does
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - A form view's `columns` (the form body's column count) was drawn by the Setup preview and ignored by the published form: `/forms/:name` and `/f/:slug` read only each section's `columns`, defaulting to two. A form saved with `columns: 3` and undeclared sections previewed three across and published two across; a form with `columns: 1` and a `columns: 2` section previewed one column and published two.
+  - The form page now resolves each section's fields per row through `@object-ui/plugin-form`'s `sectionedGridLayout`, the rule the Setup canvas, the record dialog and the record form already share: the form view's `columns` is the grid width and caps a section's count, and a section that declares none takes the form's count. A form view without `columns` draws exactly as before.
+  - `@object-ui/plugin-form`: `sectionedGridLayout` and its `SectionedGridLayout` type are exported from the package root and from `/core`, and the layout gains `sectionColumns(declared)`, the count one section draws, for a host that draws each section on a grid of its own.
+- f4d6bc5: fix(plugin-form): a `repeater` field on `span: 'auto'` takes the whole row again, on the record form and on `/forms/NAME`
+  
+  Clause-②: no (layout only; an author could already set `span: 'full'`)
+  Metadata-protocol: none
+  
+  The spec's form field `span` docblock lists `repeater` among the types that take the whole row by default. A repeater used to get there through the wide line-items widget it mapped to; since it moved to the JSON editor that `json`, `composite` and `record` also use, both form renderers gave it one cell. The default width now reads the object field's own type, so a repeater is wide and those three types stay one cell. The Studio form designer's canvas asks the same rule, so it lays a repeater out as the form does. An authored `colSpan` still wins. The named-form page passes the object field's type to the shared resolver, as it already passed `multiple`. The spec docblock's stale "through the `field:grid` widget" clause now says how the width is decided.
+- f07d63a: feat(spec)!: retire an agent's `model.provider` — no runtime read it; the deployment's AI settings choose the provider
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37796
+  
+  <!-- adr-0087: registered agent-model-provider-removed, agent-model-provider-retired -->
+  
+  **BREAKING** key removal on `AIModelConfigSchema` (`@objectstack/spec/ai`), an agent's `model` block. The key declared which provider served the agent, from an enum of `openai`, `azure_openai`, `anthropic` and `local`, and no runtime ever read it: the AI runtime that executes agents applies the model name, `temperature` and `maxTokens` from the block and nothing else, so an agent that declared `anthropic` ran on whatever provider the deployment served. The providers a deployment can turn on are its own AI settings, a list the enum neither matched nor could follow.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `model: { provider: 'anthropic', model: 'claude-sonnet-4' }` | `model: { model: 'claude-sonnet-4' }` — the deployment resolves the name among the providers it has turned on |
+  
+  The one-line fix: delete `provider` from every agent's `model` block; `os migrate meta --from 18 --write` deletes it from agent sources. Writing it after upgrade fails `tsc` (the input type is `never`) and fails the parse with that prescription. `provider: 'openai'`, the default every released 18.x toolchain wrote into a parsed agent's `model` block, is accepted as inert residue and stripped, so agents built and stored by 18.x keep loading. The model name, `temperature`, `maxTokens` and `topP` are unchanged.
+  
+  The retirement kit:
+  
+  - **`@objectstack/spec`**: `provider` is a `retiredKey()` tombstone on `AIModelConfigSchema`, and the 18.x emitted default is stripped by `acceptRetiredDefaultResidue`. The D2 conversion `agent-model-provider-removed` (lossless, retired from the load path) deletes the key from `agents[]` on every data-at-rest seam (stored rows, built artifacts, `os migrate meta`); the D3 entry `agent-model-provider-retired` names what the upgrade still owes: whether the model each agent names is one the target deployment offers. The key is registered in `RETIRED_KEYS_BY_MAJOR[19]`. The liveness ledger's `model` row records the removal. The agent form's model help text no longer names a provider, and a `provider` written at the agent's top level is answered with the same fact instead of a pointer to `model.provider`. The `AIModelConfigSchema` export is now the residue stage's preprocess pipe with a read-through `shape` (the `ViewSharingSchema` shape), so `.extend()`, `.pick()`, `.omit()` and `.partial()` are no longer available on it; extend the inner shape instead.
+  - **`@objectstack/platform-objects`**: the agent form's regenerated help-text labels.
+  - **`@object-ui/app-shell`**: the agent metadata preview shows the model name alone and never a provider pill.
+  - **`@object-ui/console`**: the agent preview sample no longer writes `provider`.
+  - **`@objectstack/cli`**: `os explain agent` describes the `model` block without `provider`, and its example drops it.
+- @objectstack/sdui-parser@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

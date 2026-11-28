@@ -54,7 +54,6 @@ import { entitlementDialogFromError, type EntitlementDialogSpec } from '../envir
 import { resolvePageVarTokens } from '../utils/resolvePageVarTokens.js';
 import { launchConsoleFlow } from '../utils/flowLaunch.js';
 import { useScreenFlowQueue } from './useScreenFlowQueue.js';
-import { useAskAiHandler } from './useAskAiHandler.js';
 import type { TranslateFn } from '@object-ui/i18n';
 import { apiActionRefusalResult } from '../utils/flowResponse.js';
 import { invitationVerifyEmailPromptPath, isAcceptNeedsVerifiedEmail } from '../console/organizations/orgErrorMessage.js';
@@ -156,11 +155,7 @@ export interface ConsoleActionRuntime {
       | 'onResultDialog'
       | 'handlers'
     >
-  > &
-    // objectstack#37142 — present only where the console can serve an
-    // `ask_ai` click (see `useAskAiHandler`); its absence is what keeps every
-    // `ask_ai` action under the provider undrawn.
-    Pick<ActionProviderProps, 'onAskAi'>;
+  >;
   /** Confirm / param / result / paused-flow / flow-refusal dialogs — render inside the provider. */
   dialogs: React.ReactNode;
 }
@@ -404,6 +399,19 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
 
   const toastHandler = useCallback<ToastHandler>((message, options) => {
     if (options?.type === 'error') { toast.error(message); return; }
+    // objectstack#37867 — a write that went through with warnings: the
+    // runner's success toast on its warning variant, the warnings under the
+    // title, the Undo button kept (the same toast a record save raises).
+    if (options?.type === 'warning') {
+      toast.warning(message, {
+        duration: options.duration,
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.undo
+          ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+          : {}),
+      });
+      return;
+    }
     if (options?.undo) {
       toast.success(message, {
         duration: options.duration,
@@ -634,7 +642,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // meaningful when an object context exists (ObjectView); pages without an
       // object resolve their actions through the absolute path above.
       const obj = action.objectName || objApiName;
-      // The row record is stashed under `_rowRecord` for list_item actions —
+      // The row record is stashed under `_rowRecord` for record_row actions —
       // separate it from the field values, and resolve the record id from it
       // (the action's static params carry the field changes, not the id).
       const rowRecord = (params as any)._rowRecord as Record<string, any> | undefined;
@@ -759,7 +767,7 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
       // The record a launch runs on, by the ONE selection rule the `script`
       // launcher uses (objectui#12331): `@object-ui/core`'s
       // `resolveServerActionRecordId`. An explicit `params.recordId`, then the
-      // list_item row (`_rowRecord`), then — for a list_toolbar launch, which
+      // record_row row (`_rowRecord`), then — for a list launch, which
       // carries no row — the grid's checkbox selection (`selectedRecords`,
       // published into the runner context by ObjectGrid). One row supplies the
       // record. Several rows are refused: a flow takes a single `recordId`
@@ -959,9 +967,6 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     };
   }, [resolveModalTarget, modalHandler]);
 
-  // ADR-0160 D7 — the assistant an `ask_ai` action hands its record to.
-  const askAiHandler = useAskAiHandler();
-
   const actionProviderProps = useMemo(() => ({
     context: {
       ...(objectName ? { objectName } : {}),
@@ -993,11 +998,10 @@ export function useConsoleActionRuntime(opts: ConsoleActionRuntimeOptions): Cons
     onResultDialog: resultDialogHandler,
     onModal: modalHandler,
     handlers: { api: apiActionHandler, flow: flowHandler, script: serverActionHandler, modal: modalActionHandler },
-    ...(askAiHandler ? { onAskAi: askAiHandler } : {}),
   }), [
     objectName, objectDef, currentUser, activeOrganization, confirmHandler, toastHandler,
     navigateHandler, paramCollectionHandler, resultDialogHandler, apiActionHandler,
-    flowHandler, serverActionHandler, modalHandler, modalActionHandler, askAiHandler,
+    flowHandler, serverActionHandler, modalHandler, modalActionHandler,
   ]);
 
   // The run FlowRunner shows; its close and completion settle that run alone.

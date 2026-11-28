@@ -1,5 +1,95 @@
 # @object-ui/auth
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 5b32625: fix(auth): a cloud-managed runtime's password refusal is shown in the session's language and points at the identity provider's button
+  
+  Clause-②: yes (widening) — `@object-ui/auth` `ForgotPasswordFormProps` gains the optional `errorMessages`; `@object-ui/i18n` gains `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset` in every locale
+  Metadata-protocol: none
+  
+  A cloud-managed runtime refuses the password doors (sign-in, forgot password, reset password, set password) with 409 `RESOURCE_CONFLICT`. Its code never reached the pages. The hosted relay and the set-password route answer in the platform's error envelope, `{ success: false, error: { code, message } }`, which the auth client did not read. Forgot and reset dropped the code where the client threw. So each of those pages showed the server's English sentence or `Auth request failed with status 409`, whatever the language.
+  
+  - **`@object-ui/auth`.** The client's error builder reads `code`, `message`, `details` and `userMessage` from the envelope's `error` when the flat body has none; a better-auth refusal answers exactly as before. `forgotPassword`, `resetPassword` and `setInitialPassword` now keep the refusal's code and status too. `ForgotPasswordForm` gains an `errorMessages` prop, the same code-to-text map `LoginForm` takes; without it the server's message is shown as before.
+  - **`@object-ui/app-shell`.** `signInRefusalMessages` maps `RESOURCE_CONFLICT` to a sentence that says the deployment signs people in through its identity provider and points at its button above the form. The new `passwordDoorRefusalMessages` carries the matching sentence for the forgot, reset and set-password doors, and the package's forgot-password page passes it.
+  - **`@object-ui/i18n`.** Two keys, `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset`, in every locale.
+  - **`@object-ui/console`.** The forgot-password, reset-password and set-password pages show the same sentence.
+  
+  On the sign-in door only a cloud-managed runtime answers this code, so a self-hosted sign-in is unchanged. On the reset and set-password doors a self-hosted deployment answers the same 409 `RESOURCE_CONFLICT` in two cases: an account its identity provider provisions while SSO-only mode is on, and a pending SSO person not yet signed in. Those pages now show the same localized sentence in place of the server's English one; it is true for that reader too. Nothing to migrate.
+- cb3f8b9: fix(console): the profile page's password card shows a password refusal in the session's language
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The profile page's password card (set a local password, change password) now maps a refusal's `code` through `passwordDoorRefusalMessages`, as the set-password and reset-password pages do: a 409 `RESOURCE_CONFLICT` (a cloud-managed runtime, an SSO-only account, a pending SSO person) shows the localized sentence instead of the server's English one. Any other code keeps the server's message.
+  
+  `@object-ui/auth`: `sendVerificationEmail`, `signOut` and `signInWithProvider` now reject through the same error builder as the other doors, so the thrown error carries the refusal's `code` and HTTP `status`, read from better-auth's flat body or from the ADR-0112 envelope. The `message` is unchanged.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

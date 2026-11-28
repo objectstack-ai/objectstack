@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x; each @object-ui/* package declares its exact @objectstack/spec range in its own manifest.
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.0"
+  version: "19.0.0-next.2"
   domain: ui
   tags: sdui, schema-renderer, json-ui, react, shadcn, tailwind, plugin, expression
 user-invocable: false

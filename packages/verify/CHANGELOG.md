@@ -1,5 +1,251 @@
 # @objectstack/verify
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [1f03dc5]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [73d0240]
+- Updated dependencies [724d6f3]
+- Updated dependencies [58be677]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0bfdee9]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [8d598aa]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0ea3093]
+- Updated dependencies [c151c49]
+- Updated dependencies [0c190a8]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/mcp@19.0.0-next.2
+  - @objectstack/service-analytics@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/service-knowledge@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-approvals@19.0.0-next.2
+  - @objectstack/knowledge-pgvector@19.0.0-next.2
+  - @objectstack/plugin-auth@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/plugin-audit@19.0.0-next.2
+  - @objectstack/plugin-email@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/plugin-pinyin-search@19.0.0-next.2
+  - @objectstack/plugin-security@19.0.0-next.2
+  - @objectstack/plugin-sharing@19.0.0-next.2
+  - @objectstack/plugin-webhooks@19.0.0-next.2
+  - @objectstack/rest@19.0.0-next.2
+  - @objectstack/service-automation@19.0.0-next.2
+  - @objectstack/service-cache@19.0.0-next.2
+  - @objectstack/service-datasource@19.0.0-next.2
+  - @objectstack/service-job@19.0.0-next.2
+  - @objectstack/service-mailbox@19.0.0-next.2
+  - @objectstack/service-messaging@19.0.0-next.2
+  - @objectstack/service-package@19.0.0-next.2
+  - @objectstack/service-push@19.0.0-next.2
+  - @objectstack/service-queue@19.0.0-next.2
+  - @objectstack/service-realtime@19.0.0-next.2
+  - @objectstack/service-record-context@19.0.0-next.2
+  - @objectstack/service-settings@19.0.0-next.2
+  - @objectstack/service-sms@19.0.0-next.2
+  - @objectstack/service-storage@19.0.0-next.2
+  - @objectstack/trigger-api@19.0.0-next.2
+  - @objectstack/trigger-record-change@19.0.0-next.2
+  - @objectstack/trigger-schedule@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 0296d97: feat(plugin-audit): the audit log is sealed by default, and sealed rows expire by whole checkpoints under a signed expiry amendment
+  
+  Clause-②: yes (narrowing) — narrowed: because `sys_audit_log` now declares `lifecycle.seal` on every deployment, `os migrate audit-key-material`, `audit-mail-bodies`, `audit-metadata-bodies` and `audit-side-copies` with `--apply` refuse on SQLite or Turso without `--sealer-stopped`, and on Postgres or MySQL take the audit seal lock and refuse when a sealer pass still holds it after ten minutes, where 18.6.0 ran them unlocked on a deployment that sealed nothing; `os audit verify` exits 1 on a row in a window at or before the newest window a trusted `window` checkpoint names that no checkpoint holds (`late`, unsealed), where it read the window unsealed and exited 0; `os audit verify` refuses with `archive_not_connected` and exits 2 wherever the `archive` datasource is declared and not connected on its own boot, where 18.6.0 printed that nothing is sealed and exited 0; `verifyAuditLedger` throws for `sys_audit_log` when the `archive` datasource it archives to is not connected and no `archive` is passed; and on an object whose packaged metadata declares `lifecycle.seal` and no `archive`, a `lifecycle` settings override of `retention.maxAge` or `ttl.expireAfter` below the declared window, global or for one organization, is rejected and reported at `error`, and the declared window applies, where 18.6.0 applied it. An object created at runtime is outside the override arm and outside signed expiry: it keeps the 18.6.0 row-cutoff retention sweep, and a settings override applies to it; the `os audit verify` arms hold for it as for any sealed object. This breaks the bound changeset `35c9a30` (#33675) set, "No object declares `lifecycle.seal` by default, so a deployment that did not opt in sees no change": this release is the one that opts every deployment in. Widened: `@objectstack/objectql` `LifecycleService.registerExpiryPrefix` and the types `LifecycleExpiryPrefix`, `LifecycleExpiryPrefixRequest` (with its `tenants` windows and `tenantColumn`), `LifecycleExpiryPrefixRun`, the predicate `takesSignedExpiry` with its type `SignedExpiryRegistryLike`, and three optional owner reads on `LifecycleEngineLike.registry`; a sweep entry's `policy` gains `'expiry'` and `skipped[].reason` gains `seal-expiry-pending` and `seal-delete-unsupported`.
+  Metadata-protocol: semantic — on an object whose packaged metadata declares `lifecycle.seal`, the authored `retention.maxAge`, `ttl.expireAfter` and `archive.keep` no longer delete a row at its row cutoff: rows leave by whole checkpoints under a signed expiry amendment, counted to the start of a UTC day, at most 10,000 a sweep, and not at all while no sealer runs; an object created at runtime keeps its row cutoff
+  Skills-docs: follow-up owed — this claim's second PR (amendment 7193137455) rewrites `skills/objectstack-data/rules/lifecycle.md`, which still says the sweeper deletes sealed rows
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value or metadata type is added, removed or renamed, and nothing stored is rewritten: the moved answers are whether an os migrate audit-* --apply run may proceed while a sealer could be sealing sys_audit_log, how os audit verify reads a lagging chain, and when a sealed row may be deleted. A declaration keeps its meaning as a lower bound, so no author's declaration needs rewriting. The one-line fix for each is in the body. -->
+  
+  **BREAKING** for operators and library callers, because the audit log is now sealed on every deployment:
+  
+  - **`os migrate audit-* --apply` on SQLite or Turso** stops before writing and names the flag. Fix: stop every server that seals the database, then run it again with `--sealer-stopped`.
+  - **The same run on Postgres or MySQL** waits up to ten minutes for a sealer pass in flight, then refuses having changed nothing. Fix: run it again once that pass has finished.
+  - **`os audit verify` exits 1** on a row it reads `late` and unsealed in a window another chain of the object already sealed. Fix: none is owed by the command; read the rows the report names (a chain a fault left behind), and run it again after the sealer's next pass.
+  - **`os audit verify` exits 2** (`archive_not_connected`) where the `archive` datasource is declared and the command's boot does not connect it. Fix: declare the datasource with `autoConnect: true`, or make it reachable from where the command runs.
+  - **`verifyAuditLedger`** (`@objectstack/plugin-audit`) throws for `sys_audit_log` when its `archive` datasource is not connected. Fix: pass `archive`, for example `archive: () => 'none'` where the deployment has no archive datasource.
+  - **On a sealed object with no `archive` whose lifecycle is declared in packaged metadata, a retention override cannot shorten the declared window.** An override below it is rejected at every sweep, reported at `error` (`floorViolations` on the sweep report), and the declared window applies. On an object that archives, an override still sets when rows move to the archive. Fix: remove the override or raise it to at least the declared window; to keep rows for less time, shorten the window the object declares.
+  
+  Every dry run is unchanged. A deployment's own objects that do not declare `lifecycle.seal` keep the row-cutoff retention they had.
+  
+  ADR-0154 D8 and D10 (#31908, slice P4c, the last one).
+  
+  - **`sys_audit_log` is sealed.** Its lifecycle declares `seal: { valueFields: ['old_value', 'new_value', 'metadata'] }`, so every deployment whose `AuditPlugin` has a crypto provider (`os serve` hands it one) signs each hour's audit rows into a per-organization checkpoint, and `os audit verify` checks them. The three value columns enter each checkpoint as salted commitments; every other column enters in clear.
+  - **Sealed rows leave only by whole checkpoints.** Signed expiry covers objects whose lifecycle is declared in packaged metadata; an object created at runtime keeps the 18.6.0 row-cutoff retention sweep, its rows then reading as missing. Extending signed expiry to runtime-created objects is a separate card. The LifecycleService no longer deletes a row of a sealed object whose lifecycle is declared in packaged metadata by a row cutoff (`retention.maxAge`, `ttl.expireAfter`, or the archive's `keep` prune). It hands each policy to the sealed expiry the audit sealer registers (`LifecycleService.registerExpiryPrefix`, `@objectstack/objectql`). Per chain, the sealer takes the consecutive checkpoints from the chain's first remaining one whose windows ended before the cutoff (aligned down to a UTC day, so once its backlog is drained a chain gains at most one expiry amendment a day), each admitted under a trusted signing key, at most 10,000 rows a sweep. It signs and stores the chain's `expiry` amendment first. The sweep then deletes exactly those rows, by id, from the hot store and the archive, and only after them the checkpoints and their seeds. A sweep stopped part way resumes under the stored amendment and signs no second one. A run a reap guard vetoes in part is not completed and is retried. The verifier reads an expired row as `expired` while its checkpoint stands, and after it is gone honours the range as before (D8).
+  - **`os migrate audit-* --apply` on SQLite or Turso now needs `--sealer-stopped` for the audit log.** The rule 18.6.0 set for a sealed object now holds on every deployment, since `sys_audit_log` is one: stop every server that seals the database, then run with the flag. That includes the `os migrate audit-side-copies --apply` an upgrade from 18.4.0 or earlier runs. Postgres and MySQL take the audit seal lock, and a dry run is unchanged.
+  - **No sealer, no deletion.** While no sealed expiry is registered (an `AuditPlugin` with no crypto provider, a one-shot boot), a sealed object's rows past their policy are kept, the archive copy still runs, the sweep reports `seal-expiry-pending`, and the lifecycle service says so once at `warn`; such a host keeps `sys_audit_log` past `archive.keep`, and its sealer reports the missing provider hourly at `error`. An archive store with no `bulkDelete` is never planned (`seal-delete-unsupported`), so no amendment is signed over rows it could not delete. A chain whose first remaining checkpoint does not follow its last expiry (a checkpoint removed outside the platform), or whose next checkpoint does not verify under a trusted key, is not expired past that point, and the sealer says so. An expiry acts only on the chain's own checkpoints and amendments, linked in order; a stopped expiry is resumed only over checkpoints that also each verify under a trusted key and run on to the amendment's last sequence and digest; otherwise nothing in its range is deleted, and the sealer says so. The verifier holds an expiry it honours to the same. An expiry deletes rows for good: a deleted row cannot be restored from the ledger.
+  - **On a sealed object with no `archive`, a retention override cannot shorten the declared window.** `AuditPlugin` registers a retention floor (the mechanism the job queue uses for its idempotency window) for every object whose packaged metadata declares `lifecycle.seal` and no `archive`, at its declared `retention.maxAge` and `ttl.expireAfter`, refreshed before every sealer pass so it follows the declaration. An override, global or for one organization, may lengthen the window; one below it is rejected and the declared window applies. `archive.keep` takes no override. A lifecycle service that takes a sealed expiry but no retention floors is given no expiry, so its sealed rows are kept, and the plugin says so at `error`.
+  - **A tenant-scoped retention override applies to its organization's chain where it is set on the chain column.** Tenant windows are set on the object's `organization_id` column, so this holds on an object chained by it (`seal.chainField: 'organization_id'`). The lifecycle service hands each tenant's window, through the same floors, to the sealed expiry (`LifecycleExpiryPrefixRequest.tenants`), with the column the windows are set on (`LifecycleExpiryPrefixRequest.tenantColumn`). Where that is the object's chain column, an organization's chain expires under its own window and its amendment signs that value. Every other chain expires under the longest window configured: the chain of rows about no organization, and every chain of an object whose windows are set on another column than its chain column, which may hold rows of several organizations. On such an object a shorter tenant window has no effect on its sealed rows: they are kept to the longest. No row expires under a window shorter than one set for it.
+  - **A fully expired chain continues.** Its next checkpoint chains onto the expiry: sequence after the expiry's last, linked to its `last_removed_digest`.
+  - **`os audit verify` stays loud for a chain a fault left behind** (seat ruling 6885452378, ADR-0154 D3 as amended): a window that starts at or before the newest window a trusted `window` checkpoint names is sealed, so a row there that no checkpoint holds reads `late` and unsealed, and the check fails.
+  - **The verify harness hands its crypto provider to `AuditPlugin`.** `bootStack` gives an `AuditPlugin` it mounts (an `extraPlugins` entry, a stack `plugins` entry, or the provider `requires: ['audit']` constructs) the same `harnessCryptoProvider()` instance that settings and the engine get, never a bare `LocalCryptoProvider`; an instance composed with its own provider keeps it.
+  - The `lifecycle.seal` description no longer says the retention sweeper deletes sealed rows.
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [73d5e34]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [9b622bb]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [9f9db81]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [3806b2e]
+- Updated dependencies [9ed54cb]
+- Updated dependencies [e86bf99]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [c9741f4]
+- Updated dependencies [be61425]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [6679160]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [92b4167]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [1490855]
+- Updated dependencies [14badad]
+- Updated dependencies [aca4960]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [ff63b02]
+- Updated dependencies [5d37374]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [2314b0e]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [5e1d58a]
+- Updated dependencies [f19ae3a]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [94b0314]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/plugin-audit@19.0.0-next.1
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/plugin-sharing@19.0.0-next.1
+  - @objectstack/plugin-security@19.0.0-next.1
+  - @objectstack/rest@19.0.0-next.1
+  - @objectstack/runtime@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/service-automation@19.0.0-next.1
+  - @objectstack/mcp@19.0.0-next.1
+  - @objectstack/service-messaging@19.0.0-next.1
+  - @objectstack/plugin-approvals@19.0.0-next.1
+  - @objectstack/metadata@19.0.0-next.1
+  - @objectstack/service-knowledge@19.0.0-next.1
+  - @objectstack/service-settings@19.0.0-next.1
+  - @objectstack/knowledge-pgvector@19.0.0-next.1
+  - @objectstack/service-record-context@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+  - @objectstack/service-queue@19.0.0-next.1
+  - @objectstack/service-storage@19.0.0-next.1
+  - @objectstack/plugin-auth@19.0.0-next.1
+  - @objectstack/plugin-email@19.0.0-next.1
+  - @objectstack/plugin-pinyin-search@19.0.0-next.1
+  - @objectstack/plugin-webhooks@19.0.0-next.1
+  - @objectstack/service-analytics@19.0.0-next.1
+  - @objectstack/service-datasource@19.0.0-next.1
+  - @objectstack/service-mailbox@19.0.0-next.1
+  - @objectstack/service-package@19.0.0-next.1
+  - @objectstack/trigger-record-change@19.0.0-next.1
+  - @objectstack/plugin-hono-server@19.0.0-next.1
+  - @objectstack/service-cache@19.0.0-next.1
+  - @objectstack/service-job@19.0.0-next.1
+  - @objectstack/service-push@19.0.0-next.1
+  - @objectstack/service-realtime@19.0.0-next.1
+  - @objectstack/service-sms@19.0.0-next.1
+  - @objectstack/trigger-api@19.0.0-next.1
+  - @objectstack/trigger-schedule@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

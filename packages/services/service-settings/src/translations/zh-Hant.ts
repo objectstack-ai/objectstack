@@ -505,9 +505,6 @@ export const zhHant: PlatformTranslationData = {
       keys: {
         chunk_target: { label: '目標區塊大小（字元）', help: '知識服務切分文件時每個片段的最大字元數。知識來源自身設定的大小優先；嵌入模型的輸入上限可能將其調低。' },
       },
-      actions: {
-        test: { label: '測試連線' },
-      },
     },
     lifecycle: {
       title: '資料生命週期',

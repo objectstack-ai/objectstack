@@ -15,13 +15,13 @@ import { join } from 'node:path';
 
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiBillingRefusedError } from '../../src/runner/driver.js';
+import { API_BILLING_ENV, ApiBillingRefusedError, CLAUDE_EFFORT_ENV, CLAUDE_MEMORY_ENV } from '../../src/runner/driver.js';
 import type { TurnProcessRun } from '../../src/runner/drivers/process.js';
 import { ARM_TOOLS, armArgs, prepareArmWorkdir } from '../../src/skill-evals/arms.js';
 import { hashCase, loadSkillEvalCatalog, notUserInvocable, parseEvalFile, selectBundles, type SkillEvalCase } from '../../src/skill-evals/cases.js';
 import { main, parseSkillEvalArgs, regradeRound, ROUND_RECORD_SCHEMA, triggerFieldLine, turnsLine } from '../../src/skill-evals/cli.js';
 import { gradeAnswer } from '../../src/skill-evals/grade.js';
-import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord, regradeRecords, type SkillEvalRunRecord } from '../../src/skill-evals/run.js';
+import { executeRound, judgeTurn, planRound, preflight, rateLimitStop, regradeRecord, regradeRecords, type SkillEvalRunRecord, turnEnv } from '../../src/skill-evals/run.js';
 import { runSelfTest, SELF_TEST_BATTERIES, SELF_TEST_BATTERY_FLOOR, selfTestReached } from '../../src/skill-evals/self-test.js';
 import { renderSummaryMarkdown, summariseRound } from '../../src/skill-evals/summary.js';
 
@@ -99,6 +99,29 @@ describe('the login guard, imported from the scenario runner: a round refuses an
     await expect(main(['--skills-from', 'workspace', '--bin', bin, '--out', join(dir, 'out')])).rejects.toThrow(ApiBillingRefusedError);
     expect(existsSync(marker)).toBe(false);
     expect(existsSync(join(dir, 'out'))).toBe(false);
+  });
+});
+
+describe('a turn\'s environment: the host\'s, minus API billing, the effort override and the host\'s memory', () => {
+  const host = {
+    PATH: '/usr/bin',
+    HOME: '/home/u',
+    ANTHROPIC_API_KEY: 'sk-x',
+    ANTHROPIC_AUTH_TOKEN: 't',
+    CLAUDE_CODE_EFFORT_LEVEL: 'max',
+    CLAUDE_COWORK_MEMORY_PATH_OVERRIDE: '/host/project/memory',
+    CLAUDE_MEMORY_STORES: 'host-store',
+  };
+
+  it('a host env carrying the memory variables yields a turn env without them, and keeps the rest', () => {
+    expect(turnEnv(host)).toEqual({ PATH: '/usr/bin', HOME: '/home/u' });
+  });
+
+  it('removes every name the three lists hold, and the memory list names both variables a project container sets', () => {
+    const out = turnEnv(host);
+    for (const k of [...API_BILLING_ENV, CLAUDE_EFFORT_ENV, ...CLAUDE_MEMORY_ENV]) expect(out).not.toHaveProperty(k);
+    expect([...CLAUDE_MEMORY_ENV].sort()).toEqual(['CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', 'CLAUDE_MEMORY_STORES']);
+    expect(host).toHaveProperty('CLAUDE_MEMORY_STORES', 'host-store'); // the caller's env is never edited
   });
 });
 
@@ -196,26 +219,29 @@ describe('the arms: one fresh directory per turn, differing only in the bundle',
     }
   });
 
-  it('a round hands each turn its arm\'s directory, the prompt on stdin and an environment with no API key or effort override; records land and directories go', async () => {
+  it('a round hands each turn its arm\'s directory, the prompt on stdin and an environment with no API key, effort override or host memory; records land and directories go', async () => {
     vi.stubEnv('ANTHROPIC_API_KEY', 'sk-should-not-reach');
     vi.stubEnv('CLAUDE_CODE_EFFORT_LEVEL', 'max');
+    vi.stubEnv('CLAUDE_COWORK_MEMORY_PATH_OVERRIDE', '/host/project/memory');
+    vi.stubEnv('CLAUDE_MEMORY_STORES', 'host-store');
     try {
       const root = writeCatalog();
       const cat = loadSkillEvalCatalog(root);
       const cases = selectBundles(cat, ['alpha-skill']);
-      const seen: Array<{ args: readonly string[]; cwd: string; input: string; skills: string[]; envKey: boolean; envEffort: boolean }> = [];
+      const seen: Array<{ args: readonly string[]; cwd: string; input: string; skills: string[]; envKey: boolean; envEffort: boolean; envMemory: string[] }> = [];
       const out = mkdtempSync(join(scratch, 'out-'));
       const exec = await executeRound(planRound(cases, 1), {
         bin: 'claude', skillsRoot: root, catalog: { bundles: cat.bundles, unlisted: cat.unlistedBundles }, outDir: out, maxTurns: 5, caseTimeoutMs: 1000, concurrency: 1, maxUtilization: 0.9,
         runTurn: async (_bin, args, o) => {
           const skillsDir = join(o.cwd, '.claude', 'skills');
           const skills = existsSync(skillsDir) ? readdirSync(skillsDir) : [];
-          seen.push({ args, cwd: o.cwd, input: o.input, skills, envKey: o.env.ANTHROPIC_API_KEY !== undefined, envEffort: o.env.CLAUDE_CODE_EFFORT_LEVEL !== undefined });
+          seen.push({ args, cwd: o.cwd, input: o.input, skills, envKey: o.env.ANTHROPIC_API_KEY !== undefined, envEffort: o.env.CLAUDE_CODE_EFFORT_LEVEL !== undefined, envMemory: CLAUDE_MEMORY_ENV.filter((k) => o.env[k] !== undefined) });
           return exited(stream({ skills, answer: 'uses $icontains and orderBy' }));
         },
       });
       expect(seen.map((s) => [s.input, s.skills.join()])).toEqual([['prompt 1', 'alpha-skill'], ['prompt 1', ''], ['prompt 2', 'alpha-skill'], ['prompt 2', '']]);
       expect(seen.every((s) => !s.envKey && !s.envEffort)).toBe(true);
+      expect(seen.map((s) => s.envMemory)).toEqual([[], [], [], []]);
       expect(seen.every((s) => !existsSync(s.cwd))).toBe(true);
       expect(exec.records.map((r) => r.verdict)).toEqual(['pass', 'pass', 'pass', 'pass']);
       expect(readdirSync(join(out, 'runs')).sort()).toEqual([

@@ -1,5 +1,84 @@
 # @object-ui/plugin-report
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 7c85f5b: fix(plugin-report): a report never draws a new selection over the previous selection's rows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset report's table, matrix and chart answered a new selection, for one render, with the rows of the selection before it, because the query for the new one runs only after that render. Turning 「Compare with previous period」 on drew the comparison series over rows that carry no comparison values, a frame the browser could paint before the chart turned to "Loading chart…". Each outcome now answers only the selection it was queried for, and under any other selection reads as loading. A re-read of the same selection (a data change on the object) still keeps its rows on screen until the new answer lands. Nothing to migrate.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [27ee984]
+- Updated dependencies [8361dfc]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [7e4df28]
+  - @object-ui/i18n@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/fields@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 544a946: feat(app-shell): the assistant's entry is an outlined 「Ask AI」 button at the end of every page's top-right group, and a route with no page header gets it in its corner
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The assistant's one standing entry was a 32 px transparent robot icon named only by its tooltip. It is now an outlined button with a chat-bubble icon and the words 「Ask AI」 (「问 AI」 in Chinese), read from the string Home's own 「Ask AI」 button already carries in every built-in pack (`home.askAI`), so no language pack changes. The words are the platform's; no app renames them.
+  
+  - **Where it sits.** Last in the page's top-right button group (comments, help, Ask AI), so it ends the page header's row and the record page's navigation row; after help on Home's bar and in the phone's top bar. A route whose page draws no button group (search results, a component page, the app editor) gets the same button over the empty top end corner of its content (top-right; top-left in a right-to-left language), and loses it as soon as its page draws a group. A page that keeps its own controls in that corner draws the group in its own top bar instead, so the button never covers them: the report builder (a new report, and a report's Edit) ends its header with Discard, Save, help, Ask AI, and the inbox ends its header row with its own buttons, help, Ask AI.
+  - **When the header runs out of room.** The console page header now measures whether its title (and, on a page that offers the folded actions, its description) still fits beside the words; when it does not, the words are hidden first and the icon stays, before the page's own actions fold and before the title is cut. They come back once there is room again, after any fold has opened. The decision reads the header's own width, never a breakpoint, so a longer translation hides its words sooner.
+  - **Phone.** The icon alone, a 44 px target.
+  - **Accessibility.** With its words shown the words are the button's accessible name; with the icon alone `aria-label` carries the same words. On a Mac the tooltip shows ⌘⇧I and the button declares `aria-keyshortcuts="Meta+Shift+I"`; on other platforms, where Ctrl+Shift+I opens the browser's developer tools, no shortcut is shown or declared.
+  - **Home.** Home's 「Ask AI」 opens the drawer through the same entry hook as the page's button (`useAskAiEntry`), still on the ask agent.
+  
+  `useShellPageActionsSlot()`'s render function takes one more optional prop, `assistantIconOnly`, which a header that measures its own width passes; a header that passes nothing gets the button with its words, as before. `ReportBuilder` (`@object-ui/plugin-report`) takes an optional `headerEnd`, drawn after Save at the end of its header; without it the header ends with Save, as before. The drawer keeps its title for now.
+- Updated dependencies [81c68b3]
+- Updated dependencies [f722411]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [adb65d1]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [712df42]
+- Updated dependencies [c2bfa3e]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [3eb778d]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [0a3ea67]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/fields@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

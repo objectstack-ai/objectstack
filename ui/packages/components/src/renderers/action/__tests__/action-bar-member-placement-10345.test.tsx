@@ -67,7 +67,7 @@ type Handler = Mock<(action: ActionDef, ctx: ActionContext) => Promise<ActionRes
 type Member = Record<string, unknown>;
 type Placement = 'inline' | 'group' | 'menu' | 'absent';
 
-const LOCATION = 'list_toolbar';
+const LOCATION = 'list';
 
 /** The unflagged control in every probe row. */
 const CONTROL = { name: 'control', label: 'Control', type: 'api', locations: [LOCATION] };

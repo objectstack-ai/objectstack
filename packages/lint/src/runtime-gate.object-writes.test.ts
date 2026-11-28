@@ -175,6 +175,11 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       // `reference` on a type that reads none (error) and a count-named
       // relationship (warning), judged on the written object's own fields.
       'lintFieldReferenceShapes',
+      // [#37435] An advisory join, the card's own: an option `color` the
+      // option badge renders neutral (`field/option-color-renders-neutral`),
+      // judged on the written object's own options. Not a fenced rule: it
+      // fires on none of the platform's or the examples' option colours.
+      'lintOptionColors',
       // Joins as the card's ruling names it (error at the author door): two
       // visible fields an object serves under one label. The door cases are
       // in the duplicate-label describe below.
@@ -579,6 +584,7 @@ describe('the object write door dispatches at the adjudicated scope (#4716)', ()
       'lintAutonumberFormats',
       'lintSummaryRollups', // see the roster pin above
       'lintFieldReferenceShapes', // [#35143] — see the roster pin above
+      'lintOptionColors', // [#37435] — see the roster pin above
       'lintDuplicateFieldLabels', // see the roster pin above
       'validateSecurityPosture',
       'validateSecurityRoleWord', // [#19370] — see the roster pin above

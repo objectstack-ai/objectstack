@@ -1,5 +1,110 @@
 # @objectstack/service-record-context
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 3806b2e: fix(record-context): a related object's read that fails is answered as a failure, not as "no access"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `get_record_context` reads each related object of a pack before it answers: the object's API exposure, its definition as the caller is served it, its published definition, and the related list itself. When one of the first three reads failed for a reason that is not a refusal (the database or the metadata store down, a bug), the call was refused `PERMISSION_DENIED` (403), as if the caller could not read the object. Such a failure now fails the call `INTERNAL_ERROR` (500), and the thrown error carries the original on `cause`. At the related-list read, the raw error left the executor and the MCP doors classified it. That is still so for every throw the `/data` door answers with a code or sentence of its own. `INTERNAL_ERROR` (500) applies there to an uncoded failure only, one the doors answered `INTERNAL_ERROR` (500) before, which now fails the call the same way and carries the original on `cause`.
+  
+  What an MCP caller sees for an uncoded failure, on either door: `{ code: 'INTERNAL_ERROR', status: 500 }` with the message `Internal server error`. The doors withhold a 5xx's own sentence, so the executor's sentence (which names the pack and the root record's object only) is read in-process only, for example by the host of `verifyRecordCitations`. Nothing names the related object, a field, a package or what the failed read said. Each door logs the failure at `error` on every call, with the thrown error and its `cause`.
+  
+  A refusal at the same reads is answered as before. At the first three reads a coded refusal (a string `code` with a declared 4xx status, a disabled package's included) refuses `PERMISSION_DENIED` (403). At the related-list read, a throw the `/data` door answers itself is left to the door as before, with its own code and sentence. A refusal: a sandboxed `beforeFind` hook's plain throw still answers `400 HOOK_ABORTED`, and a `PERMISSION_DENIED` with no status still answers 403. A coded fault: an unavailable datasource still answers `ERR_DATASOURCE_UNAVAILABLE` (503) with its sentence, a driver error the door recognises `DATABASE_ERROR` (500), a driver's declared `NOT_IMPLEMENTED` (501) and a declared 5xx their own code, with the sentence the producer declared for the caller.
+  
+  `verifyRecordCitations` therefore reports such a failure through `onError` (its citations are still dropped), where at the first three reads it used to drop them without a report. A host that retries or logs on `onError` now sees outages behind a pack with related lists.
+  
+  The package gains one dependency, `@objectstack/types` (already a dependency of `@objectstack/core`), for the `/data` door's classifier the related-list read asks.
+- e86bf99: fix(service-record-context): `get_record_context` states nothing for a `related` object the stack does not define
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A context pack whose `related` entry names an object no package and no environment defines (a misspelt name, or a package removed after the pack was written) is an author defect: `os validate` reports it (`ai-context-object-unknown`), and ADR-0160 D1 says the tool answer says nothing about it. Until now the section was left out and every caller was told "Some of the material this pack covers is not visible to you", which reads as a permission narrowing nobody configured.
+  
+  The section is still left out. The not-visible statement now fires only when the stack publishes the object and this caller is not served it, as it did before for a defined child. The judgement reads the published definition, which is the same for every caller, so the answer for one caller reveals nothing about another caller's access: two callers get the same bytes for a pack with an undefined `related` object, on the `/mcp` door and the stdio door alike. Nothing of the published definition is carried in the answer.
+- 6b7b305: fix: the 5xx fault log and `ObjectLogger` print an error's `cause` chain
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A server fault thrown with the original error on `cause` used to log the wrapper's message and stack only, so the root cause was missing from the operator's line. `logServerFault` (`@objectstack/types`) now prints the chain as `causes` beside `stack` on its console fallback, and `ObjectLogger` (`@objectstack/core`) prints it as `error.causes` for every `logger.error` / `logger.fatal` that passes an error. Each link carries its message and stack; a cycle stops at the first repeat and a chain stops after five links, each saying so in a last link. Nothing reaches a response body.
+  
+  `@objectstack/service-record-context` drops the `Caused by:` suffix it appended to a failed read's stack, since the fault line now renders the `cause` itself.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

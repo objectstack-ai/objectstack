@@ -325,24 +325,24 @@ describe('validateActionNameRefs — record:related_list actions', () => {
       {
         name: 'crm_account',
         fields: { name: { type: 'text' } },
-        actions: [{ name: 'crm_merge_accounts', type: 'script', locations: ['record_header'] }],
+        actions: [{ name: 'crm_merge_accounts', type: 'script', locations: ['record_page'] }],
       },
       {
         name: 'crm_contact',
         fields: { name: { type: 'text' } },
         actions: [
           { name: 'crm_log_call', type: 'script', locations: ['record_related'] },
-          { name: 'crm_new_contact', type: 'script', locations: ['list_toolbar'] },
-          { name: 'crm_email_contact', type: 'script', locations: ['list_item'] },
-          { name: 'crm_pin_contact', type: 'script', locations: ['record_header'] },
+          { name: 'crm_new_contact', type: 'script', locations: ['list'] },
+          { name: 'crm_email_contact', type: 'script', locations: ['record_row'] },
+          { name: 'crm_pin_contact', type: 'script', locations: ['record_page'] },
           { name: 'crm_sync_contact', type: 'script', locations: [] },
           { name: 'crm_score_contact', type: 'script' },
         ],
       },
     ],
     actions: [
-      { name: 'crm_tag_contact', objectName: 'crm_contact', type: 'script', locations: ['list_item'] },
-      { name: 'crm_export_all', type: 'script', locations: ['list_toolbar'] },
+      { name: 'crm_tag_contact', objectName: 'crm_contact', type: 'script', locations: ['record_row'] },
+      { name: 'crm_export_all', type: 'script', locations: ['list'] },
     ],
     pages: [
       {
@@ -682,7 +682,7 @@ describe('[#22161] one-line verdicts — action-name-undefined', () => {
         fields: { name: { type: 'text' } },
         actions: [
           { name: 'crm_log_call', type: 'script', locations: ['record_related'] },
-          { name: 'crm_pin', type: 'script', locations: ['record_header', 'record_more', 'record_section', 'list_item_x'] },
+          { name: 'crm_pin', type: 'script', locations: ['record_page', 'record_section', 'list_item_x'] },
           { name: 'crm_score', type: 'script' },
         ],
       },

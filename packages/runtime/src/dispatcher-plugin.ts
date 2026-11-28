@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { Plugin, PluginContext, IHttpServer, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS, AuthzStoreUnavailableError, resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
-import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
+import { looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, answerVariesByLanguage, LOCALIZED_ANSWER_VARY, serverFaultProvenance, declaredRefusalMessage, demotedDeclaredCode, logServerFault, describeFaultRequest, inProcessSessionReadInput } from '@objectstack/types';
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/contracts';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
@@ -457,11 +457,17 @@ function sendResultBase(
     // exit's, one function up.
     if (result.handled && result.response) {
         const body = result.response.body as { error?: { code?: unknown; message?: unknown } } | undefined;
+        // [#37864] An answer whose body is in the caller's language names the
+        // English its log line prints (`faultLogMessage`): the operator's line
+        // keeps one language whoever asked first.
+        const logMessage = typeof result.response.faultLogMessage === 'string'
+            ? result.response.faultLogMessage
+            : body?.error?.message;
         logServerFault(
             {
                 status: result.response.status,
                 ...(typeof body?.error?.code === 'string' ? { code: body.error.code } : {}),
-                ...(typeof body?.error?.message === 'string' ? { message: body.error.message } : {}),
+                ...(typeof logMessage === 'string' ? { message: logMessage } : {}),
                 request: describeFaultRequest(fault?.req ?? (res as any)?.__obsRequest),
             },
             fault?.logger,
@@ -857,7 +863,7 @@ function errorResponseBase(
         (err?.code && typeof err.code !== 'string') || validation
             ? { ...(err?.code && typeof err.code !== 'string' ? { code: err.code } : {}), ...(validation ?? {}) }
             : undefined;
-    res.json({
+    const body = {
         success: false,
         error: buildApiError({
             message,
@@ -866,7 +872,14 @@ function errorResponseBase(
             details,
             ...(Object.keys(extra).length > 0 ? { extra } : {}),
         }),
-    });
+    };
+    // [#37828] The `userMessage` above is in the caller's language, so the
+    // answer varies by `Accept-Language` (`answerVariesByLanguage`,
+    // `@objectstack/types`, asked of the body actually sent). The contract's
+    // multi-value form, which the hosts APPEND, so a `Vary` another layer adds
+    // keeps its tokens.
+    if (answerVariesByLanguage(body)) res.header('Vary', [LOCALIZED_ANSWER_VARY]);
+    res.json(body);
 }
 
 /**

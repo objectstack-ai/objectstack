@@ -1,5 +1,143 @@
 # @object-ui/plugin-view
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/plugin-form@19.0.0-next.2
+  - @object-ui/plugin-grid@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- f722411: feat(kanban): a card footer with each record's open comment threads and attachments (`kanban.cardFooter`)
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  `KanbanConfigSchema` gains one optional key with no default; a view that does not declare it renders as before, and reads nothing more:
+  
+  - `cardFooter: { comments?: boolean, attachments?: boolean }` — the counts each card shows at its foot. `comments: true` shows how many of the record's comment threads are open (top-level and not resolved), the number the record page's comments icon shows with two exceptions: a reply whose parent was deleted is not counted (the record page shows it as a thread of its own), and a comment written before the record pair (`object_name` + `record_id`) existed is not counted until `os migrate comment-parent-pair --apply` has stamped it (the record page reads by `thread_id`). `attachments: true` shows how many files are attached to the record. A count of zero draws nothing. An unknown member is refused by name, so a later foot item is one more member.
+  
+  Each count is read once for the whole board, in one grouped read per counted object over the cards the board has loaded, never one read per card, and under the reader's permissions: `sys_comment` grouped by `record_id`, asked only on an object whose discussion is on (`enable.feeds`), and `sys_attachment` grouped by `parent_id`, asked only on an object that takes files (`enable.files`). A refused read draws no count. A cut answer (the door's default page size, `OS_DATA_DEFAULT_PAGE_SIZE`) is never read as the whole set: the reader asks again, still grouped, over the cards the answer did not name, up to `MAX_COUNT_ROUNDS` (20) reads in all; a card still unnamed after that draws no count. The counts are asked again when the board reloads and when a comment or an attachment is written (the data-invalidation bus), and a card already counted keeps its count while a new set of cards is asked. The record Attachments panel now announces an upload and the uploader's own delete on that bus, since both go through the storage route rather than the data source; the record page announces a thread resolved or reopened (the resolution door) and a member's delete of their own comment (the own-comment door) the same way. The reader is shared in `@object-ui/plugin-detail` (`useRecordCounts`, with `askRecordCounts` and its bound `MAX_COUNT_ROUNDS`, `compileCommentCountQuery`, `compileAttachmentCountQuery` and `readRecordCounts`), so a list row can use it next.
+  
+  On a board, 视图设置 offers 「显示评论数」 and 「显示附件数」 beside the two card toggles, each only where the object has that count; both start off. Both producers of the board node (`ListView` and `ObjectView#generateViewSchema`) and the Console relay the key.
+
+### Patch Changes
+
+- 2980483: fix(core): a list bulk Delete with refused records says why, not only "0 deleted, 4 failed"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The built-in bulk Delete deletes each selected record and reports one summary toast. When records were refused (a restrict delete, a lock, a permission), the toast gave only the two counts and dropped each refusal's reason, which the one-record Delete shows. The summary keeps its counts, and its description now lists the reasons: one line per distinct reason, led by the names of the records it refused (up to three names, then `+N`), at most three reasons and then "And N more". An external datasource's refusal reads as the read-only sentence, as the one-record toast reads it. A refusal with no message adds no line, so a batch with no reason keeps the bare count. The one-record toast is unchanged. Two keys are added to every locale pack: `objectActions.bulkDeleteRefusedNamed` and `objectActions.bulkDeleteMoreReasons`.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [fbcfdfb]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [5314575]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/plugin-grid@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/plugin-form@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+  - @object-ui/permissions@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

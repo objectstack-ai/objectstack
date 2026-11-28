@@ -151,7 +151,8 @@ describe('search_knowledge — the caller\'s execution context', () => {
   it('passes the caller\'s context to the row-level re-check, which drops a record the caller cannot read', async () => {
     const { service, contexts } = setup(['p2']);
     const answer = await service.knowledgeTools().searchKnowledge({ query: 'q' }, caller);
-    expect(contexts).toEqual([caller]);
+    // Both reads run as the caller: the records they may read, then the re-check.
+    expect(contexts).toEqual([caller, caller]);
     expect(answer.hits.map((h) => h.record?.id)).toEqual(['p2']);
   });
 

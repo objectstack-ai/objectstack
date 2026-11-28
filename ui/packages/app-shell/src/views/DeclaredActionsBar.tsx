@@ -13,7 +13,7 @@
  * A bespoke page (e.g. the approvals inbox) that already has a record in hand
  * can drop this bar in to surface the actions the backend declares on that
  * object (`objectDef.actions[]`) — filtered to a `location`
- * (`record_section`, `record_header`, …) and each action's `visible` CEL —
+ * (`record_section`, `record_page`, …) and each action's `visible` CEL —
  * and have them execute through the *same* console action runtime ObjectView /
  * RecordDetailView use: confirm dialogs, param-collection dialogs, result
  * dialogs, the authenticated api/flow/server handlers, and refresh-after.
@@ -53,13 +53,13 @@ import {
   MetadataCtx,
   useAction,
   useCapabilityGate,
-  useDrawsAction,
   useCondition,
   toPredicateInput,
   usePredicateRecordContext,
   useActionTextLocalizer,
 } from '@object-ui/react';
 import { isActionSwitchedOff, type ActionDef } from '@object-ui/core';
+import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 import type { ConsoleActionDispatch } from '../consoleActionDispatch.js';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { ChevronDown, Loader2, MoreHorizontal, ShieldAlert } from 'lucide-react';
@@ -1031,12 +1031,9 @@ const DeclaredActionsToolbar: React.FC<
 > = ({ actions, objectName, record, className, label, foldOverrides, foldDecisions, onDrawnActionsChange, headerParts, requireRejectReason }) => {
   const { t } = useObjectTranslation();
   const mayInvoke = useCapabilityGate();
-  // [ADR-0160 D7] An `ask_ai` action is absent where this provider has no
-  // in-app assistant to hand the record to.
-  const drawsAction = useDrawsAction();
   const permitted = useMemo(
-    () => actions.filter((action) => mayInvoke(action.requiredPermissions) && !isActionSwitchedOff(action) && drawsAction(action)),
-    [actions, mayInvoke, drawsAction],
+    () => actions.filter((action) => mayInvoke(action.requiredPermissions) && !isActionSwitchedOff(action)),
+    [actions, mayInvoke],
   );
   // objectstack#25877 — which of the permitted levers fold into the override
   // menu. Only for a viewer admitted through the override door alone
@@ -1430,8 +1427,9 @@ export function DeclaredActionsBar({
       const drop = exclude && exclude.length ? new Set(exclude) : null;
       return allActions.filter(
         (a: any) =>
-          Array.isArray(a?.locations) &&
-          a.locations.includes(location) &&
+          // Placement is `actionRendersAt`'s: `record` is drawn at `record_row`
+          // and `record_page` too (objectstack#36495).
+          actionRendersAt(a, location as ActionLocation) &&
           !(drop && drop.has(a?.name)),
       );
     },

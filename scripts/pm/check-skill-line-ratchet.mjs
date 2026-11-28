@@ -143,7 +143,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/checklist-author/SKILL.md', 3574],
   ['.claude/skills/dogfood-verification/SKILL.md', 9526],
   ['.claude/skills/spec-property-retirement/SKILL.md', 26922],
-  ['AGENTS.md', 78401], // raised 78106 → 78401 (+295 B, the merge-queue speed-budget sentence; 1050 → 1053 lines) by ruling record 7044162186 「抬到 1053,整句写进去」 under ruling record 6184799323, letter B
+  ['AGENTS.md', 78712], // raised 78401 → 78712 (+311 B, the volatile-counts rule less the counts it deleted) by ruling records 7233980615 「没用的统计数字直接删，不同步」 and 7234354812 (option A 「上调上限并删无用计数」) under ruling record 6184799323, letter B; raised 78106 → 78401 (+295 B, the merge-queue speed-budget sentence; 1050 → 1053 lines) by ruling record 7044162186 「抬到 1053,整句写进去」 under ruling record 6184799323, letter B
   ['CLAUDE.md', 273],
 ]);
 
@@ -240,7 +240,7 @@ export const MAX_TABLE_ROW_BYTES = new Map([
   // the `domain:engine` row. Landed width, headroom 0 (lowering is always
   // legitimate).
   // Lowered 342 → 341 by the domain:server lane merge (maintainer ruling
-  // 2026-10-22, letter 乙): the engine, services and cli rows of the 域车道
+  // 2026-10-22, letter 乙): the engine, services and cli rows of the 车道与域
   // table consolidated into one `domain:server` row that names package
   // families and points at lanes/server.md for the enumeration. The widest
   // survivor is that row. Landed width, headroom 0.

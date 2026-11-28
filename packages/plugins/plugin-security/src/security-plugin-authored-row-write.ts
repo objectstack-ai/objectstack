@@ -109,6 +109,85 @@ function withoutPlatformOwnershipFloor(set: PermissionSet): PermissionSet {
   return { ...set, rowLevelSecurity: policies.filter((p) => !isPlatformOwnershipFloorPolicy(p)) };
 }
 
+/**
+ * [#37535] The authored scope both answers below are read off: Layer 0 (the
+ * tenant wall) and Layer 1 compiled from the caller's sets with the platform
+ * ownership floor taken out, or `null` when no authored policy can admit a row
+ * for `(object, operation)`. It was the head of `checkAuthoredRowWrite`, moved
+ * here unedited so the per-row verdict and the filter-shaped twin
+ * (`getAuthoredRowWriteFilter`) cannot disagree about what "authored" means:
+ * a row matches the filter iff the verdict admits it. A throw propagates; each
+ * caller turns it into its own fail-closed answer.
+ */
+async function authoredRowWriteLayers(
+  this: Pick<AuthoredRowWriteHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'resolvePermissionSetsForContext'>,
+  object: string,
+  operation: AuthoredRowWriteOperation,
+  context: any,
+): Promise<{ layer0: unknown; layer1: unknown } | null> {
+  // No principal, or a delegated identity this path cannot intersect —
+  // both are "cannot measure", which is `abstain` (never `admit`).
+  if (!context?.userId) return null;
+  if (context?.onBehalfOf?.userId) return null;
+
+  const permissionSets = await this.resolvePermissionSetsForContext(context);
+  if (permissionSets.length === 0) return null;
+
+  // Cheap provenance pre-check: if the caller holds NO app-authored policy
+  // applicable to (object, operation), there is nothing that could admit by
+  // declaration — answer without spending a database round-trip. This is
+  // the same collection the compiler consumes, filtered by the same
+  // provenance predicate, so the two cannot disagree about what "authored"
+  // means.
+  //
+  // [#8059] The pre-check asks for an authored policy that ADMITS ROWS —
+  // one carrying a `using` scope predicate. A `check`-only policy declares
+  // no row scope at all (ADR-0058 D4: post-image validation), so it can
+  // admit nothing, and the verdict for a caller holding only check-only
+  // policies is `abstain` — which is the verdict this method already
+  // returned before #8059 and must keep returning after it. It got there
+  // by a route the fix removes: a check-only policy compiles to no `using`
+  // filter, so Layer 1 was null and the `layer1 == null → abstain` rule
+  // below fired. Site 1 now DERIVES a Layer 1 from the caller's select
+  // narrowing in exactly that case, so without this clause the derived
+  // readable-set scope would start answering `admit` — and `admit` is what
+  // the by-id widener uses to WIDEN. That is precisely the masquerade the
+  // doc comment above promises cannot happen (#5493 / #7281), so the
+  // promise is now kept by an explicit test rather than by the accident of
+  // a null Layer 1. Nothing narrows here: `abstain` changes nothing on its
+  // own, and the pre-image gate still refuses on its own terms.
+  const authored = this.collectRLSPolicies(
+    permissionSets,
+    object,
+    operation,
+    (context?.positions ?? []) as string[],
+    context,
+  ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
+  if (authored.length === 0) return null;
+
+  // [#35917] The floor is taken out of the SETS, by provenance, rather than
+  // by `dropPlatformOwnershipFloor`. That knob is the write authority's
+  // `allow` replacing the floor, and since #35917 a replacement keeps the
+  // floor's term beside an authored one (the OR an authored policy stands
+  // in is never shortened by it), which is exactly the case this probe
+  // exists for: through the knob, the floor would answer here as if it
+  // were an authored admission (#5493 / #7281). With the floor gone from
+  // the sets the collection the compiler sees is the one the knob used to
+  // leave: the floor's alternates are materialized only beside a floor
+  // ({@link withOwnershipFloorAlternates}), and the authored `using`
+  // pre-checked above keeps the derive-from-select branch off.
+  const { layer0, layer1 } = await this.computeLayeredRlsFilter(
+    permissionSets.map(withoutPlatformOwnershipFloor),
+    object,
+    operation,
+    context,
+  );
+  // A null Layer 1 means no authored predicate is gating this write: an
+  // abstention, never an admission (see `SecurityPlugin#checkAuthoredRowWrite`).
+  if (layer1 == null) return null;
+  return { layer0, layer1 };
+}
+
 /** The body of `SecurityPlugin#checkAuthoredRowWrite`; the method's docblock there is its contract. */
 export async function checkAuthoredRowWrite(
   this: Pick<AuthoredRowWriteHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'logger' | 'ql' | 'resolvePermissionSetsForContext'>,
@@ -121,66 +200,9 @@ export async function checkAuthoredRowWrite(
     if (!object || recordId == null || recordId === '') return 'abstain';
     if (operation !== 'update' && operation !== 'delete') return 'abstain';
     if (!this.ql) return 'abstain';
-    // No principal, or a delegated identity this path cannot intersect —
-    // both are "cannot measure", which is `abstain` (never `admit`).
-    if (!context?.userId) return 'abstain';
-    if (context?.onBehalfOf?.userId) return 'abstain';
-
-    const permissionSets = await this.resolvePermissionSetsForContext(context);
-    if (permissionSets.length === 0) return 'abstain';
-
-    // Cheap provenance pre-check: if the caller holds NO app-authored policy
-    // applicable to (object, operation), there is nothing that could admit by
-    // declaration — answer without spending a database round-trip. This is
-    // the same collection the compiler consumes, filtered by the same
-    // provenance predicate, so the two cannot disagree about what "authored"
-    // means.
-    //
-    // [#8059] The pre-check asks for an authored policy that ADMITS ROWS —
-    // one carrying a `using` scope predicate. A `check`-only policy declares
-    // no row scope at all (ADR-0058 D4: post-image validation), so it can
-    // admit nothing, and the verdict for a caller holding only check-only
-    // policies is `abstain` — which is the verdict this method already
-    // returned before #8059 and must keep returning after it. It got there
-    // by a route the fix removes: a check-only policy compiles to no `using`
-    // filter, so Layer 1 was null and the `layer1 == null → abstain` rule
-    // below fired. Site 1 now DERIVES a Layer 1 from the caller's select
-    // narrowing in exactly that case, so without this clause the derived
-    // readable-set scope would start answering `admit` — and `admit` is what
-    // the by-id widener uses to WIDEN. That is precisely the masquerade the
-    // doc comment above promises cannot happen (#5493 / #7281), so the
-    // promise is now kept by an explicit test rather than by the accident of
-    // a null Layer 1. Nothing narrows here: `abstain` changes nothing on its
-    // own, and the pre-image gate still refuses on its own terms.
-    const authored = this.collectRLSPolicies(
-      permissionSets,
-      object,
-      operation,
-      (context?.positions ?? []) as string[],
-      context,
-    ).filter((p) => !isPlatformOwnershipFloorPolicy(p) && policyDeclaresClause(p, 'using'));
-    if (authored.length === 0) return 'abstain';
-
-    // [#35917] The floor is taken out of the SETS, by provenance, rather than
-    // by `dropPlatformOwnershipFloor`. That knob is the write authority's
-    // `allow` replacing the floor, and since #35917 a replacement keeps the
-    // floor's term beside an authored one (the OR an authored policy stands
-    // in is never shortened by it), which is exactly the case this probe
-    // exists for: through the knob, the floor would answer here as if it
-    // were an authored admission (#5493 / #7281). With the floor gone from
-    // the sets the collection the compiler sees is the one the knob used to
-    // leave: the floor's alternates are materialized only beside a floor
-    // ({@link withOwnershipFloorAlternates}), and the authored `using`
-    // pre-checked above keeps the derive-from-select branch off.
-    const { layer0, layer1 } = await this.computeLayeredRlsFilter(
-      permissionSets.map(withoutPlatformOwnershipFloor),
-      object,
-      operation,
-      context,
-    );
-    // See the doc above: a null Layer 1 means no authored predicate is
-    // gating this write, which is an abstention and not an admission.
-    if (layer1 == null) return 'abstain';
+    const layers = await authoredRowWriteLayers.call(this, object, operation, context);
+    if (layers == null) return 'abstain';
+    const { layer0, layer1 } = layers;
 
     const parts = [{ id: recordId }, ...(layer0 ? [layer0] : []), layer1];
     // [#7281] The predicate is the question; the scope is not. Read ELEVATED
@@ -204,5 +226,40 @@ export async function checkAuthoredRowWrite(
       e instanceof Error ? e : new Error(String(e)),
     );
     return 'abstain';
+  }
+}
+
+/**
+ * [#37535, ruling record 7190344023 (2a)] The body of
+ * `SecurityPlugin#getAuthoredRowWriteFilter`, the filter-shaped twin of
+ * {@link checkAuthoredRowWrite}: the predicate the verdict's probe read asks
+ * about one row, `layer0 AND layer1`, without the `{ id }` term — so a row
+ * matches it iff the verdict admits that row. Nothing is read: the answer is
+ * the compiled predicate, handed to the predicate write that asked for it.
+ *
+ * `undefined` on every abstention the verdict takes and on any failure, which
+ * is the answer that widens nothing (the sharing middleware keeps its scope).
+ */
+export async function getAuthoredRowWriteFilter(
+  this: Pick<AuthoredRowWriteHost, 'collectRLSPolicies' | 'computeLayeredRlsFilter' | 'logger' | 'resolvePermissionSetsForContext'>,
+  object: string,
+  operation: AuthoredRowWriteOperation,
+  context?: any,
+): Promise<Record<string, unknown> | undefined> {
+  try {
+    if (!object) return undefined;
+    if (operation !== 'update' && operation !== 'delete') return undefined;
+    const layers = await authoredRowWriteLayers.call(this, object, operation, context);
+    if (layers == null) return undefined;
+    const { layer0, layer1 } = layers;
+    return (layer0 ? { $and: [layer0, layer1] } : layer1) as Record<string, unknown>;
+  } catch (e) {
+    this.logger.warn?.(
+      `[security] getAuthoredRowWriteFilter could not resolve the authored-policy scope for ` +
+        `'${object}' (${operation}, user ${context?.userId ?? 'unknown'}) — answering none ` +
+        `(fail-closed: a scope that cannot be resolved never widens a predicate write)`,
+      e instanceof Error ? e : new Error(String(e)),
+    );
+    return undefined;
   }
 }

@@ -24,11 +24,12 @@
     {
       "id": 3,
       "prompt": "Index our `kb_article` records (title and body) so the assistant can answer from them with RAG. Only published articles, and we want to filter by `category` at search time. We run PostgreSQL with pgvector.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'pgvector'` and `source: { kind: 'object', object: 'kb_article', contentFields: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`, `refresh: { onRecordChange: true }`, registered at boot through `KnowledgeServicePlugin({ sources })`. Top-K and rerankers are not source metadata, and no `split` key is written: the pgvector adapter takes the service's passages, and the default `recursive` split fits article prose.",
+      "expected_output": "Emits a `knowledge_source` item (a `*.knowledge-source.ts` file under the stack's `knowledgeSources`, typed `KnowledgeSource`) with a snake_case `name`, a `label`, and `source: { kind: 'object', object: 'kb_article', content: ['title', 'body'], metadataFields: ['category'], where: { published: true } }`. It may omit `adapter`: on PostgreSQL the deployment's store is `pgvector`. The content list names its fields: none of the keys retired in 19 (`contentFields`, `id`, `embedding`, `vectorStore`) and no retired `'*'` member. Notes that the first build sends `title` and `body` of every published article to the embedding provider. `topK` and rerankers are not source metadata, and no `split` key is written: the default `recursive` split fits article prose.",
       "files": [],
       "assertions": {
-        "must_contain": ["KnowledgeSourceSchema", "contentFields", "metadataFields", "where", "KnowledgeServicePlugin"],
-        "must_not_contain": ["chunkSize", "topK"]
+        "must_contain": ["name:", "content:", "metadataFields", "where"],
+        "must_contain_any": [["knowledgeSources", "knowledge_source", "knowledge-source"]],
+        "must_not_contain": ["contentFields:", "['*'],", "['*'] }", "[\"*\"],", "[\"*\"] }", "chunkSize", "topK:", "embedding:", "vectorStore:"]
       }
     },
     {
@@ -44,7 +45,7 @@
     {
       "id": 5,
       "prompt": "Create `src/ai/support-bot.agent.ts` with defineAgent({ name: 'crm_support_bot', tools: ['query_records', 'action_crm_close_case'], knowledge: ['support_kb'] }) and register it under agents. None of the project's files are in this directory: answer from what is stated here.",
-      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` are protocol-17 tombstones. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
+      "expected_output": "Refuses the agent: the `agent` type is closed to third parties (a stack-authored agent is filtered out, refused by `loadAgent()` and 404s on chat), and `agent.tools` / `agent.knowledge` were removed in protocol 17: the strict schema refuses each as an unknown key, naming https://objectstack.ai/docs/protocol-upgrade. Re-declares the two tools in a `defineSkill` (registered under `skills`) with a `surface`, and restricts retrieval at the knowledge-source level (`aiExposed`, `where`) rather than on an agent. The in-app `ask` assistant picks the skill up by surface (`ask` or `both`) for the app the user is in, and a tool the skill names outside the allow-set is dropped with a diagnostic.",
       "files": [],
       "assertions": {
         "must_contain": ["defineSkill", "skills", "surface", "aiExposed"],
@@ -84,11 +85,11 @@
     {
       "id": 9,
       "prompt": "Index our `policy_doc` records (`title`, `body`) for the assistant with the in-memory adapter. Each body is a long Markdown handbook with headings; answers should cite one section, at most 600 characters, and neighbouring passages should overlap by 100 characters.",
-      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` record with `adapter: 'memory'` (the adapter that takes the service's passages) and `source: { kind: 'object', object: 'policy_doc', contentFields: ['title', 'body'], split: { strategy: 'markdown', maxChars: 600 } }`: one section per heading, each passage embedded with its heading path, 600 characters at most unless the embedder's input limit is lower. Declines the overlap: passages never overlap, and the `knowledge.chunk_overlap` setting is retired (a write naming it is refused `400 UNKNOWN_KEY`), so it writes no overlap key and no chunk-size key.",
+      "expected_output": "Emits a `KnowledgeSourceSchema.parse({...})` item with a snake_case `name`, `adapter: 'memory'` (a store that takes the service's passages) and `source: { kind: 'object', object: 'policy_doc', content: ['title', 'body'], split: { strategy: 'markdown', maxChars: 600 } }`: one section per heading, each passage embedded with its heading path, 600 characters at most unless the embedder's input limit is lower. Declines the overlap: passages never overlap, and the `knowledge.chunk_overlap` setting is retired (a write naming it is refused `400 UNKNOWN_KEY`), so it writes no overlap key and no chunk-size key.",
       "files": [],
       "assertions": {
-        "must_contain": ["split", "strategy", "markdown", "maxChars"],
-        "must_not_contain": ["chunkSize", "chunkOverlap", "overlap: 100"]
+        "must_contain": ["split", "strategy", "markdown", "maxChars", "name:", "content:"],
+        "must_not_contain": ["chunkSize", "chunkOverlap", "overlap: 100", "contentFields:", "id: 'policy", "id: \"policy"]
       }
     },
     {
@@ -119,6 +120,27 @@
       "assertions": {
         "must_contain": ["defineSkill", "context:", "policy_document"],
         "must_not_contain": ["permissions:", "defineAgent("]
+      }
+    },
+    {
+      "id": 13,
+      "prompt": "Add `src/ai/faq.knowledge-source.ts` so the assistant can search our `faq_entry` records. Index every text field of the record, so we never have to touch this file when the object grows. None of the project's files are in this directory: write the file in your answer.",
+      "expected_output": "Emits a `knowledge_source` item with a snake_case `name`, a `label` and `source: { kind: 'object', object: 'faq_entry', content: [...] }` listing named fields, and declines the wildcard: a `'*'` member is refused at parse, because embedding is egress and a wildcard would also send every text field added to the object later to the embedding provider. Says the list must be edited when a new field should be indexed, and asks which fields to list (or lists placeholders such as `question` and `answer`). Writes neither retired key, `contentFields` (now `content`) or `id` (now `name`).",
+      "files": [],
+      "assertions": {
+        "must_contain": ["name:", "content:"],
+        "must_contain_any": [["egress", "embedding provider", "refused", "rejected"]],
+        "must_not_contain": ["contentFields:", "['*'],", "['*'] }", "[\"*\"],", "[\"*\"] }", "id: 'faq", "id: \"faq"]
+      }
+    },
+    {
+      "id": 14,
+      "prompt": "Our app ships no knowledge source in its package: admins will create them at run time in Studio, and an agent of ours saves them over MCP. What does `objectstack.config.ts` need so those sources are indexed and searchable? Answer from what is stated here.",
+      "expected_output": "Adds `requires: ['knowledge']` to the stack: a source the app ships in `knowledgeSources` mounts the knowledge service and its store by itself, but an app that ships none and authors its sources at run time must list the token, or a run-time save is refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack declares it and the server restarts. Names no `adapter` requirement (the deployment's store is used) and adds no `knowledgeSources` entry the prompt did not ask for. Says that creating or changing a source at run time needs `manage_knowledge_sources` beside `manage_metadata`.",
+      "files": [],
+      "assertions": {
+        "must_contain_any": [["requires: ['knowledge']", "requires: [\"knowledge\"]"]],
+        "must_not_contain": ["contentFields:"]
       }
     }
   ]

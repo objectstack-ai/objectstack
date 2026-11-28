@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/components",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.2",
   "type": "module",
   "license": "MIT",
   "description": "Standard UI component library for ObjectUI, built with Shadcn UI + Tailwind CSS",

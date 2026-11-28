@@ -1703,6 +1703,17 @@ const INLINE_EDIT_BOOLEAN_RETIRED =
   + 'name it in a field group of the parent (`fieldGroups[].relatedList`). '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
+/**
+ * The prose answer for a field-level spelling of "track this field's
+ * history" that is not a field key: it names the `fieldHistory` model
+ * (`resolveFieldHistory`), never `trackHistory`.
+ */
+function fieldHistorySpellingAnswer(key: string): string {
+  return `\`${key}\` is not a field key — a field's old → new values show on the record activity timeline `
+    + 'by default. Write `fieldHistory: false` to turn them off for this field (`true` opts a media or '
+    + 'structured-JSON field in), or `enable.fieldHistory: false` on the object to turn them off for every field.';
+}
+
 export const FieldSchema = lazySchema(() => {
   const base = strictObject({
   surface: 'this field',
@@ -1741,10 +1752,13 @@ export const FieldSchema = lazySchema(() => {
     // CASE-SENSITIVELY on the authored spelling, so a row per spelling is the
     // only way this channel can cover a family, and `not_null` was the spelling
     // it would have missed.
-    tracked:
-      '`tracked` is not a field key — a field\'s old → new values show on the record activity timeline '
-      + 'by default. Write `fieldHistory: false` to turn them off for this field (`true` opts a media or '
-      + 'structured-JSON field in), or `enable.fieldHistory: false` on the object to turn them off for every field.',
+    // `trackChanges` / `feedTracked` (the Salesforce "Track Field History" /
+    // "Feed Tracking" spellings) used to RENAME onto `trackHistory`, whose
+    // `false` turns nothing off; they take `tracked`'s answer instead, so both
+    // stay refused and the author is sent to the switch that works.
+    tracked: fieldHistorySpellingAnswer('tracked'),
+    trackChanges: fieldHistorySpellingAnswer('trackChanges'),
+    feedTracked: fieldHistorySpellingAnswer('feedTracked'),
     // [ADR-0158 L3] The natural spellings of a quantity's unit on the field
     // itself, answered in prose because the targets are NESTED keys of
     // `unitConfig` — the form the `currency` answer above takes. None of them

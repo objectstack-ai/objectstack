@@ -525,31 +525,28 @@ describe('the emitted key is the key the platform declares and consumes', () => 
 // ── Real metadata from the in-repo example app ─────────────────────────
 
 describe('the showcase app, walked for real', () => {
-  it('picks up `showcase_contact`’s default-form sections and `showcase_semantic_zoo`’s field groups', async () => {
-    const [{ ContactViews }, { SemanticZoo }] = await Promise.all([
+  it('picks up `showcase_contact`’s and `showcase_semantic_zoo`’s field-group sections', async () => {
+    const [{ Contact }, { ContactViews }, { SemanticZoo }] = await Promise.all([
+      import('../../../examples/app-showcase/src/data/objects/contact.object'),
       import('../../../examples/app-showcase/src/ui/views/contact.view'),
       import('../../../examples/app-showcase/src/data/objects/semantic-zoo.object'),
     ]);
 
-    const keys = sectionKeys({ objects: [SemanticZoo], views: [ContactViews] });
+    const keys = sectionKeys({ objects: [SemanticZoo, Contact], views: [ContactViews] });
 
     expect(keys.sort()).toEqual([
       // `fieldGroups: [{ key: 'basics' }, { key: 'money' }]`, both referenced
       // by `group:` on real fields.
       'objects.showcase_semantic_zoo._sections.basics.label',
       'objects.showcase_semantic_zoo._sections.money.label',
-      // `ContactViews.form.sections[].name` — the container's DEFAULT form,
-      // which `ObjectForm` renders and translates like any other. NOT the
-      // only contributor: `formViews.create`'s sparse override names its own
-      // section too (objectstack#8231), which is the entry right below.
+      // `Contact.fieldGroups` — the four groups the contact's create and edit
+      // forms are laid out by (objectstack#36553). `ContactViews` declares a
+      // list and no form, so it adds no section of its own: the create form's
+      // former `who_is_this` heading is gone with the form that named it.
       'objects.showcase_contact._sections.contact.label',
       'objects.showcase_contact._sections.notes.label',
       'objects.showcase_contact._sections.status.label',
       'objects.showcase_contact._sections.work.label',
-      // `ContactViews.formViews.create.sections[0].name` — the sparse create
-      // override's own section ("Who is this?"), named by objectstack#8231's
-      // remainder. Distinct surface, same object, same walker.
-      'objects.showcase_contact._sections.who_is_this.label',
     ].sort());
   }, 60_000);
 });

@@ -16,6 +16,7 @@ import type { OpenListLink } from '../recordLink';
 import type { RecordWrite, SampleDataCleanup, PackageRemoval } from '../mapMessages';
 import type {
   DatasetProvenance,
+  DraftReviewListParsed,
   ObjectQuerySource,
   RecordCitationParsed,
 } from '@objectstack/spec/ai';
@@ -63,6 +64,13 @@ export interface ChatbotEnhancedMessage {
    * cited record at its section through `onOpenRecord`.
    */
   recordCitations?: RecordCitationParsed[];
+  /**
+   * The drafts the turn saved, lifted from the message's `data-draft-review`
+   * part by `extractDraftReview`. Drawn as a review card under the answer,
+   * with Studio review links through `onOpenReviewLink`. Live only: a
+   * history rebuild does not carry it.
+   */
+  draftReview?: DraftReviewListParsed;
 }
 
 /**
@@ -313,6 +321,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   readOnly?: boolean;
   /**
+   * The id of the conversation shown. It keys the question card's skip marks
+   * in localStorage (`QUESTION_SKIP_STORAGE_PREFIX`), so a question the user
+   * skipped stays skipped when the conversation is opened again on this
+   * device. Without it a skip holds for the mounted view only.
+   */
+  conversationId?: string;
+  /**
    * Whether the assistant is currently generating a response. While it is
    * true a message the user sends is queued until the turn ends.
    */
@@ -360,6 +375,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * Clicking a chip submits the message immediately.
    */
   suggestions?: string[];
+  /**
+   * objectstack#37862 — the host's own empty conversation, drawn in place of
+   * the built-in one (the icon, {@link ChatbotLabels.emptyTitle},
+   * {@link ChatbotLabels.emptyDescription} and {@link suggestions}) while the
+   * conversation has no message. It gets the two things a suggestion can do:
+   * `send` sends the text as a message, as a built-in chip does; `fill` puts
+   * the text in the composer and focuses it, sending nothing.
+   */
+  renderEmptyState?: (actions: {
+    send: (text: string) => void;
+    fill: (text: string) => void;
+  }) => React.ReactNode;
   /**
    * Optional UI string overrides for localization. Each field falls back
    * to its English default, so existing callers keep working unchanged.
@@ -443,6 +470,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * Absent → a list link keeps the default link-safety dialog.
    */
   onOpenList?: OpenListLink;
+  /**
+   * Open a Studio review route of the draft review card (a Console path such
+   * as `/studio/<package>/data?changes=review`) inside the app, so the live
+   * conversation stays. Absent → the card's links are ordinary anchors.
+   */
+  onOpenReviewLink?: (path: string) => void;
+  /**
+   * The anchor href for a review route — the router's basename joined to the
+   * path — so a new tab or a copied link opens the same page. Absent → the
+   * path itself.
+   */
+  reviewLinkHref?: (path: string) => string;
   /** cloud#1658 — the record hand-off card's title. */
   recordHandoffTitleLabel?: string;
   /** cloud#1658 — the record hand-off card's action label. */

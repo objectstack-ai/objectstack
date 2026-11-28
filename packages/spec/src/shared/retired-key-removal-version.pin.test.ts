@@ -80,6 +80,8 @@ import { describe, expect, it } from 'vitest';
 import { ALL_CONVERSIONS } from '../conversions/registry';
 import { MIGRATIONS_BY_MAJOR } from '../migrations/registry';
 import { AIModelConfigSchema } from '../ai/agent.zod';
+import { ActionLocationSchema, ActionSchema, ActionType } from '../ui/action.zod';
+import { DashboardHeaderActionSchema } from '../ui/dashboard.zod';
 import { TimeUpdateInterval } from '../data/analytics.zod';
 import { CurrencyConfigSchema, FieldSchema } from '../data/field.zod';
 import { IndexSchema, ObjectSchema } from '../data/object.zod';
@@ -340,6 +342,28 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   // #35926: a relationship field's boolean `inlineEdit`, refused by the enum's own error map.
   // #37712: an agent's `model.provider`, tombstoned on the model block.
   'agent-model-provider-removed': [tombstone(AIModelConfigSchema, 'agent.model', 'provider')],
+  // objectstack#36495: a retired page-part location word is an enum VALUE, so
+  // what an author meets is the enum's refusal of it, which names the release.
+  'action-locations-acted-on': (['list_toolbar', 'list_item', 'record_header', 'record_more'] as const).map((word) =>
+    refusal(`action.locations ${word}`, () => ActionLocationSchema.safeParse(word)),
+  ),
+  // #37856: the `ask_ai` action type (ADR-0160 D7), refused with one
+  // prescription in every slot that takes an action type.
+  'action-type-ask-ai-removed': [
+    refusal("ActionType 'ask_ai'", () => ActionType.safeParse('ask_ai')),
+    refusal(
+      "a declared action's type 'ask_ai'",
+      () => ActionSchema.safeParse({ name: 'ask_about_case', label: 'Ask AI', type: 'ask_ai' }),
+      'type',
+    ),
+    refusal("an action:button row's actionType 'ask_ai'", () => ActionButtonPropsSchema.safeParse({ label: 'Ask', actionType: 'ask_ai' }), 'actionType'),
+    refusal("an action:menu member's type 'ask_ai'", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Ask', type: 'ask_ai' }] }), 'actions'),
+    refusal(
+      "a dashboard header action's actionType 'ask_ai'",
+      () => DashboardHeaderActionSchema.safeParse({ label: 'Ask', actionUrl: '#', actionType: 'ask_ai' }),
+      'actionType',
+    ),
+  ],
   'field-inline-edit-boolean-removed': [
     refusal(
       'field.inlineEdit: true',

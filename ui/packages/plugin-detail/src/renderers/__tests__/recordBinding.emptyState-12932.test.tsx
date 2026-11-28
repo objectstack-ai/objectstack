@@ -58,7 +58,7 @@ const OBJECT_SCHEMA = {
   },
 };
 
-const APPROVE = { name: 'approve', label: 'Approve environment', type: 'api', locations: ['record_header'] };
+const APPROVE = { name: 'approve', label: 'Approve environment', type: 'api', locations: ['record_page'] };
 const OBJECT_META = { name: OBJECT, label: 'Environment', actions: [APPROVE] };
 
 type Row = Record<string, unknown>;

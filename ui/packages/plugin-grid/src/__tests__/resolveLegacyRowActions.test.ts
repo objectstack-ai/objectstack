@@ -14,7 +14,7 @@ const CONVERT_LEAD = {
   label: 'Convert Lead',
   type: 'api',
   target: '/leads/convert',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 
 describe('resolveLegacyRowActions', () => {
@@ -31,8 +31,8 @@ describe('resolveLegacyRowActions', () => {
     expect(undeclared).toEqual([]);
   });
 
-  it('drops a legacy name that duplicates an existing list_item def', () => {
-    const listItemDef = { ...CONVERT_LEAD, locations: ['list_item'], label: '转换线索' };
+  it('drops a legacy name that duplicates an existing record_row def', () => {
+    const listItemDef = { ...CONVERT_LEAD, locations: ['record_row'], label: '转换线索' };
     const { defs, undeclared } = resolveLegacyRowActions({
       rowActions: ['convert_lead'],
       rowActionDefs: [listItemDef],
@@ -72,8 +72,8 @@ describe('resolveLegacyRowActions', () => {
   });
 
   it('appends promotions after the declared defs and preserves order', () => {
-    const archive = { name: 'archive', locations: ['list_item'] };
-    const merge = { name: 'merge', locations: ['record_header'] };
+    const archive = { name: 'archive', locations: ['record_row'] };
+    const merge = { name: 'merge', locations: ['record_page'] };
     const { defs, undeclared } = resolveLegacyRowActions({
       rowActions: ['merge', 'unknown_one', 'convert_lead'],
       rowActionDefs: [archive],

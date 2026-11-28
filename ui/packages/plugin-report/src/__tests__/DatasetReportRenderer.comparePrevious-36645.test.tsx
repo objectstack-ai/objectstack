@@ -44,11 +44,15 @@ beforeAll(() => {
 vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
 
 let chartProps: Record<string, any> | null = null;
+/** Every chart render's props, in order (objectstack#38008). */
+let chartRenders: Array<Record<string, any>> = [];
 
 beforeEach(() => {
   chartProps = null;
+  chartRenders = [];
   ComponentRegistry.register('chart', (props: any) => {
     chartProps = props;
+    chartRenders.push(props);
     return null;
   });
 });
@@ -162,6 +166,26 @@ describe('「Compare with previous period」 on a report (objectstack-ai/objects
     fireEvent.click(compareSwitch());
     await waitFor(() => expect(chartProps!.schema.series).toHaveLength(1));
     expect(src.selections[src.selections.length - 1]).not.toHaveProperty('compareTo');
+  });
+
+  it('never draws the comparison series over rows the earlier window was not queried for (objectstack#38008)', async () => {
+    // The render that carries the switch runs before the chart's query for it
+    // does. Drawn there, the new series would sit over the previous
+    // selection's rows: a comparison series with no comparison values.
+    const src = makeSource();
+    renderReport({ ...BASE, chart: { type: 'bar', xAxis: 'stage', yAxis: 'amount' } }, src);
+    await waitFor(() => expect(chartProps?.schema?.series).toBeDefined());
+
+    fireEvent.click(compareSwitch());
+    await waitFor(() =>
+      expect(chartProps!.schema.data.find((r: any) => r.stage === 'Won')).toMatchObject({ amount__compare: 20 }),
+    );
+
+    const compared = chartRenders.filter((p) => p.schema.series.some((s: any) => s.variant === 'comparison'));
+    expect(compared.length).toBeGreaterThan(0);
+    for (const p of compared) {
+      for (const row of p.schema.data) expect(row).toHaveProperty('amount__compare');
+    }
   });
 
   it.each([['bar'], ['line']])(

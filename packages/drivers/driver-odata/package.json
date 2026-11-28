@@ -1,6 +1,6 @@
 {
   "name": "@objectstack/driver-odata",
-  "version": "19.0.0-next.0",
+  "version": "19.0.0-next.2",
   "license": "Apache-2.0",
   "description": "OData v4 and v2 datasource driver for ObjectStack — serve an OData service's entity sets as external objects through a plugin driver",
   "keywords": [

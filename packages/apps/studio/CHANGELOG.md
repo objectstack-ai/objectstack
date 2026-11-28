@@ -1,5 +1,95 @@
 # @objectstack/studio
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Minor Changes
+
+- 81c68b3: feat(spec): a book audience can name a capability, so the Setup and Studio docs open only for callers who can open those apps
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: none — no `skills/` page teaches the book audience forms; `content/docs/ui/doc-pages.mdx` documents the new form in this change
+  
+  A book's `audience` (ADR-0046 §6.7) takes a fourth form, `{ systemPermission: 'TOKEN' }`: the book's pages are read by a signed-in caller who holds that capability through any permission set, the same caller an app with `requiredPermissions: ['TOKEN']` opens for. `{ permissionSet }` names one set, so it could not gate a manual on a capability several sets grant (`setup.access` comes with `organization_admin`, `admin_full_access` and any delegated-admin set an application authors).
+  
+  - **`@objectstack/spec`.** `BookAudienceSchema` and `BookAudience` gain the arm. It is strict, so `{ systemPermission, label }` is refused at parse, and an object that also carries `permissionSet` is refused too: an audience names one gate. `BookAudience` is a wider union now: TypeScript code that reads `.permissionSet` after a bare `typeof audience === 'object'` check narrows by key instead (`'permissionSet' in audience`). `AudienceCaller` gains `systemPermissions`, and `audienceAllows` admits the arm only when that list holds the token; an absent list denies (fail closed). Every other form answers as before.
+  - **`@objectstack/rest`.** The docs audience reads the caller's own `systemPermissions` (the list every `requiredPermissions` arm of the `/meta` read gate reads) when some book carries the new form, on `GET /meta/doc` (with and without `?include=content`), `GET /meta/doc/:name`, `GET /meta/book`, `GET /meta/book/:name/tree` and the app-nav `doc` entries. New: `anySystemPermissionAudience`, and the optional `resolveAudienceSystemPermissions` port on `MetaReadGateAudienceSources` for a transport whose audience reads someone else's holdings.
+  - **`@objectstack/runtime`.** The MCP docs tools (`search_package_docs`, `read_package_doc`) gate on the same form; on an OAuth grant they read the delegating person's own capabilities, never the token's ceiling.
+  - **`@objectstack/setup`, `@objectstack/studio`.** Each package now ships a manual (`setup_manual`, `studio_manual`) claiming its package's doc namespace (`setup_*`, `studio_*`), gated on `setup.access` / `studio.access`. Before, those docs were claimed by no book, so they fell back to `org`: listed to administrators only by the Console's docs index, but readable at their address, and through `?include=content`, by every signed-in member. Now a member who cannot open Setup gets `setup_overview` in neither list and a `403 PERMISSION_DENIED` on its read; an administrator reads it as before. The docs' Console address now names the manual (`/apps/com.objectstack.setup/docs/setup/setup_overview`) in place of the package's implicit one; the flat `/docs/setup_overview` permalink still finds it.
+  - **`@objectstack/lint`.** `capability-reference-unknown` also resolves a book's `audience.systemPermission`, so a misspelled capability (which hides the manual from everyone) warns.
+  - **`@object-ui/app-shell`, `@object-ui/i18n`.** Studio's book preview shows a capability-gated book as "Capability: TOKEN" instead of "Org", and the book form round-trips the new form.
+  
+  Nothing to migrate: the manuals claim by name, so a stored doc bound to no package (which a package-scoped `include: '*'` would also have claimed) keeps the audience it had. Only docs named under those prefixes change audience: on `main` that is `setup_overview` and `studio_overview`.
+
+### Patch Changes
+
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

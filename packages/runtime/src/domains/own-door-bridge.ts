@@ -50,7 +50,8 @@
  *
  * ## The slot is the REQUEST kernel's, read per request
  *
- * The member is looked up with `getRequestKernelService`: the request's own
+ * The member is looked up with {@link readDoorSlot}, the reader every
+ * dispatcher door bridge reads its member through: the request's own
  * resolved kernel, never the host kernel's scoped fallback. Each of these
  * doors writes a row through the engine of the kernel whose member serves it,
  * so a tenant kernel that lacks the member must answer `501`, ⛔ never be
@@ -79,6 +80,7 @@
 import { INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import { operationUserMessage } from '@objectstack/core';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
+import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRequest, DomainRoute } from '../domain-handler-registry.js';
 
@@ -184,13 +186,7 @@ export async function handleOwnDoorBridgeRequest(
         return { handled: true, response: deps.routeNotFound(req.path) };
     }
 
-    // A kernel that throws for an unregistered name reads as an empty slot.
-    let service: Record<string, unknown> | null | undefined;
-    try {
-        service = await deps.getRequestKernelService(context, bridge.slot) as Record<string, unknown> | null | undefined;
-    } catch {
-        service = undefined;
-    }
+    const service = await readDoorSlot(deps, context, bridge.slot) as Record<string, unknown> | undefined;
     if (!service) {
         return localizedNotImplemented(deps, notImplementedSentence(bridge, context, 'own_door_service_unregistered', { producer: bridge.producer }));
     }
@@ -225,6 +221,43 @@ export async function handleOwnDoorBridgeRequest(
             err instanceof Error ? err : new Error(String(err)),
         );
         return { handled: true, response: deps.error(INTERNAL_ERROR_MESSAGE, 500) };
+    }
+}
+
+/**
+ * The service on a door's slot, read off the REQUEST's own kernel and nowhere
+ * else: a door is served only by the request's own kernel.
+ *
+ * A door member is closed over the kernel that registered it, so a request
+ * kernel without the slot is the door's typed not-available answer (`501`),
+ * ⛔ never a member found on another kernel. On a host with one kernel the
+ * request's kernel IS that kernel, so the answer there is the one it always was.
+ *
+ * Typed as `getRequestKernelService` is: a slot in `ServiceSlotContracts` reads
+ * as its contract, any other name as an untyped value the caller casts.
+ *
+ * What `own-door-bridge.test.ts` holds, exactly: every non-test module under
+ * `src/domains/` that takes the transport's request whole
+ * (`context.request as Request`) or is built on this file's shared bridge body
+ * reads no service through `deps.resolveService`, `deps.resolveServiceOrLoud`,
+ * `deps.getService` or a `deps.getObjectQL` given an environment id, and each such
+ * module that reads a slot reads it through this. A module that hands the
+ * request on some other way is outside that net.
+ *
+ * A kernel that throws for an unregistered name reads as an empty slot. Read
+ * on every request, never recorded (AGENTS.md, "Startup registry reads").
+ */
+export function readDoorSlot<K extends keyof ServiceSlotContracts>(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    slot: K,
+): Promise<ServiceSlotContract<K> | undefined>;
+export function readDoorSlot(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): Promise<any>;
+export async function readDoorSlot(deps: DomainHandlerDeps, context: HttpProtocolContext, slot: string): Promise<unknown> {
+    try {
+        return (await deps.getRequestKernelService(context, slot)) ?? undefined;
+    } catch {
+        return undefined;
     }
 }
 
@@ -274,7 +307,12 @@ function notImplementedSentence(
  * the comment doors (`comments.ts`) and the webhook redelivery door
  * (`webhooks.ts`, both #37610), the approval action-page door (`approvals.ts`)
  * and the inbound automation hooks (`automation-hooks.ts`, both #37662), and
- * the other domain modules' `501`s (#37811).
+ * the other domain modules' `501`s (#37811), `capabilityUnavailable`
+ * (`unavailable.ts`, #37864) among them. Two callers read it directly: the
+ * activation door (`catalog-activation.ts`), for the noun its `501` names in
+ * the same language, and `capabilityUnavailableMessageFor`
+ * (`unavailable.ts`), for the custom-endpoint flow target's `501`, which
+ * builds its own envelope.
  */
 export function requestLocaleOf(context: HttpProtocolContext): string | undefined {
     const headers = (context.request as { headers?: unknown } | undefined)?.headers as

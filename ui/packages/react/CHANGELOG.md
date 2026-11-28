@@ -1,5 +1,127 @@
 # @object-ui/react
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 3eb778d: perf(console): a list page draws its rows once before they paint, and the shell re-renders less during first load
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No schema key, accepted value, metadata type or stored row is added, removed or renamed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the value two React hooks of @object-ui/i18n return: `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`, which moved to its own hook. Its consumer is code, and the compiler names every reader left behind. `runtime-interface-only` does not fit on a checked fact: the context value's interface is not exported, so it cannot be named by path. -->
+  
+  On a list page's first load the grid drew its whole table several times between the rows' first render and their first paint: once with row-end controls before the list page scope was known, once when the inline-action fold found its host, and once when the record verdicts were republished with nothing new in them. The rows now draw once, without row-end controls, and those passes are gone.
+  
+  The shell does less during first load too. The app's own locale list lands after the console has drawn; it used to re-render every component that reads a translation, about 1,900 of them. It is now read with `useAppContentLanguages()` from `@object-ui/i18n`, and only the language menus re-render for it. `useObjectTranslation()` and `useI18nContext()` no longer carry `appContentLanguages`. A sidebar entry is not redrawn when a new capability checker gives it the same answer.
+  
+  Nothing changes in what the list, the sidebar or the language menus show.
+  
+  **BREAKING** (`@object-ui/i18n`, and `@object-ui/react`, which re-exports the same two hooks: their return values), shipped as `patch`: the change is not to the metadata protocol (`Metadata-protocol: none`).
+  
+  - Removed: the `appContentLanguages` field from what `useObjectTranslation()` and `useI18nContext()` return, whether they are imported from `@object-ui/i18n` or from `@object-ui/react`. It was added there by #36040.
+  - Use instead: `useAppContentLanguages()`, which both entries now export: `@object-ui/i18n`, and `@object-ui/react` beside the two hooks. It returns the same value, the app's declared content languages or `null` while they are unknown, and `null` outside an `I18nProvider`.
+  - Why: the list lands after the console has drawn. While it rode on the translation context, its arrival re-rendered every component that reads a translation, about 1,900 of them on first load. In its own context only the components that read it re-render.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

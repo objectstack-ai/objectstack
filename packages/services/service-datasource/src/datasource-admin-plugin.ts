@@ -203,7 +203,9 @@ async function loadDatasourceRows(engine: DataEngineLike | undefined): Promise<A
       // driver factory reads since #4456. The direct sys_metadata read here
       // bypasses the metadata service's own converting loaders, so the pass
       // must happen locally.
-      out.push(applyConversionsToStoredItem(DS_META_TYPE, parsed));
+      const item = applyConversionsToStoredItem(DS_META_TYPE, parsed);
+      // The seam answers `undefined` for a row the chain yields no item of.
+      if (item !== undefined) out.push(item);
     } catch {
       /* skip corrupt row */
     }
@@ -355,7 +357,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
         method: 'POST',
         variant: 'secondary',
         refreshAfter: false,
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
       },
       // The #8155 migration's operator-initiated door: one datasource, one
       // click, by a human who is looking at the row. Deliberately NOT a
@@ -379,7 +381,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
         method: 'POST',
         variant: 'secondary',
         refreshAfter: true,
-        locations: ['record_header'],
+        locations: ['record_page'],
       },
     ] as any);
 

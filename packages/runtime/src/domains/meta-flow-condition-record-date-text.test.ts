@@ -247,3 +247,27 @@ describe('[#36377] the flow publish door refuses a bare date ordering before dat
         expect(await rig.state('loan_mixed_ordering')).toEqual(['active']);
     }, 60_000);
 });
+
+/**
+ * [#38135] The flow publish door accepts a condition that compares a date field
+ * with `addDays(today(), N)`, as it always did. Before the fix the published
+ * flow failed every run (ordering) or never fired (equality); the runtime now
+ * evaluates it as it evaluates the `today()` comparison (pinned in
+ * `@objectstack/service-automation`'s `flow-registration-schema-e2e.test.ts`),
+ * so the door is unchanged and this is its control: it publishes and goes
+ * `active`, with no date finding.
+ */
+describe('[#38135] the flow publish door accepts a date field compared with addDays(today(), N)', () => {
+    it('⭐ CONTROL — the ordering and equality spellings publish and go active', async () => {
+        const rig = await boot();
+        for (const [name, condition] of [
+            ['loan_due_within_month', 'record.due_date < addDays(today(), 30)'],
+            ['loan_due_within_month_bare', 'due_date > "2026-01-01" && addDays(today(), 30) > record.due_date'],
+            ['loan_due_tomorrow', 'record.due_date == addDays(today(), 1)'],
+        ] as const) {
+            const err = await rig.publish(flowOn(name, condition));
+            expect(err?.issues ?? err, `${condition}: the door refused`).toBeUndefined();
+            expect(await rig.state(name), condition).toEqual(['active']);
+        }
+    }, 60_000);
+});

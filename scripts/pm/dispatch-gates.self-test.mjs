@@ -296,10 +296,12 @@ import {
   readBySpecMigrationEntryConsumers,
   SPEC_MIGRATION_ENTRY_ROOTS,
   packageTestSubsetFile,
-  changesFieldSchemaKeySet,
+  changesServedKeySet,
+  servedKeySetPinGaps,
   declaredKeySet,
   objectLiteralMembers,
-  FIELD_SCHEMA_KEY_DECLARATIONS,
+  SERVED_KEY_SET_DECLARATIONS,
+  SERVED_KEY_SET_PINS,
   adrAnchorTargets,
   breaksAnAdrAnchor,
   carriesACliCommandLiteral,
@@ -5491,32 +5493,41 @@ export function selfTest({ tier = 'full' } = {}) {
   // The 178 files run only in CI's Test UI shards, so no family named them and a
   // card under ui package source or skills/objectui learned of a red one CI round
   // later. The entry stands in for that CI JOB (`ciJobRunsRunner`): pinned here
-  // are the predicate on all four roots and outside them, the rendering and the
+  // are the predicate on every reader's specimen and outside them, the rendering and the
   // runnable union through the whole table, the `--ran` verdict without it, the
   // STALE branch, and the binding against the live workflows.
   const UI_SUITE = 'pnpm --dir ui exec vitest run scripts/';
+  // Keyed by the reader that makes each specimen a suite input, so a root list
+  // narrowed back to sub-trees reds on the specimen it drops.
   const UI_SUITE_SPECIMENS = Object.freeze({
-    'ui/packages/**/src': 'ui/packages/sdui-parser/src/expression-carriage.ts',
-    'ui/apps/**': 'ui/apps/console/src/App.tsx',
-    'skills/objectui/**': 'skills/objectui/SKILL.md',
-    'ui/scripts/**': 'ui/scripts/check-skill-examples.mjs',
+    'ui package source': 'ui/packages/sdui-parser/src/expression-carriage.ts',
+    'the ui apps': 'ui/apps/console/src/App.tsx',
+    'the objectui skill bundle': 'skills/objectui/SKILL.md',
+    'the suite\'s own tree': 'ui/scripts/check-skill-examples.mjs',
+    // check-ui-root-lookups scans every source under ui/packages, a package's
+    // own scripts/ directory included: the miss this specimen pins.
+    'a ui package\'s own scripts/ directory': 'ui/packages/components/scripts/new-script.mjs',
+    // package-files-exist reads every ui package manifest.
+    'a ui package manifest': 'ui/packages/core/package.json',
+    // the vitest-config tests read the ui root's config.
+    'the ui root config': 'ui/vitest.config.mts',
   });
   const UI_SUITE_CONTROLS = Object.freeze([
     'packages/core/src/x.ts',
-    'ui/packages/core/package.json',
+    'uikit/packages/core/scripts/x.mjs',
     'skills/objectstack/SKILL.md',
     'scripts/pm/dispatch-gates.mjs',
   ]);
   const uiEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === UI_SUITE));
   t('exactly one entry in the table names the ui/scripts suite, bound to the Test UI job',
     uiEntry.length === 1 && uiEntry[0].matches('ui/scripts/x.mjs') && uiEntry[0].gates[0].ciJob === 'Test UI' && UI_SUITE.startsWith(`${uiEntry[0].gates[0].ciRunner} `));
-  t('the roots are the card\'s four, in the trigger language', ['ui/packages/**/src/**', 'ui/apps/**', 'skills/objectui/**', 'ui/scripts/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
+  t('the roots are the whole ui tree and the objectui skill bundle, in the trigger language', ['ui', 'ui/**', 'skills/objectui/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
   for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
     t(`a path under ${root} is read by the ui/scripts suite (${specimen})`, readByUiScriptsSuite(specimen));
   }
-  t('a dispatch surface given as a ui package\'s src DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts'));
+  t('a dispatch surface given as a ui DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts') && readByUiScriptsSuite('ui/packages/fields/scripts') && readByUiScriptsSuite('ui'));
   for (const control of UI_SUITE_CONTROLS) {
-    t(`CONTROL: ${control} is outside the four roots`, !readByUiScriptsSuite(control));
+    t(`CONTROL: ${control} is outside the roots`, !readByUiScriptsSuite(control));
   }
   // A resolver that resolves a family by its `pnpm` spelling and a CI-job gate by
   // its own name — the shape `derive`'s resolver has.
@@ -5530,10 +5541,10 @@ export function selfTest({ tier = 'full' } = {}) {
     t(`…and ${control} derives no suite line and no suite command`,
       !throughTableUi(control) && !commandsFor({ kindGroups: changeKindGates([control], uiResolved) }).includes(UI_SUITE));
   }
-  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['skills/objectui/**']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
+  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['the objectui skill bundle']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
   t('the suite line states its build prerequisite, runnably', /seven @objectstack packages/.test(uiLine) && uiLine.includes('turbo run build') && uiLine.includes('--filter=@objectstack/sdui-parser...'));
   t('…and says it is the whole suite, never a subset', /The whole suite, never a subset/.test(uiLine));
-  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['ui/apps/**']], uiResolved) });
+  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['the ui apps']], uiResolved) });
   const uiWithout = runReconciliation({
     derived: uiDerived,
     record: parseRunRecord(uiDerived.filter((c) => c !== UI_SUITE).map((c) => `${c} :: exit 0`).join('\n')),
@@ -5541,7 +5552,7 @@ export function selfTest({ tier = 'full' } = {}) {
   t('⭐ a run record carrying every derived command BUT the suite is NOT ok, and names the suite unrun', !uiWithout.ok && uiWithout.unrun.some((u) => u.command === UI_SUITE));
   const uiWith = runReconciliation({ derived: uiDerived, record: parseRunRecord(uiDerived.map((c) => `${c} :: exit 0`).join('\n')) });
   t('CONTROL: the same record WITH the suite is ok', uiWith.ok);
-  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['ui/scripts/**']], () => null, uiEntry);
+  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['the suite\'s own tree']], () => null, uiEntry);
   t('an unresolvable binding renders STALE, naming the job and the runner it lost',
     uiStale.filter((l) => l.includes(`⚠ ${UI_SUITE}: STALE`) && l.includes("job named 'Test UI…'") && l.includes("'pnpm --dir ui exec vitest run'")).length === 1);
   // The binding itself, against fixtures and then the LIVE workflows.
@@ -5636,45 +5647,70 @@ export function selfTest({ tier = 'full' } = {}) {
     try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === '@objectstack/cli'; } catch { return false; }
   })());
 
-  // ── The closure pins a FieldSchema key-set change owes ────────────────────
+  // ── The whole-set pins a served type's key-set change owes ───────────────
   //
-  // Three tests outside the spec package hold FieldSchema's whole key set (two
-  // classification tables both ways, one property count), and CI runs them only
-  // inside Test Core's package test task, so a card adding a field key learned of
-  // them a CI round after a green local ledger. The row is read from the DIFF:
-  // pinned here are the member reader, the declaration reader, the predicate on
-  // every edit shape that does and does not move the set, the rendering and the
-  // runnable union, the `--ran` verdict without one, the STALE branch, the
-  // bindings, and the live census of the reader against the driver's table.
-  const FK_GATES = Object.freeze([
-    'pnpm --filter @objectstack/driver-sql exec vitest run src/builtin-column-collision.test.ts',
-    'pnpm --filter @objectstack/metadata-core exec vitest run src/object-schema-fls-references.test.ts',
-    'pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.meta-types-degenerate-derivation.test.ts',
-  ]);
-  const fkEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => FK_GATES.includes(g.name)));
-  t('⭐ exactly one entry names the three FieldSchema closure pins, bound to the Test Core job and the field-schema-key-set predicate',
-    fkEntry.length === 1 && fkEntry[0].gates.length === 3 && FK_GATES.every((n) => fkEntry[0].gates.some((g) => g.name === n && g.ciJob === 'Test Core'))
-      && CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => FK_GATES.includes(g.name))).map((r) => r.matches).join() === 'field-schema-key-set');
+  // Four tests outside the spec package hold a served metadata type's whole key
+  // set (driver-sql's storage table for field, metadata-core's reference tables
+  // for field and object, metadata-protocol's property counts for fourteen types,
+  // the ui report inspector's coverage case for report's own keys), and CI runs
+  // them only inside Test Core's package test task or the Test UI shards, so a
+  // card adding a key learned of them a CI round after a green local ledger. One
+  // row per pin, each read from the DIFF through its `SERVED_KEY_SET_PINS` entry:
+  // pinned here are the roster, the member reader, the declaration reader, the
+  // predicate on every edit shape that does and does not move a set, the spread
+  // rows and who spreads them, the rendering and the runnable union, the `--ran`
+  // verdict without one, the STALE branch, the bindings, and the live censuses
+  // of the reader against each pin's own numbers and tables.
+  const KS_GATES = Object.freeze({
+    'field-schema-key-set': 'pnpm --filter @objectstack/driver-sql exec vitest run src/builtin-column-collision.test.ts',
+    'object-reference-key-set': 'pnpm --filter @objectstack/metadata-core exec vitest run src/object-schema-fls-references.test.ts',
+    'served-type-key-set': 'pnpm --filter @objectstack/metadata-protocol exec vitest run src/protocol.meta-types-degenerate-derivation.test.ts',
+    'report-inspector-key-set': 'pnpm --dir ui exec vitest run packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx',
+  });
+  const KS_JOB = Object.freeze({ 'field-schema-key-set': 'Test Core', 'object-reference-key-set': 'Test Core', 'served-type-key-set': 'Test Core', 'report-inspector-key-set': 'Test UI' });
+  const KS_NAMES = Object.values(KS_GATES);
+  const ksEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => KS_NAMES.includes(g.name)));
+  const ksRows = CHANGE_KIND_ROWS.filter((r) => r.gates.some((g) => KS_NAMES.includes(g.name)));
+  t('⭐ the pins table and the rows agree: one row per pin, named by the pin\'s key, each carrying exactly its one test, bound to its CI job',
+    JSON.stringify(Object.keys(SERVED_KEY_SET_PINS)) === JSON.stringify(Object.keys(KS_GATES))
+      && ksRows.length === 4 && ksEntry.length === 4
+      && ksRows.every((r) => r.gates.length === 1 && KS_GATES[r.matches] === r.gates[0].name && KS_JOB[r.matches] === r.gates[0].ciJob));
+  t('…and no pin names a type the reader has no row for (the load-time refusal\'s input is empty)', servedKeySetPinGaps().length === 0);
+  t('CONTROL: a pin naming an undeclared type IS a gap, by pin and type',
+    JSON.stringify(servedKeySetPinGaps({ k: { types: ['field', 'widget'], throughSpreads: true } })) === JSON.stringify(['k: widget']));
+  t('the served pin holds the fourteen types, field\'s pin field alone, the reference pin field and object, the report pin report\'s own keys',
+    SERVED_KEY_SET_PINS['served-type-key-set'].types.length === 14
+      && SERVED_KEY_SET_PINS['field-schema-key-set'].types.join() === 'field'
+      && SERVED_KEY_SET_PINS['object-reference-key-set'].types.join() === 'field,object'
+      && SERVED_KEY_SET_PINS['report-inspector-key-set'].types.join() === 'report' && SERVED_KEY_SET_PINS['report-inspector-key-set'].throughSpreads === false);
   // The member reader, pure.
   const olm = (src) => objectLiteralMembers(src, src.indexOf('{'));
   t('the member reader reads names, quoted keys, methods, shorthands and spreads at its own depth',
     JSON.stringify(olm("{ a: 1, 'b-c': 2, d() {}, get e() { return 1; }, f, ...G.shape, h?: 3 }")) === JSON.stringify(['a', 'b-c', 'd', 'e', 'f', '...G.shape', 'h']));
   t('…and a computed key as its bracketed text', JSON.stringify(olm('{ [KEY]: 1, z: 2 }')) === JSON.stringify(['[KEY]', 'z']));
+  t('…and a spread whose operand is not a bare name path as its own source text, one member each (a cast, a conditional, an inline literal, a call)',
+    JSON.stringify(olm('{ ...G, ...(X as unknown as Y).shape, ...(cond ? A : {}), ...{ k: v },\n  ...make(), z: 1 }'))
+      === JSON.stringify(['...G', '...(X as unknown as Y).shape', '...(cond ? A : {})', '...{ k: v }', '...make()', 'z']));
   t('…and nothing nested, commented or quoted',
     JSON.stringify(olm("{ a: z.object({ inner: 1 }), // gone: 1,\n /* x: 2, */ b: 'c: { d: 1 }', e: [{ f: 1 }], g: (h) => { const i = { j: 1 }; return i; } }")) === JSON.stringify(['a', 'b', 'e', 'g']));
   t('…and null for a literal that does not close, never a short list', olm('{ a: 1, b: { c: 2 }') === null);
   // The declaration reader, pure.
-  const FK_FIELD = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'FieldSchema');
-  const FK_PROT = FIELD_SCHEMA_KEY_DECLARATIONS.find((d) => d.declares === 'MetadataProtectionFields');
+  const ksRow = (key) => SERVED_KEY_SET_DECLARATIONS.find((d) => d.type === key || d.spread === key);
+  const FK_FIELD = ksRow('field');
+  const FK_PROT = ksRow('MetadataProtectionFields');
+  const KS_OVR = ksRow('OverrideDeclarationFields');
   const fkSrc = (shape, opts = "surface: 'this field', guidance: { columnName: 'removed' }") =>
     `import { z } from 'zod';\nexport const FieldSchema = lazySchema(() => {\n  const base = strictObject({ ${opts} }, {\n${shape}\n  });\n  return base.superRefine((f, ctx) => { ctx.addIssue({ code: 'custom', path: ['x'] }); });\n});\n`;
   const FK_BASE = fkSrc("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,\n    ...MetadataProtectionFields,");
   t('the declaration reader takes the strictObject call\'s SECOND argument, not the options before it',
     JSON.stringify(declaredKeySet(FK_BASE, FK_FIELD)) === JSON.stringify(['...MetadataProtectionFields', 'name', 'type']));
   t('…a bare literal row reads the literal after the binding', JSON.stringify(declaredKeySet('export const MetadataProtectionFields = {\n  _lock: x,\n  _provenance: y,\n};', FK_PROT)) === JSON.stringify(['_lock', '_provenance']));
+  t('…a factory row reads the literal its arrow body calls with (action\'s `actionObject`)',
+    JSON.stringify(declaredKeySet("const actionObject = () => strictObject({ surface: 'this action' }, {\n  name: z.string(),\n  ...OverrideDeclarationFields,\n});", ksRow('action'))) === JSON.stringify(['...OverrideDeclarationFields', 'name']));
   t('…and null where the declaration is not where the row says', declaredKeySet(FK_BASE.replace('strictObject(', 'z.object('), FK_FIELD) === null
     && declaredKeySet('export const Other = {};', FK_PROT) === null);
-  // The predicate, over injected base and head blobs.
+  // The predicate, over injected base and head blobs: field's own row first, every edit shape.
+  const PIN = SERVED_KEY_SET_PINS;
   const FK_PATH = FK_FIELD.path;
   const fkIo = (head, base) => ({ readHead: () => head, readBase: () => base });
   const FK_EDITS = Object.freeze({
@@ -5682,6 +5718,7 @@ export function selfTest({ tier = 'full' } = {}) {
     'a key removed': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n", ''), true],
     'a key renamed': [FK_BASE.replace('    type: FieldTypeSchema,', '    kind: FieldTypeSchema,'), true],
     'a spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...AuditFields,'), true],
+    'a parenthesised spread added to the shape': [FK_BASE.replace('    ...MetadataProtectionFields,', '    ...MetadataProtectionFields,\n    ...(AuditSchema as unknown as { shape: object }).shape,'), true],
     'the declaration moved out of the reader\'s reach': [FK_BASE.replace('strictObject(', 'z.object('), true],
     'the file deleted': [null, true],
     'a describe() reworded': [FK_BASE.replace("'Machine name'", "'Machine name (snake_case)'"), false],
@@ -5691,59 +5728,164 @@ export function selfTest({ tier = 'full' } = {}) {
     'the keys reordered': [FK_BASE.replace("    name: z.string().describe('Machine name'),\n    type: FieldTypeSchema,", "    type: FieldTypeSchema,\n    name: z.string().describe('Machine name'),"), false],
   });
   for (const [edit, [head, expected]] of Object.entries(FK_EDITS)) {
-    t(`${expected ? '' : 'CONTROL: '}${edit} ${expected ? 'derives' : 'derives nothing'}`, changesFieldSchemaKeySet(FK_PATH, fkIo(head, FK_BASE)) === expected);
+    t(`${expected ? '' : 'CONTROL: '}field: ${edit} ${expected ? 'derives' : 'derives nothing'}`, changesServedKeySet(FK_PATH, PIN['field-schema-key-set'], fkIo(head, FK_BASE)) === expected);
   }
-  t('⭐ an unchanged file derives nothing: the surface the PM names before the code exists', !changesFieldSchemaKeySet(FK_PATH, fkIo(FK_BASE, FK_BASE)));
-  t('a key added to the spread protection fields derives, on that file\'s own row',
-    changesFieldSchemaKeySet(FK_PROT.path, fkIo('export const MetadataProtectionFields = {\n  _lock: x,\n  _owner: z,\n};', 'export const MetadataProtectionFields = {\n  _lock: x,\n};')));
-  t('CONTROL: a sibling spec file whose object gained a key is not this row',
-    !changesFieldSchemaKeySet('packages/spec/src/data/object.zod.ts', fkIo(FK_BASE.replace('    type: FieldTypeSchema,', '    type: FieldTypeSchema,\n    extra: z.string(),'), FK_BASE)));
-  t('…a dispatch surface pasted with a leading ./ is the same path', changesFieldSchemaKeySet(`./${FK_PATH}`, fkIo(FK_EDITS['a key added'][0], FK_BASE)));
-  // Through the rendering, with the predicate bound to the fixture IO.
-  const fkResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
-  const fkBound = fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a key added'][0], FK_BASE)) }));
-  const fkLines = changeKindLines([FK_PATH], fkResolved, fkBound);
-  t('a key-set change renders all three pins runnably, anchored on the delimiter', FK_GATES.every((n) => fkLines.some((l) => l.includes(`- ${n}   —`))));
-  t('…each line states its build prerequisite as measured: none for driver-sql, the closure build for the two that read the spec dist',
-    fkLines.some((l) => l.includes(FK_GATES[0]) && /needs NO build/.test(l))
-      && fkLines.some((l) => l.includes(FK_GATES[1]) && l.includes("pnpm --filter '@objectstack/metadata-core^...' build"))
-      && fkLines.some((l) => l.includes(FK_GATES[2]) && l.includes("pnpm --filter '@objectstack/metadata-protocol^...' build")));
-  t('…and carries no tracker number in the text a dev is shown', fkLines.length === 4 && fkLines.every((l) => !/#\d{4,5}\b/.test(l)));
-  const fkDerived = commandsFor({ kindGroups: changeKindGates([FK_PATH], fkResolved, fkBound) });
-  t('the runnable union carries all three', FK_GATES.every((n) => fkDerived.includes(n)));
+  t('⭐ an unchanged file derives nothing: the surface the PM names before the code exists', !changesServedKeySet(FK_PATH, PIN['field-schema-key-set'], fkIo(FK_BASE, FK_BASE)));
+  t('…a dispatch surface pasted with a leading ./ is the same path', changesServedKeySet(`./${FK_PATH}`, PIN['field-schema-key-set'], fkIo(FK_EDITS['a key added'][0], FK_BASE)));
+  // Each pin holds its own types and no other: a key added to one type's schema, read through every pin.
+  const ksTypeSrc = (row, shape) => (row.declares === 'ObjectSchemaBase'
+    ? `const ObjectSchemaBase = strictObject(\n  { surface: 'this object' },\n  {\n${shape}\n  },\n);\n`
+    : row.declares === 'actionObject'
+      ? `const actionObject = () => strictObject({ surface: 'this action' }, {\n${shape}\n});\n`
+      : `export const ${row.declares} = lazySchema(() => strictObject({ surface: 'this ${row.type}' }, {\n${shape}\n}));\n`);
+  const KS_SHAPE = '  name: z.string(),\n  label: z.string(),\n  ...MetadataProtectionFields,\n  ...OverrideDeclarationFields,';
+  const KS_SHAPE_ADDED = `${KS_SHAPE}\n  extra: z.string().optional(),`;
+  const KS_HOLDS = Object.freeze({
+    'field-schema-key-set': ['field'],
+    'object-reference-key-set': ['field', 'object'],
+    'served-type-key-set': ['action', 'agent', 'app', 'dashboard', 'dataset', 'field', 'flow', 'hook', 'object', 'page', 'position', 'report', 'skill', 'tool'],
+    'report-inspector-key-set': ['report'],
+  });
+  for (const row of SERVED_KEY_SET_DECLARATIONS.filter((d) => d.type !== undefined)) {
+    const io = fkIo(ksTypeSrc(row, KS_SHAPE_ADDED), ksTypeSrc(row, KS_SHAPE));
+    const fired = Object.keys(PIN).filter((key) => changesServedKeySet(row.path, PIN[key], io));
+    const owed = Object.keys(PIN).filter((key) => KS_HOLDS[key].includes(row.type));
+    t(`a key added to ${row.declares} (${row.type}) derives exactly the pins that hold ${row.type}: ${owed.join(', ')}`, JSON.stringify(fired) === JSON.stringify(owed));
+    t(`CONTROL: ${row.declares} with a describe() reworded derives no pin`,
+      Object.values(PIN).every((pin) => !changesServedKeySet(row.path, pin, fkIo(ksTypeSrc(row, KS_SHAPE.replace('z.string(),', "z.string().describe('the name'),")), ksTypeSrc(row, KS_SHAPE)))));
+  }
+  // The spread rows: who spreads a member object is read from the types' own declarations, at either side.
+  const ksIoOf = (byPath) => ({ readHead: (p) => byPath[p]?.[0] ?? null, readBase: (p) => byPath[p]?.[1] ?? null });
+  const PROT_BEFORE = 'export const MetadataProtectionFields = {\n  _lock: x,\n};';
+  const PROT_AFTER = 'export const MetadataProtectionFields = {\n  _lock: x,\n  _owner: z,\n};';
+  const OVR_BEFORE = 'export const OverrideDeclarationFields = {\n  overrides: x,\n} as const;';
+  const OVR_AFTER = 'export const OverrideDeclarationFields = {\n  overrides: x,\n  basedOn: y,\n} as const;';
+  const ksWorld = (spreadsOf, prot = [PROT_AFTER, PROT_BEFORE], ovr = [OVR_AFTER, OVR_BEFORE]) => ksIoOf(Object.fromEntries([
+    [FK_PROT.path, prot], [KS_OVR.path, ovr],
+    ...SERVED_KEY_SET_DECLARATIONS.filter((d) => d.type !== undefined).map((d) => {
+      const shape = ['  name: z.string(),', ...(spreadsOf[d.type] ?? []).map((s) => `  ...${s},`)].join('\n');
+      return [d.path, [ksTypeSrc(d, shape), ksTypeSrc(d, shape)]];
+    }),
+  ]));
+  const SPREADS_NOW = Object.freeze({
+    action: ['MetadataProtectionFields', 'OverrideDeclarationFields'], agent: ['MetadataProtectionFields'], app: ['MetadataProtectionFields', 'OverrideDeclarationFields'],
+    dashboard: ['MetadataProtectionFields', 'OverrideDeclarationFields'], dataset: ['MetadataProtectionFields', 'OverrideDeclarationFields'], field: ['MetadataProtectionFields'],
+    flow: ['MetadataProtectionFields', 'OverrideDeclarationFields'], hook: ['MetadataProtectionFields'], object: ['MetadataProtectionFields'],
+    page: ['MetadataProtectionFields', 'OverrideDeclarationFields'], position: ['MetadataProtectionFields'], report: ['MetadataProtectionFields', 'OverrideDeclarationFields'],
+    skill: ['MetadataProtectionFields'], tool: ['MetadataProtectionFields'],
+  });
+  const ksFired = (path, io) => Object.keys(PIN).filter((key) => changesServedKeySet(path, PIN[key], io));
+  t('⭐ a key added to the protection fields derives every pin that reads through spreads, and NOT the report pin, which excludes them',
+    ksFired(FK_PROT.path, ksWorld(SPREADS_NOW)).join() === 'field-schema-key-set,object-reference-key-set,served-type-key-set');
+  t('⭐ a key added to the override declaration derives the served pin alone: field and object do not spread it',
+    ksFired(KS_OVR.path, ksWorld(SPREADS_NOW)).join() === 'served-type-key-set');
+  t('CONTROL: a spread object edited without moving its members derives no pin',
+    ksFired(FK_PROT.path, ksWorld(SPREADS_NOW, [PROT_BEFORE.replace('_lock: x', '_lock: x.describe(\'lock\')'), PROT_BEFORE])).length === 0);
+  t('CONTROL: a spread object no pinned type spreads derives nothing for that pin',
+    !changesServedKeySet(FK_PROT.path, { types: ['tool'], throughSpreads: true }, ksWorld({ tool: [] })));
+  t('…and derives once the type spreads it, read at the base alone (the same diff dropped the spread)',
+    changesServedKeySet(FK_PROT.path, { types: ['tool'], throughSpreads: true }, (() => {
+      const w = ksWorld({ tool: [] });
+      const tool = ksRow('tool');
+      return { readHead: w.readHead, readBase: (p) => (p === tool.path ? ksTypeSrc(tool, '  name: z.string(),\n  ...MetadataProtectionFields,') : w.readBase(p)) };
+    })()));
+  t('…and reads wide when a spreader\'s declaration cannot be read on either side',
+    changesServedKeySet(FK_PROT.path, { types: ['tool'], throughSpreads: true }, (() => {
+      const w = ksWorld({ tool: [] });
+      const tool = ksRow('tool');
+      return { readHead: (p) => (p === tool.path ? null : w.readHead(p)), readBase: (p) => (p === tool.path ? null : w.readBase(p)) };
+    })()));
+  t('CONTROL: a sibling spec file that declares no served type derives no pin',
+    ksFired('packages/spec/src/ui/view.zod.ts', fkIo(FK_EDITS['a key added'][0], FK_BASE)).length === 0);
+  // Through the rendering, with each pin's predicate bound to the fixture world.
+  const ksResolved = (name, gate = null) => (gate?.ciJob ? name : `pnpm ${name}`);
+  const REPORT = ksRow('report');
+  const ksBothIo = ksIoOf({ [FK_PATH]: [FK_EDITS['a key added'][0], FK_BASE], [REPORT.path]: [ksTypeSrc(REPORT, KS_SHAPE_ADDED), ksTypeSrc(REPORT, KS_SHAPE)] });
+  const ksBound = ksEntry.map((k) => ({ ...k, matches: (p) => changesServedKeySet(p, PIN[ksRows.find((r) => r.kind === k.kind).matches], ksBothIo) }));
+  const ksPaths = [FK_PATH, REPORT.path];
+  const ksLines = changeKindLines(ksPaths, ksResolved, ksBound);
+  t('a field and a report key-set change render all four pins runnably, anchored on the delimiter', KS_NAMES.every((n) => ksLines.some((l) => l.includes(`- ${n}   —`))));
+  t('…each line states its build prerequisite as measured: none for driver-sql, the closure build for the two that read the spec dist, the job\'s seven-package build for the ui test',
+    ksLines.some((l) => l.includes(KS_GATES['field-schema-key-set']) && /needs NO build/.test(l))
+      && ksLines.some((l) => l.includes(KS_GATES['object-reference-key-set']) && l.includes("pnpm --filter '@objectstack/metadata-core^...' build"))
+      && ksLines.some((l) => l.includes(KS_GATES['served-type-key-set']) && l.includes("pnpm --filter '@objectstack/metadata-protocol^...' build"))
+      && ksLines.some((l) => l.includes(KS_GATES['report-inspector-key-set']) && /seven @objectstack packages/.test(l) && l.includes('--filter=@objectstack/sdui-parser...')));
+  t('…and carries no tracker number in the text a dev is shown', ksLines.length === 8 && ksLines.every((l) => !/#\d{4,5}\b/.test(l)));
+  const ksDerived = commandsFor({ kindGroups: changeKindGates(ksPaths, ksResolved, ksBound) });
+  t('the runnable union carries all four', KS_NAMES.every((n) => ksDerived.includes(n)));
   t('CONTROL: a describe-only edit renders none of them',
-    changeKindLines([FK_PATH], fkResolved, fkEntry.map((k) => ({ ...k, matches: (p) => changesFieldSchemaKeySet(p, fkIo(FK_EDITS['a describe() reworded'][0], FK_BASE)) }))).length === 0);
-  for (const gate of FK_GATES) {
-    const without = runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.filter((c) => c !== gate).map((c) => `${c} :: exit 0`).join('\n')) });
+    changeKindLines([FK_PATH], ksResolved, ksEntry.map((k) => ({ ...k, matches: (p) => changesServedKeySet(p, PIN[ksRows.find((r) => r.kind === k.kind).matches], fkIo(FK_EDITS['a describe() reworded'][0], FK_BASE)) }))).length === 0);
+  for (const gate of KS_NAMES) {
+    const without = runReconciliation({ derived: ksDerived, record: parseRunRecord(ksDerived.filter((c) => c !== gate).map((c) => `${c} :: exit 0`).join('\n')) });
     t(`⭐ a run record carrying every derived command BUT ${gate.split(' ')[2]}'s pin is NOT ok, and names it unrun`, !without.ok && without.unrun.some((u) => u.command === gate));
   }
-  t('CONTROL: the same record WITH all three is ok', runReconciliation({ derived: fkDerived, record: parseRunRecord(fkDerived.map((c) => `${c} :: exit 0`).join('\n')) }).ok);
-  const fkStale = changeKindLines([FK_PATH], () => null, fkBound);
-  t('an unresolvable binding renders each pin STALE, naming the job and the file it lost (a renamed pin resolves to null)',
-    fkEntry[0]?.gates.every((g) => fkStale.filter((l) => l.includes(`⚠ ${g.name}: STALE`) && l.includes("job named 'Test Core…'") && l.includes(g.ciSubset)).length === 1));
+  t('CONTROL: the same record WITH all four is ok', runReconciliation({ derived: ksDerived, record: parseRunRecord(ksDerived.map((c) => `${c} :: exit 0`).join('\n')) }).ok);
+  const ksStale = changeKindLines(ksPaths, () => null, ksBound);
+  t('an unresolvable binding renders each pin STALE, naming the job and what it lost (the file for a Test Core subset, the runner for the ui one)',
+    ksEntry.every((k) => k.gates.every((g) => ksStale.filter((l) => l.includes(`⚠ ${g.name}: STALE`) && l.includes(`job named '${g.ciJob}…'`)
+      && l.includes(g.ciSubset ?? `'${g.ciRunner}'`)).length === 1)));
   t('a pin whose ciSubset names another file REFUSES at load',
-    bindRefuses({ name: FK_GATES[0], ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/drivers/driver-sql/src/renamed.test.ts' }));
+    bindRefuses({ name: KS_GATES['field-schema-key-set'], ciJob: 'Test Core', ciRunner: 'set -- pnpm turbo run test', ciSubset: 'packages/drivers/driver-sql/src/renamed.test.ts' }));
   // Against the LIVE tree.
-  for (const g of fkEntry[0]?.gates ?? []) {
-    t(`⭐ LIVE: ${g.ciSubset} exists, inside the package its name filters on, and its binding resolves`, (() => {
-      if (!existsSync(nodePath.join(ROOT, g.ciSubset)) || !ciJobRunsRunner(g, discoverFamilies().workflowEntries)) return false;
+  for (const g of ksEntry.flatMap((k) => k.gates)) {
+    t(`⭐ LIVE: ${g.ciSubset ?? g.name.slice(g.ciRunner.length + 1)} exists, inside the package its name runs in, and its binding resolves`, (() => {
+      if (!ciJobRunsRunner(g, discoverFamilies().workflowEntries)) return false;
+      if (g.ciSubset === undefined) return g.name.startsWith(`${g.ciRunner} `) && existsSync(nodePath.join(ROOT, 'ui', g.name.slice(g.ciRunner.length + 1)));
+      if (!existsSync(nodePath.join(ROOT, g.ciSubset))) return false;
       const pkgDir = g.ciSubset.slice(0, -('/' + packageTestSubsetFile(g.name)).length);
       try { return JSON.parse(readFileSync(nodePath.join(ROOT, pkgDir, 'package.json'), 'utf8')).name === /--filter\s(\S+)/.exec(g.name)[1]; } catch { return false; }
     })());
   }
-  const liveFk = FIELD_SCHEMA_KEY_DECLARATIONS.map((d) => [d, declaredKeySet(readFileSync(nodePath.join(ROOT, d.path), 'utf8'), d)]);
-  t('⭐ LIVE: every declaration row reads on this tree', liveFk.every(([, keys]) => Array.isArray(keys) && keys.length > 0));
-  const liveFieldKeys = (() => {
-    const field = liveFk.find(([d]) => d === FK_FIELD)?.[1] ?? [];
-    const prot = liveFk.find(([d]) => d === FK_PROT)?.[1] ?? [];
-    return [...field.filter((k) => k !== '...MetadataProtectionFields'), ...(field.includes('...MetadataProtectionFields') ? prot : [])].sort();
+  const liveKs = new Map(SERVED_KEY_SET_DECLARATIONS.map((d) => [d, declaredKeySet(readFileSync(nodePath.join(ROOT, d.path), 'utf8'), d)]));
+  t(`⭐ LIVE: every declaration row reads on this tree (${liveKs.size})`, [...liveKs.values()].every((keys) => Array.isArray(keys) && keys.length > 0));
+  const liveSpreadRows = new Map(SERVED_KEY_SET_DECLARATIONS.filter((d) => d.spread !== undefined).map((d) => [`...${d.spread}`, liveKs.get(d) ?? []]));
+  const liveExpanded = (type) => {
+    const own = liveKs.get(ksRow(type)) ?? [];
+    return [...own.filter((k) => !k.startsWith('...')), ...own.filter((k) => k.startsWith('...')).flatMap((k) => liveSpreadRows.get(k) ?? [k])].sort();
+  };
+  const unwatched = SERVED_KEY_SET_DECLARATIONS.filter((d) => d.type !== undefined)
+    .flatMap((d) => (liveKs.get(d) ?? []).filter((k) => (k.startsWith('...') && !liveSpreadRows.has(k)) || k.startsWith('[')).map((k) => `${d.type}: ${k}`));
+  t(`⭐ LIVE: every spread a type declares has a row of its own, and no type declares a computed key (unwatched: ${unwatched.join(', ') || 'none'})`, unwatched.length === 0);
+  // The served pin's own numbers: the counts its test spells, read from the test file.
+  // Comments masked (strings kept): a bracket, brace or quote in a comment inside the pinned literal is no structure.
+  const PROTOCOL_PIN = maskComments(readFileSync(nodePath.join(ROOT, 'packages/metadata-protocol/src/protocol.meta-types-degenerate-derivation.test.ts'), 'utf8'));
+  const pinCounts = (() => {
+    const block = /CARD_PROPERTY_COUNTS[^=]*=\s*\{([^}]*)\}/.exec(PROTOCOL_PIN)?.[1] ?? '';
+    const counts = Object.fromEntries([...block.matchAll(/([a-z_]+):\s*(\d+)/g)].map((m) => [m[1], Number(m[2])]));
+    const action = /retiredTopLevelCount\('action'\)\)\.toBe\((\d+)\)/.exec(PROTOCOL_PIN);
+    if (action) counts.action = Number(action[1]);
+    return counts;
   })();
+  const countDrift = Object.entries(pinCounts).filter(([type, n]) => !ksRow(type) || liveExpanded(type).length !== n).map(([type, n]) => `${type} ${n} vs ${ksRow(type) ? liveExpanded(type).length : 'no row'}`);
+  t(`⭐ LIVE census: each type's key count, its spreads expanded, equals the count the metadata-protocol pin spells for it (${Object.keys(pinCounts).length} types; drift: ${countDrift.join(', ') || 'none'})`,
+    Object.keys(pinCounts).length === 14 && countDrift.length === 0);
+  t('…and the types that pin counts are exactly the served pin\'s, which are exactly the type rows',
+    JSON.stringify(Object.keys(pinCounts).sort()) === JSON.stringify([...PIN['served-type-key-set'].types].sort())
+      && JSON.stringify(SERVED_KEY_SET_DECLARATIONS.filter((d) => d.type !== undefined).map((d) => d.type).sort()) === JSON.stringify([...PIN['served-type-key-set'].types].sort()));
+  // The table pins: the reader's sets against the tables their own tests hold equal to the schema.
+  const liveFieldKeys = liveExpanded('field');
   const liveStorage = declaredKeySet(readFileSync(nodePath.join(ROOT, 'packages/drivers/driver-sql/src/builtin-column-collision.ts'), 'utf8'),
     { declares: 'FIELD_KEY_STORAGE_CLASS', call: 'Object.freeze', argument: 0 }) ?? [];
   t(`⭐ LIVE census: the reader's FieldSchema key set (${liveFieldKeys.length}, the spread expanded, no other spread) equals the driver's classification table (${liveStorage.length}), which its own test holds equal to the schema`,
     liveFieldKeys.length > 50 && liveFieldKeys.every((k) => !k.startsWith('...')) && JSON.stringify(liveFieldKeys) === JSON.stringify(liveStorage));
-  t('CONTROL: the live files, read at base and head alike, derive nothing',
-    FIELD_SCHEMA_KEY_DECLARATIONS.every((d) => { const text = readFileSync(nodePath.join(ROOT, d.path), 'utf8'); return !changesFieldSchemaKeySet(d.path, fkIo(text, text)); }));
+  const liveObjectKeys = liveExpanded('object').filter((k) => k !== 'fields');
+  // The table spreads its own envelope table, as the schema spreads the protection fields: expanded the same way.
+  const FLS_TABLES = readFileSync(nodePath.join(ROOT, 'packages/metadata-core/src/object-schema-fls-references.ts'), 'utf8');
+  const liveEnvelope = declaredKeySet(FLS_TABLES, { declares: 'PROTECTION_ENVELOPE', call: null, argument: 0 }) ?? [];
+  const liveObjectTable = (declaredKeySet(FLS_TABLES, { declares: 'OBJECT_REFERENCE_POSITIONS', call: null, argument: 0 }) ?? [])
+    .flatMap((k) => (k === '...PROTECTION_ENVELOPE' ? liveEnvelope : [k])).sort();
+  t(`⭐ LIVE census: the reader's ObjectSchema key set less \`fields\` (${liveObjectKeys.length}) equals metadata-core's reference table, its envelope spread expanded (${liveObjectTable.length}), which its own test holds equal to the schema`,
+    liveObjectKeys.length > 30 && JSON.stringify(liveObjectKeys) === JSON.stringify(liveObjectTable));
+  const REPORT_PIN = maskComments(readFileSync(nodePath.join(ROOT, 'ui/packages/app-shell/src/views/metadata-admin/inspectors/ReportDefaultInspector.joinedClearsRefused-29195.test.tsx'), 'utf8'));
+  const liveMaximal = declaredKeySet(REPORT_PIN, { declares: 'MAXIMAL', call: null, argument: 0 }) ?? [];
+  const liveExcludedNamed = [...(/const EXCLUDED = new Set\(\[([^\]]*)\]/.exec(REPORT_PIN)?.[1] ?? '').matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  const liveReportOwn = (liveKs.get(REPORT) ?? []).filter((k) => !k.startsWith('...'));
+  t(`⭐ LIVE census: ReportSchema's own keys (${liveReportOwn.length}) equal the inspector pin's fixture keys plus the keys it excludes by name (${liveMaximal.length} + ${liveExcludedNamed.length}), and its spreads are exactly the two it excludes by reading the spec`,
+    liveMaximal.length > 10 && JSON.stringify(liveReportOwn) === JSON.stringify([...liveMaximal, ...liveExcludedNamed].sort())
+      && JSON.stringify((liveKs.get(REPORT) ?? []).filter((k) => k.startsWith('...'))) === JSON.stringify(['...MetadataProtectionFields', '...OverrideDeclarationFields'])
+      && /\.\.\.Object\.keys\(MetadataProtectionFields\)/.test(REPORT_PIN) && /\.\.\.Object\.keys\(OverrideDeclarationFields\)/.test(REPORT_PIN));
+  t('CONTROL: the live files, read at base and head alike, derive no pin',
+    SERVED_KEY_SET_DECLARATIONS.every((d) => { const text = readFileSync(nodePath.join(ROOT, d.path), 'utf8'); return Object.values(PIN).every((pin) => !changesServedKeySet(d.path, pin, fkIo(text, text))); }));
 
   // ── The metadata-form edge (#9116) ────────────────────────────────────────
   //
@@ -8448,7 +8590,8 @@ export function selfTest({ tier = 'full' } = {}) {
       // 748 -> 751 (#31292): the workspace-enumerator import and its comment.
       // 751 -> 753 (#34760): the data import and its re-export each gained SPEC_MIGRATION_ENTRY_ROOTS.
       // 753 -> 755 (the FieldSchema key-set row): the data import and its re-export each gained FIELD_SCHEMA_KEY_DECLARATIONS.
-      'scripts/pm/dispatch-gates.mjs:755 inherited-population',
+      // 755 -> 757 (the served key-set rows): that name became SERVED_KEY_SET_DECLARATIONS and SERVED_KEY_SET_PINS, in both.
+      'scripts/pm/dispatch-gates.mjs:757 inherited-population',
       // Ninth row, added with the declaration it names: the recogniser's mailbox
       // doorbell battery pins the seven key templates verbatim in the pm-dispatch
       // references' project-forms.md, a population claim on a governed file, so
@@ -11079,7 +11222,7 @@ export function selfTest({ tier = 'full' } = {}) {
   // review", "self-review") and the 2026-09-17 LANE key ("owed in the spec and skills lanes").
   t('BOTH renderings key whether the clause-② review is OWED by SURFACE, never by lane — and keep the contract-review tier\'s at-tier subagent route', [plainLines, mandLines].every((l) => l.includes('owed by SURFACE, never by lane') && l.includes('at-tier subagent')));
   t('…and neither spells a retired key — no "spec seat" (2026-09-10), no default-tier review or self-review (2026-09-16), no owed-by-lane (2026-09-17)', [plainLines, mandLines].every((l) => !l.includes('spec seat') && !l.includes('default-tier review') && !l.includes('self-review') && !l.includes('owed in the spec and skills lanes')));
-  t('…and both say a clause-② hit outside the spec lane is spec-lane work that MOVES there — lane routing, never a review demand on the lane that found it', [plainLines, mandLines].every((l) => l.includes('a hit outside the spec lane is spec-lane work and moves there')));
+  t('…and both say a contract-surface hit no longer MOVES the card — build and review stay with the claiming seat, and the retired move-to-the-spec-lane sentence is gone', [plainLines, mandLines].every((l) => l.includes('a contract-surface hit no longer moves the card — build and review stay with the claiming seat') && !l.includes('spec-lane work') && !l.includes('moves there')));
   // The tier follows the face that made the review owed (ruling record 6159870311 on #23352, letter B′ with C):
   // the note names BOTH tiers by their constant NAMES, each beside the face it serves, so a no-mandate
   // line can no longer read as "every clause-② review is at the contract-review tier".
@@ -11293,7 +11436,7 @@ export function selfTest({ tier = 'full' } = {}) {
   t('the suspicion rendering sends the seat to the card CONTENT for the tier call', suspectRendered.includes('judge the tier from the card CONTENT'));
   t('the suspicion rendering routes EVERY dispatch through the enqueue gate on the ACTUAL diff', suspectRendered.includes('whichever tier is dispatched') && suspectRendered.includes('enqueue gate'));
   t('the suspicion rendering names the contract-review tier from its single-source constant', suspectRendered.includes(CONTRACT_REVIEW_TIER));
-  t('the suspicion rendering keys the review by LANE — "in the spec lane", the work being the spec lane\'s whichever seat found it — never by seat (#18536)', suspectRendered.includes('in the spec lane') && suspectRendered.includes('whichever seat found it') && !suspectRendered.includes('spec seat'));
+  t('the suspicion rendering keeps build and review with the CLAIMING seat — the hit no longer moves the card, and neither the retired spec-lane routing nor a "spec seat" comes back', suspectRendered.includes('both by the claiming seat') && suspectRendered.includes('no longer moves the card') && !suspectRendered.includes('spec-lane work') && !suspectRendered.includes('in the spec lane') && !suspectRendered.includes('spec seat'));
   const noSuspicion = fableOf(['packages/runtime/src/kernel.ts']);
   t('an ordinary non-contract surface raises no suspicion', noSuspicion.suspects.length === 0);
   t('no suspicion ⇒ no suspect line — absence and clearance must not share a spelling with a hit', !tierLines(noSuspicion).join('\n').includes('SUSPECT'));

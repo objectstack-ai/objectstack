@@ -4,8 +4,9 @@
  * [ADR-0161 K4, guard two] `authoredKnowledgeSourceRefusal` — what every save
  * door asks before a `knowledge_source` is written: the knowledge service's
  * verdict for the AUTHOR. Pinned here: which saves are judged, that the
- * service is asked with the item and the author's context, and that the gate
- * fails closed.
+ * service is asked with the item and the author's context, that a deployment
+ * with no knowledge service refuses an author's save, and that the gate fails
+ * closed.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -44,8 +45,29 @@ describe('authoredKnowledgeSourceRefusal — source admission at save', () => {
         expect(resolve).not.toHaveBeenCalled();
     });
 
-    it('no knowledge service, or one without the member, judges nothing: nothing loads the item there', async () => {
-        for (const service of [undefined, null, {}, { search: async () => [] }]) {
+    it('no knowledge service registered: an author\'s save is refused SERVICE_UNAVAILABLE / 503, naming the reason and the remedy', async () => {
+        for (const service of [undefined, null]) {
+            for (const type of ['knowledge_source', 'knowledge_sources']) {
+                const refusal = await authoredKnowledgeSourceRefusal({ type, item: ITEM, executionContext: AUTHOR, resolveKnowledgeService: async () => service });
+                expect(refusal, `${type} / ${String(service)}`).toMatchObject({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+                // The reason, the item, and the remedy in its order: the token, a restart, then the save.
+                expect(refusal?.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+                expect(refusal?.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+            }
+        }
+        // An item with no name is still refused, without a name to quote.
+        const unnamed = await authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item: {}, executionContext: AUTHOR, resolveKnowledgeService: () => undefined });
+        expect(unnamed?.message).toMatch(/^The knowledge source was not saved: /);
+    });
+
+    it('no knowledge service registered: the engine\'s own write is not refused (a package install, a seed, a migration)', async () => {
+        const resolve = vi.fn(() => undefined);
+        expect(await authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item: ITEM, executionContext: { isSystem: true }, resolveKnowledgeService: resolve })).toBeUndefined();
+        expect(resolve).not.toHaveBeenCalled();
+    });
+
+    it('a registered knowledge service without the member (not the platform\'s) judges nothing: the save goes on', async () => {
+        for (const service of [{}, { search: async () => [] }]) {
             expect(await authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item: ITEM, executionContext: AUTHOR, resolveKnowledgeService: () => service })).toBeUndefined();
         }
     });

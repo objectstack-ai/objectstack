@@ -376,8 +376,14 @@ the scope and names the cause (`Task: "Design review" could not be looked up wit
 "Gemini": the target field this lookup's dependsOn filters by cannot be filtered on, …`),
 never `reference_out_of_scope`. Point `param` at a stored field of the target. `os validate`
 and the runtime publish gate refuse such an entry at authoring (`object-field-ref-unknown`,
-naming the target field), so an import meets this sentence only on metadata stored before that
-check.
+naming the target field). That check judges a `lookup`, `master_detail` or `user` field, against
+the objects it can see, so an import still meets this sentence in three cases: on metadata stored
+before the check; on a `tree` field or a legacy `reference` field, which the import scopes by
+`dependsOn` too but the check does not judge; and after an `os validate` of a stack that does not
+hold both objects, such as a target object from another package, or a target field turned into a
+formula in a package validated without the object whose lookup filters by it. The runtime publish
+gate judges against every object the environment serves, so a publish that turns such a target
+field into a formula is refused there.
 
 A scoped lookup whose reads are all refused for any other reason, such as no read access to
 the target or a master cell the scoping field's type cannot take, keeps `reference_not_found`

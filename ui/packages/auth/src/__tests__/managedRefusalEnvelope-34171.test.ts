@@ -92,3 +92,25 @@ describe('#34171 — an ADR-0112 envelope refusal keeps its code on every passwo
     expect(err.message).toBe('Auth request failed with status 500');
   });
 });
+
+describe('the remaining client doors keep the refusal code too (verification mail, sign-out, social sign-in)', () => {
+  const doors: Array<[string, string, (c: ReturnType<typeof createAuthClient>) => Promise<unknown>]> = [
+    ['sendVerificationEmail', '/send-verification-email', (c) => c.sendVerificationEmail('a@example.com')],
+    ['signOut', '/sign-out', (c) => c.signOut()],
+    ['signInWithProvider', '/sign-in/social', (c) => c.signInWithProvider('google')],
+  ];
+
+  it.each(doors)('%s: an ADR-0112 envelope answers code RESOURCE_CONFLICT, its message, status 409', async (_name, path, call) => {
+    const err = await rejectionOf(call(clientFor(path, 409, ENVELOPE)));
+    expect(err.code).toBe('RESOURCE_CONFLICT');
+    expect(err.status).toBe(409);
+    expect(err.message).toBe(MANAGED);
+  });
+
+  it.each(doors)('%s CONTROL: a flat better-auth refusal keeps its own code and message', async (_name, path, call) => {
+    const err = await rejectionOf(call(clientFor(path, 400, { code: 'SOME_FLAT_CODE', message: 'Flat message' })));
+    expect(err.code).toBe('SOME_FLAT_CODE');
+    expect(err.status).toBe(400);
+    expect(err.message).toBe('Flat message');
+  });
+});

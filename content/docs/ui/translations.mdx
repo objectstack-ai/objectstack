@@ -523,7 +523,9 @@ Honest limits worth knowing before you plan around them:
   on a screen: a scheduled or record-triggered flow with no screen has no
   surface that shows its translated label.
 - **No ICU MessageFormat** — plural/gender formatting isn't available;
-  interpolation is always simple `{variable}` substitution.
+  interpolation in a message read through `t()` is always simple `{{variable}}`
+  substitution (double braces — a single-brace `{variable}` is left as written;
+  activity-milestone summaries keep their own `{field}` tokens).
 - **Runtime authoring is process-wide.** The authored layer is synced across all
   organizations into one i18n map, so a `translation` item published in one
   tenant resolves in every tenant on the same process. Ship per-tenant

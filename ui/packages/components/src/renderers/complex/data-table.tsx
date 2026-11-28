@@ -24,7 +24,7 @@ import { CELL_OVERLAY_HOST_CLASS, isCellContentTruncated, type CellOverlaySize }
 import { ComponentRegistry, compareSortValues, csvBlob, evalRowPredicate, formatDate, hasDeclaredPredicate, isActionSwitchedOff, formatDateTime, fromDateTimeInputValue, getSortValue, isEmptyValue, isImpossibleStoredDay, toDateInputValue, toDateTimeInputValue } from '@object-ui/core';
 import type { DataTableSchema, TableColumn, TableSortItem, TableColumnType } from '@object-ui/types';
 import type { SortDirection } from '@objectstack/spec/shared';
-import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useDrawsAction, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
+import { SchemaRenderer, toRenderableSchema, useCapabilityGate, useRowPredicate, usePredicateScope, extractFieldErrors, unmarkedRefusalLines } from '@object-ui/react';
 import { createSafeTranslation, useDisplayLocale } from '@object-ui/i18n';
 import { 
   Table, 
@@ -792,10 +792,9 @@ export const DataTableBuiltinRowActionItem: React.FC<{
 function gatedDataTableRowActions(
   schema: Pick<DataTableSchema, 'rowActionDefs' | 'onRowActionDef'>,
   mayInvoke: ReturnType<typeof useCapabilityGate>,
-  drawsAction: ReturnType<typeof useDrawsAction>,
 ): RowActionDef[] {
   return Array.isArray(schema.rowActionDefs) && schema.onRowActionDef
-    ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d) && drawsAction(d))
+    ? schema.rowActionDefs.filter((d) => mayInvoke(d.requiredPermissions) && !isActionSwitchedOff(d))
     : [];
 }
 
@@ -814,9 +813,9 @@ function useDataTableRowMenuPlan(schema: DataTableSchema, row: any): DataTableRo
    *
    * This surface filters its own action list instead of routing through
    * `ActionEngine.getActionsForLocation`, so the engine's gate never reached
-   * it. That left `requiredPermissions` INERT on every `list_item` action a
+   * it. That left `requiredPermissions` INERT on every `record_row` action a
    * data-table renders — the record page's related-list panel above all, which
-   * feeds a child object's `list_item` actions in as `rowActionDefs`
+   * feeds a child object's `record_row` actions in as `rowActionDefs`
    * (`RelatedRecordActionsBridge`). The record surface one level up gates the
    * same declaration correctly, off the SAME `<ActionProvider>` this hook
    * reads: the capability was on the page all along, this renderer just never
@@ -831,11 +830,9 @@ function useDataTableRowMenuPlan(schema: DataTableSchema, row: any): DataTableRo
    * to, so an unhandled `rowActionDefs` contributes no items (unchanged).
    */
   const mayInvoke = useCapabilityGate();
-  // [ADR-0160 D7] An `ask_ai` row action is absent without an in-app assistant.
-  const drawsAction = useDrawsAction();
   const customActions = useMemo(
-    () => gatedDataTableRowActions(schema, mayInvoke, drawsAction),
-    [schema.rowActionDefs, schema.onRowActionDef, mayInvoke, drawsAction],
+    () => gatedDataTableRowActions(schema, mayInvoke),
+    [schema.rowActionDefs, schema.onRowActionDef, mayInvoke],
   );
   return useMemo(
     () =>
@@ -940,7 +937,7 @@ const DataTableRowMenuItems: React.FC<{
       />
     )}
     {/* Child-object custom actions (e.g. a related list surfacing the
-        child's `list_item` actions). Dispatched with the clicked row.
+        child's `record_row` actions). Dispatched with the clicked row.
         Separators are placed off the SURVIVING groups, so a suppressed
         group can no longer leave a stray rule behind. */}
     {plan.custom.length > 0 && plan.edit && <DropdownMenuSeparator />}
@@ -2254,7 +2251,6 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // decision and the items it opens read one answer (see `rowContextMenuItems`).
   const rowMenuScope = usePredicateScope();
   const rowMenuMayInvoke = useCapabilityGate();
-  const rowMenuDrawsAction = useDrawsAction();
   
   // Refs for column resizing
   const resizingColumn = useRef<string | null>(null);
@@ -4069,7 +4065,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
   // its first control, once it has drawn one (a lazily loaded picker draws it
   // a few frames late). Before this the caret stayed on the cell.
   useEffect(() => {
-    if (!selectFirst || !editingCell) return undefined;
+    if (!editingCell) return undefined;
     let frame = 0;
     let frames = 0;
     const place = () => {
@@ -4083,7 +4079,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
     };
     place();
     return () => cancelAnimationFrame(frame);
-  }, [editingCell, selectFirst]);
+  }, [editingCell]);
 
   // Commit a host-injected widget editor on click-outside (objectui#2321).
   //
@@ -4314,7 +4310,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
       onRowDelete: schema.onRowDelete,
       editPredicates: schema.rowEditPredicates,
       deletePredicates: schema.rowDeletePredicates,
-      customActions: gatedDataTableRowActions(schema, rowMenuMayInvoke, rowMenuDrawsAction),
+      customActions: gatedDataTableRowActions(schema, rowMenuMayInvoke),
       row,
       scope: rowMenuScope,
     });
@@ -5080,7 +5076,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                         const cellValue = hasPendingChange ? rowChanges[col.accessorKey] : originalValue;
                         const isEditing = editingCell !== null && editingCell.rowKey === rowKey && editingCell.columnKey === col.accessorKey;
                         // objectstack#36023 — a picker's panel opens under the cell, which keeps its value drawn.
-                        const editsBelow = isEditing && selectFirst && editorBelow;
+                        const editsBelow = isEditing && editorBelow;
                         // The reason the last refusal gave for THIS cell, if it
                         // named it (objectstack-ai/objectstack#27520).
                         const cellError = rowCellErrors?.[col.accessorKey];
@@ -5394,7 +5390,7 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // objectstack#35688 — a pick that commits hands the
                                     // focus back to the selected cell, as Enter does.
                                     commit: (v?: any) => {
-                                      focusSelectionRef.current = selectFirst;
+                                      focusSelectionRef.current = true;
                                       if (!saveEdit(true, v)) focusSelectionRef.current = false;
                                     },
                                     cancel: cancelEdit,
@@ -5417,17 +5413,10 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                     // textarea it's left alone so Enter opens the
                                     // dropdown / inserts a newline as usual.
                                     //
-                                    // Outside the select-first model, Tab is
-                                    // deliberately NOT in that list, and
-                                    // tabbing out therefore does not leave edit
-                                    // mode — measured, `64d937c53`. It costs
-                                    // nothing: the widget has already staged
-                                    // every keystroke into `pendingChanges` (or,
-                                    // reading its input on blur, staged on the
-                                    // Tab's own blur — objectui#12664), so
-                                    // the value is safe; the cell simply stays
-                                    // open until Enter, Escape, or a pointer
-                                    // press outside closes it.
+                                    // An editor opens only in the select-first
+                                    // model (`startEdit` refuses a table that is
+                                    // not `editable`, and `editable` needs that
+                                    // model), so its keys are always the model's.
                                     return (
                                       <div
                                         ref={(n) => { injectedEditorElRef.current = n; }}
@@ -5439,19 +5428,19 @@ const DataTableRenderer = ({ schema }: { schema: DataTableSchema }) => {
                                           const tag = (e.target as HTMLElement).tagName;
                                           // The select-first model (objectstack#35687): in a
                                           // multi-line editor Ctrl/Cmd+Enter commits, and Tab
-                                          // commits and moves, superseding the Tab-stays rule.
+                                          // commits and moves.
                                           const commits = (e.key === 'Enter' && (tag === 'INPUT'
-                                            || (selectFirst && tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
-                                            || (selectFirst && e.key === 'Tab');
+                                            || (tag === 'TEXTAREA' && (e.ctrlKey || e.metaKey))))
+                                            || e.key === 'Tab';
                                           if (commits) {
                                             e.preventDefault();
                                             // A commit-on-blur widget stages
                                             // on this blur (objectui#12664).
                                             flushInjectedEditor();
-                                            if (saveEdit(true) && selectFirst) commitMoves(e);
+                                            if (saveEdit(true)) commitMoves(e);
                                           } else if (e.key === 'Escape') {
                                             e.preventDefault();
-                                            focusSelectionRef.current = selectFirst;
+                                            focusSelectionRef.current = true;
                                             exitEdit(true);
                                           }
                                         }}

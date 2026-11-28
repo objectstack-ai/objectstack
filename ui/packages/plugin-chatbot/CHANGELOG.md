@@ -1,5 +1,199 @@
 # @object-ui/plugin-chatbot
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 57ab087: refactor(plugin-chatbot): move `ChatbotEnhanced`'s tool-card renderer into `src/chat/toolDetail.tsx`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A move-only split of `ChatbotEnhanced.tsx` with no behaviour change. The detailed tool card (`renderToolDetail`: the collapsible tool header and payload, the decision line, and the sample-data cleanup, package removal, record write and record hand-off cards) is now a module-level function in `src/chat/toolDetail.tsx` that the component calls with one context object. The rendered element tree is unchanged, and so are the package entry points (`index.tsx`, `core.ts`) and the published API.
+- 531e55b: feat(app-shell): the `ai:chat` menu entry is hidden from a member who cannot get an agent, and the app's home falls to the next entry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app's AI inquiry entry (`type: 'component'`, `componentRef: 'ai:chat'`) is now shown only to a member the access-filtered agent catalog (`GET /api/v1/ai/agents`) serves at least one agent. On a deployment with no AI, or for a member with no AI seat, the entry is left out of the sidebar, the phone's app menu, the command palette and the `nav:menu` block. If it was the app's home, the home is the next entry the member is shown.
+  
+  - **A declared `landing`** still comes first. A landing entry whose `item` is the `ai:chat` entry is passed over for such a member, like any entry the member is not shown: the next declared entry that holds lands, and with none the first entry shown lands.
+  - **While the catalog is loading** the entry is not drawn, and the app root waits on its loading skeleton instead of opening the page or the next entry. It lands once the catalog answers, so the home never opens one page and then jumps to another.
+  - **A direct link to the page** is not redirected. The page draws its "AI assistant unavailable" state.
+  - The catalog is read only while an app in the list carries an `ai:chat` entry. Apps without one read nothing new.
+  - `useAiSurfaceEnabled` takes an optional `{ enabled }` and no longer reports loading for ever when the catalog is empty and is answered from the session cache. Before, a member with no seat who opened the `ai:chat` page after the console had read the catalog saw a blank loading page and never the unavailable state.
+  - `@object-ui/plugin-chatbot`: `useAgents` returns `settled`, true once a catalog read for the current `apiBase` has answered or failed. The fields it already returned are unchanged.
+  
+  Nothing to migrate.
+- 3df181b: feat(app-shell): one empty-conversation layout for the AI home, the full-window drawer and the narrow drawer
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-chatbot` `ChatbotEnhancedProps` gains the optional `renderEmptyState`; `@object-ui/i18n` gains `console.ai.suggestionsLabel` and `console.ai.suggestions.page.*` (eight keys) in every locale
+  Metadata-protocol: none
+  
+  A conversation with no message now shows the same layout in all three places: a greeting, a line on what to ask, suggested questions and the recent conversations with their titles.
+  
+  - **The AI home page** (an app's `ai:chat` entry) keeps its large question box, its suggestions that send and its recent conversations that open on the page. Its heading is the entry's declared `title`; with none it now greets the user by the time of day and name, as Home does, where it read "Ask your data".
+  - **The console's assistant drawer** draws the layout before the first message: large when the drawer fills the window, compact in the side rail and the phone sheet. The composer stays where it is, under the conversation. The `ask` assistant's suggestions follow the page in view: on a record, "Summarize this record" and "What is related to this record?" put their text in the composer for the user to finish; on a list, a dashboard or a report, the page's two questions send at once. Elsewhere, and for other assistants, the starter questions are the ones they had. The recent conversations list the drawer assistant's last three (five in the full window), not the AI home's own, and open in the drawer.
+  - **`@object-ui/plugin-chatbot`.** `ChatbotEnhanced` takes `renderEmptyState`: a host's empty conversation drawn in place of the built-in one, given `send` (sends a text) and `fill` (puts it in the composer, focused, sending nothing).
+  
+  Nothing to migrate.
+- 8b47659: feat(plugin-chatbot): the question card takes the composer's place when the AI ends its turn on a question
+  
+  Clause-②: yes (widening) — widened: `ChatbotEnhancedProps` gains the optional `conversationId`; `@object-ui/plugin-chatbot` (and its `/core` entry) exports `QUESTION_SKIP_STORAGE_PREFIX`; `QuestionCardQuestion` and `QuestionCardOption` keep their names and shape and are now the envelope types of `@objectstack/spec/ai` (`AskQuestionParsed`, `AskQuestionOptionParsed`), with `options` still read-only.
+  Metadata-protocol: none
+  
+  `ChatbotEnhanced` now draws the question card itself. When a turn ends on a question tool's result that `parseAskQuestionEnvelope` reads, and the envelope's `reply` is the turn's last text, the card replaces the composer:
+  
+  - It shows only once the stream has ended, and never while a typed message is queued (that message is sent, and sending something else skips the question), while a write approval waits in the same turn, after a skip, or on a `readOnly` transcript. Both shapes of a tool-ended turn count: one streamed message, or the two messages a reloaded conversation holds.
+  - The composer stays mounted, hidden and `inert`, so a draft and its attachments come back after Skip or an answer, and focus that was in it returns to it.
+  - One click answers: the option label goes out through `onSendMessage` as the next user message. If the send fails and the message is rolled back, the card returns with its choice still made.
+  - Skip is remembered on this device, per conversation, under `objectstack:ai-chat-question-skip:` plus the conversation id. The console passes its conversation id, and signing out clears these keys with the rest of the chat cache.
+  - The conversation draws the question from its envelope instead of its plain-text reply: while pending, the question alone; once answered or skipped, a collapsed "AI asks: …" that expands to its options. Copy still copies the full reply, and a pending question shows no Regenerate.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 6e8f663: feat(chatbot)!: the build chat's frontend is retired — the plan, change, build-result and handoff cards, their detectors and the props that fed them are removed
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (runtime-export-retired @object-ui/plugin-chatbot#detectDraftResult, @object-ui/plugin-chatbot#detectProposedPlan, @object-ui/plugin-chatbot#detectProposedChanges, @object-ui/plugin-chatbot#detectBuilderHandoff, @object-ui/plugin-chatbot#detectBuiltAppPackage, @object-ui/plugin-chatbot#detectAuthoringVerdict, @object-ui/plugin-chatbot#detectReplayOutcome, @object-ui/plugin-chatbot#buildProgressFromDraftReview, @object-ui/plugin-chatbot#DraftReview, @object-ui/plugin-chatbot#ProposedPlan, @object-ui/plugin-chatbot#ProposedChanges, @object-ui/plugin-chatbot#BuilderHandoff, @object-ui/plugin-chatbot#ReplayOutcome, @object-ui/plugin-chatbot#PublishOutcome, @object-ui/plugin-chatbot/core#PublishOutcome, @object-ui/plugin-chatbot#FloatingChatbotProps.autoPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffOpenLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffSupersededTitle, @object-ui/plugin-chatbot#FloatingChatbotProps.builderHandoffTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesAppliedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesApplyingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesConfirmMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.changesDraftedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesFailedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changesTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.changeVerbLabels, @object-ui/plugin-chatbot#FloatingChatbotProps.designBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.fetchPendingDraftCount, @object-ui/plugin-chatbot#FloatingChatbotProps.getArtifactAction, @object-ui/plugin-chatbot#FloatingChatbotProps.nextStepsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildMaterialized, @object-ui/plugin-chatbot#FloatingChatbotProps.onBuildResult, @object-ui/plugin-chatbot#FloatingChatbotProps.onDesignBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onDiscardDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onDraftArtifacts, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuilder, @object-ui/plugin-chatbot#FloatingChatbotProps.onOpenBuiltApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPlanApprovalPendingChange, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onPreviewDraftApp, @object-ui/plugin-chatbot#FloatingChatbotProps.onPublishDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDraft, @object-ui/plugin-chatbot#FloatingChatbotProps.onReviewDrafts, @object-ui/plugin-chatbot#FloatingChatbotProps.openBuiltAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAdjustLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planAnswerMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveDefaultsMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveHintLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planApproveMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planAssumptionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildingLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuildNewAppMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planBuiltLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planDeferredLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendExistingMessage, @object-ui/plugin-chatbot#FloatingChatbotProps.planExtendLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planQuestionsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planReadyLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.planTitleLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.previewDraftLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishDraftsLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishedLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.publishFromShellBar, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveAppLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveFieldTypeLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.resolveObjectLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.subscribeMetadataRefresh, @object-ui/plugin-chatbot#FloatingChatbotProps.toolReviewLabel, @object-ui/plugin-chatbot#FloatingChatbotProps.verifiedLabel, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.builderHandoff, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.draftReview, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedChanges, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.proposedPlan, @object-ui/plugin-chatbot#ChatbotEnhancedToolInvocation.replayOutcome, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.blueprintProgress, @object-ui/plugin-chatbot#ChatbotEnhancedMessage.buildProgress, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanHints, @object-ui/plugin-chatbot#ChatbotLabels.designingPlanLabel) the retired operands are functions, types, component props and chat-message fields of the published chat package entries; no packages/spec schema, no registered node type, no ADR-0087 conversion surface and no stored shape names them, so there is nothing for `objectstack migrate meta` to rewrite, and a host still using one is told by its own compiler -->
+  
+  **BREAKING** for a host that imports any export or passes any prop listed below. The console's chat (the dock and the full page `/ai/ask`) and Studio keep working; what goes is the code that drew the build conversation: the "Proposed plan" card, the change card, the build-result checklist and publish line, the builder handoff, the Build Doctor drawer, the pending-drafts bar, the spreadsheet import bar and Studio's copilot panel. An old `/ai/build/…` address still lands on the ask chat.
+  
+  `publishHealthFromResponse` and `PublishHealth` stay at both entry points of `@object-ui/plugin-chatbot`; the preview's Publish all still reads them.
+  
+  In `@object-ui/app-shell`, `ConversationsSidebar` no longer takes `includeAskConversations`: the sidebar lists the active agent's conversations. Delete the prop where a host passes it.
+  
+  `@object-ui/core`, `@object-ui/plugin-grid` and `@object-ui/plugin-form` carry comment and test edits only, which drop references to the deleted build-chat code. They change no behaviour.
+  
+  ## What leaves, and what to write instead
+  
+  Every name below leaves `@object-ui/plugin-chatbot`; `PublishOutcome` also leaves `@object-ui/plugin-chatbot/core`. `ChatbotEnhancedProps` loses the same 59 props as `FloatingChatbotProps`, and the seam types `SeamToolInvocation` and `SeamChatMessage`, with `ObjectChatMessage` built on them, lose the same fields as `ChatbotEnhancedToolInvocation` and `ChatbotEnhancedMessage`; the fix for those is the same deletion.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `detectDraftResult`, `detectProposedPlan`, `detectProposedChanges`, `detectBuilderHandoff`, `detectBuiltAppPackage`, `detectAuthoringVerdict`, `detectReplayOutcome` | delete the import; a tool result is read as plain output, and a pending approval still through `detectPendingApproval` |
+  | `buildProgressFromDraftReview` | delete the call; nothing draws a build panel any more |
+  | `DraftReview`, `ProposedPlan`, `ProposedChanges`, `BuilderHandoff`, `ReplayOutcome`, `PublishOutcome` | delete the type import |
+  | `FloatingChatbotProps.onBuildMaterialized`, `FloatingChatbotProps.onBuildResult`, `FloatingChatbotProps.onDesignBuiltApp`, `FloatingChatbotProps.onDiscardDrafts`, `FloatingChatbotProps.onDraftArtifacts`, `FloatingChatbotProps.onOpenBuilder`, `FloatingChatbotProps.onOpenBuiltApp`, `FloatingChatbotProps.onPlanApprovalPendingChange`, `FloatingChatbotProps.onPreviewDraft`, `FloatingChatbotProps.onPreviewDraftApp`, `FloatingChatbotProps.onPublishDrafts`, `FloatingChatbotProps.onReviewDraft`, `FloatingChatbotProps.onReviewDrafts` | delete the handler; the chat raises no build event any more |
+  | `FloatingChatbotProps.builderHandoffOpenLabel`, `FloatingChatbotProps.builderHandoffSupersededTitle`, `FloatingChatbotProps.builderHandoffTitleLabel`, `FloatingChatbotProps.changesAppliedLabel`, `FloatingChatbotProps.changesApplyingLabel`, `FloatingChatbotProps.changesConfirmedLabel`, `FloatingChatbotProps.changesConfirmHintLabel`, `FloatingChatbotProps.changesConfirmLabel`, `FloatingChatbotProps.changesConfirmMessage`, `FloatingChatbotProps.changesDraftedLabel`, `FloatingChatbotProps.changesFailedLabel`, `FloatingChatbotProps.changesTitleLabel`, `FloatingChatbotProps.changeVerbLabels`, `FloatingChatbotProps.designBuiltAppLabel`, `FloatingChatbotProps.nextStepsLabel`, `FloatingChatbotProps.openBuiltAppLabel`, `FloatingChatbotProps.planAdjustLabel`, `FloatingChatbotProps.planAnswerMessage`, `FloatingChatbotProps.planApproveDefaultsMessage`, `FloatingChatbotProps.planApproveHintLabel`, `FloatingChatbotProps.planApproveLabel`, `FloatingChatbotProps.planApproveMessage`, `FloatingChatbotProps.planAssumptionsLabel`, `FloatingChatbotProps.planBuildingLabel`, `FloatingChatbotProps.planBuildNewAppMessage`, `FloatingChatbotProps.planBuiltLabel`, `FloatingChatbotProps.planDeferredLabel`, `FloatingChatbotProps.planExtendExistingMessage`, `FloatingChatbotProps.planExtendLabel`, `FloatingChatbotProps.planQuestionsLabel`, `FloatingChatbotProps.planReadyLabel`, `FloatingChatbotProps.planTitleLabel`, `FloatingChatbotProps.previewDraftLabel`, `FloatingChatbotProps.publishDraftsLabel`, `FloatingChatbotProps.publishedLabel`, `FloatingChatbotProps.resolveAppLabel`, `FloatingChatbotProps.resolveFieldLabel`, `FloatingChatbotProps.resolveFieldTypeLabel`, `FloatingChatbotProps.resolveObjectLabel`, `FloatingChatbotProps.toolReviewLabel`, `FloatingChatbotProps.verifiedLabel` | delete the label or message; the card that read it is gone |
+  | `FloatingChatbotProps.autoPublishDrafts`, `FloatingChatbotProps.fetchPendingDraftCount`, `FloatingChatbotProps.getArtifactAction`, `FloatingChatbotProps.publishFromShellBar`, `FloatingChatbotProps.subscribeMetadataRefresh` | delete the prop; the build panel that read it is gone |
+  | `ChatbotEnhancedToolInvocation.builderHandoff`, `ChatbotEnhancedToolInvocation.draftReview`, `ChatbotEnhancedToolInvocation.proposedChanges`, `ChatbotEnhancedToolInvocation.proposedPlan`, `ChatbotEnhancedToolInvocation.replayOutcome` | stop reading or setting the field; the mapper no longer lifts it out of a tool result |
+  | `ChatbotEnhancedMessage.blueprintProgress`, `ChatbotEnhancedMessage.buildProgress` | stop reading or setting the field; no message carries build progress any more |
+  | `ChatbotLabels.designingPlanHints`, `ChatbotLabels.designingPlanLabel` | delete the label; the plan-design wait is gone |
+  
+  The one-line fix: delete every import, prop and field named above. Keeping one fails `tsc` after the upgrade, because none of them is declared any more.
+- 754e216: refactor(plugin-chatbot): move ChatbotEnhanced's types, subcomponents and helpers into `src/chat/`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A move-only split of `ChatbotEnhanced.tsx` with no behaviour change. Its types, the model picker, the liveness and thinking indicators, the tool summaries, the answer layout, the record-write card helpers and the composer notices now live in seven modules under `src/chat/`. `ChatbotEnhanced.tsx` keeps the component and re-exports by name every symbol it exported before, so every import path still works. The package entry points (`index.tsx`, `core.ts`) are unchanged, and so is the published API.
+- d1139f9: feat(plugin-chatbot): `QuestionCard`, the card an AI's clarifying question is answered on
+  
+  Clause-②: yes (widening) — widened: `@object-ui/plugin-chatbot` exports the component `QuestionCard` and the types `QuestionCardProps`, `QuestionCardQuestion` and `QuestionCardOption`; every `@object-ui/i18n` locale pack gains the ten `chatbot.questionCard.*` strings.
+  Metadata-protocol: none
+  
+  A pure component: the host passes the questions it parsed and receives `onAnswer(text)` or `onSkip()`. Nothing renders it yet; wiring it into the chat in the composer's place is a separate change.
+  
+  - One question: a click on an option answers at once. Two questions: an option on the first moves to the second, and the second waits on Send with a one-line summary; Back keeps both choices.
+  - A last "Type something else…" row takes a one-line answer; typing in it clears the picked option, and Enter moves on or sends.
+  - The answer is the option label or the typed text for one question, and one `header: answer` line per question for two (the question text stands in for a missing header).
+  - Options show their description as a grey second line and a "Recommended" tag. Keys work only while focus is inside the card: 1–4 pick, ↑/↓ move, Ctrl/⌘+Enter moves on or sends. The options are a radiogroup labelled with the progress and the question, and `announce` puts "A question is waiting for your answer" into a polite live region.
+  - The card is right-to-left in Arabic, scrolls inside itself above a fixed button row, and keeps its choices when the host re-renders it after a failed send.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [4e10d4b]
+- Updated dependencies [4111380]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [3eb778d]
+- Updated dependencies [91875c7]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [6e8f663]
+- Updated dependencies [6e8f663]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [2980483]
+- Updated dependencies [1028438]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e50ab8f]
+- Updated dependencies [21ad7c5]
+- Updated dependencies [b620c4b]
+- Updated dependencies [1f97fce]
+- Updated dependencies [d1139f9]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @object-ui/i18n@19.0.0-next.1
+  - @object-ui/core@19.0.0-next.1
+  - @object-ui/react@19.0.0-next.1
+  - @object-ui/components@19.0.0-next.1
+  - @object-ui/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Patch Changes

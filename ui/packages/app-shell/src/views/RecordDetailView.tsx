@@ -183,7 +183,7 @@ const RECORD_PAGE_APPEND_INSET = 'px-3 md:px-4 lg:px-6';
  * action on the record surface, and `ActionEngine.getActionsForLocation` reads the
  * capability gate off `runner.getContext().user.systemPermissions`. The engine
  * fails OPEN on `undefined` (unknown ≠ denied), so shipping identity alone
- * silently un-gated every `record_header` / `record_more` action that declared
+ * silently un-gated every `record` / `record_page` action that declared
  * `requiredPermissions` — the button rendered, and only the server's 403 stopped
  * it (and only for platform action routes at that).
  *
@@ -200,7 +200,7 @@ const RECORD_PAGE_APPEND_INSET = 'px-3 md:px-4 lg:px-6';
  * predating ADR-0066), which is exactly the "unknown" case the engine's own
  * `Array.isArray(held)` check fails OPEN on — not "holds nothing". Defaulting
  * it to `[]` here would silently re-introduce the same collapse at this one
- * call site and gate every `record_header` / `record_more` action closed on
+ * call site and gate every `record` / `record_page` action closed on
  * such a deployment. A REPORTED empty array still forwards as `[]` and gates
  * strictly, unchanged.
  */
@@ -1946,8 +1946,21 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     },
   });
 
-  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; undo?: { label?: string } }) => {
+  const toastHandler = useCallback((message: string, options?: { type?: string; duration?: number; description?: string; undo?: { label?: string } }) => {
     if (options?.type === 'error') { toast.error(message); return; }
+    // objectstack#37867 — a write that went through with warnings: the
+    // runner's success toast on its warning variant, the warnings under the
+    // title, the Undo button kept (the same toast a record save raises).
+    if (options?.type === 'warning') {
+      toast.warning(message, {
+        duration: options.duration,
+        ...(options.description ? { description: options.description } : {}),
+        ...(options.undo
+          ? { action: { label: options.undo.label || 'Undo', onClick: () => { void undoCtl.undo(); } } }
+          : {}),
+      });
+      return;
+    }
     if (options?.undo) {
       toast.success(message, {
         duration: options.duration,
@@ -2058,7 +2071,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // action doesn't retarget another object (a child action interpolated
         // from the parent's fields would hit the wrong record; same guard as
         // the recordIdParam fallback below). Without the page-record fallback,
-        // a `record_header` action reaching here through any dispatch path
+        // a `record_page` action reaching here through any dispatch path
         // that doesn't stash `_rowRecord` sent the literal `{id}` on the wire.
         const interpolationRecord = rowRecord
           ?? (!action.objectName || action.objectName === objectName
@@ -2084,7 +2097,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // about — a literal `recordId` override (not a declared ActionDef
           // field; nothing in this repo's metadata sets it today, hence the
           // cast) and the same page-record fallback `interpolationRecord`
-          // above uses for `record_header` actions dispatched with no
+          // above uses for `record_page` actions dispatched with no
           // `rowRecord`. Preserve that priority (row -> override ->
           // page record) and let the helper decide — and word — the
           // refusal only once every source has been tried, instead of the
@@ -2096,7 +2109,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           // (the only state the <SkeletonDetail> early return reads) is flipped
           // false in a route-keyed microtask, while `pageRecord` lands one
           // `findOne` round-trip later; for that whole window the real header
-          // renders with every `record_header` action live. Clicking inside it
+          // renders with every `record_page` action live. Clicking inside it
           // seeded from `null`, which `resolveRecordIdParamSeed` deliberately
           // abstains on (no value AND no error — "no row context" is not that
           // guard's business), so the request went out naming no record and the
@@ -2269,7 +2282,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
 
   /**
    * Flow action handler — triggered when an Action with `type: 'flow'` is
-   * invoked from a record-level location (record_header, record_more, …) or
+   * invoked from a record-level location (record, record_page, …) or
    * from a related list on this page. It starts the flow through one of two
    * doors (objectui#12037, triage ruling B; the rule and its reasons live in
    * `utils/flowLaunch`):
@@ -4737,10 +4750,11 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     // `@object-ui/plugin-detail/RecordDetailDrawer`.
 
     // Filter actions for the record page header and deduplicate by name.
-    // Both header locations are included: `record_header` renders inline,
-    // `record_more` renders inside the header's ⋯ overflow menu (the spec's
-    // "overflow menu under the More/⋯ button" location — PageHeaderRenderer
-    // routes record_more-only actions into the overflow; #2358 trap 2).
+    // Both record page words are included: `record_page` and `record` (which
+    // `actionRendersAt` draws on the record page too). An action folded into
+    // the header's ⋯ overflow menu says so with `component: 'action:menu'`,
+    // which PageHeaderRenderer routes into the overflow (#2358 trap 2;
+    // until protocol 19 the `record_more` location said it, objectstack#36495).
     // The set is `placedHeaderActions` (`@object-ui/types`): the ONE reader an
     // authored `page:header` with `placedActions: true` reads too
     // (objectstack#29951), so the synthesized header and such a page draw the
@@ -5336,7 +5350,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
   const hasAttachments = hasExplicitAttachments(effectivePage as any);
 
   // System actions (Edit / Share / Delete) — synthesized for every record
-  // page so objects without authored record_header actions still surface
+  // page so objects without authored record_page actions still surface
   // the basic affordances.
   //
   // Placement metadata (objectui#2361): the page header now renders up to
@@ -5370,7 +5384,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.claim', { defaultValue: 'Claim' }),
         icon: 'hand',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         order: 95,
         disabled: claiming,
         onClick: handleClaim,
@@ -5387,7 +5401,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.cancel', { defaultValue: 'Cancel' }),
         icon: 'x',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 99,
         disabled: recordEditSaving,
@@ -5400,7 +5414,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : t('detail.save', { defaultValue: 'Save' }),
         icon: 'check',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         // objectstack#35816 — Save is the edit state's one filled button, and
         // keeps its place after Cancel, as a form's footer orders them.
         variant: 'primary',
@@ -5437,7 +5451,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // to read.
         icon: 'pencil',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         order: 100,
         // objectui#2572 item 4 — while a shared inline-edit draft is live,
         // the page:header renderer greys this CTA out so the classic form
@@ -5508,7 +5522,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
           : t('common.addToFavorites', { defaultValue: 'Add to favorites' }),
         icon: 'star',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 105,
         component: 'action:menu',
@@ -5520,7 +5534,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
       label: t('detail.share', { defaultValue: 'Share' }),
       icon: 'share',
       type: 'script',
-      locations: ['record_header'],
+      locations: ['record_page'],
       variant: 'outline',
       order: 110,
       component: 'action:menu',
@@ -5572,7 +5586,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('console.changeOwner.title', { defaultValue: 'Change Owner' }),
         icon: 'user-cog',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 112,
         component: 'action:menu',
@@ -5589,7 +5603,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.openAsFullPage', { defaultValue: 'Open as full page' }),
         icon: 'arrow-up-right',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 115,
         component: 'action:menu',
@@ -5604,7 +5618,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         label: t('detail.copyRecordId', { defaultValue: 'Copy record ID' }),
         icon: 'copy',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'outline',
         order: 113,
         component: 'action:menu',
@@ -5628,7 +5642,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
         // destructive entry apart at the bottom of the menu (objectui#12529).
         icon: 'trash',
         type: 'script',
-        locations: ['record_header'],
+        locations: ['record_page'],
         variant: 'danger',
         order: 120,
         component: 'action:menu',
@@ -5726,7 +5740,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
     : (synthSystemActions.find((action) => action.name === 'sys_edit') as RecordHeaderEditEntry | undefined);
 
   // The synth path hands ONLY business actions (authored on objectDef and
-  // routed to the record_header location, e.g. Lead.convert) to the page
+  // routed to the record_page location, e.g. Lead.convert) to the page
   // schema. System actions (Edit / Share / Delete) ride through
   // `RecordContext.headerSystemActions` instead, so they reach both
   // synth/slotted pages AND authored full-Lightning pages without
@@ -6443,8 +6457,7 @@ export function RecordDetailView({ dataSource, objects, onEdit, objectNameOverri
                   that declares `print` holds only the printable component
                   types, and `page:header` is not one of them, so the record's
                   header actions have no block to draw them on such a page.
-                  This row draws them: the object's declared `record_header` /
-                  `record_more` actions and the system set the
+                  This row draws them: the object's declared `record` / `record_page` actions and the system set the
                   `RecordContextProvider` above hands over (Edit / Share /
                   Delete), through `PageHeaderActions`, the ONE resolver
                   `page:header` draws them with, so each is gated, ordered,
