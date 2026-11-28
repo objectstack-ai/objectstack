@@ -30,6 +30,7 @@ const FIELDS: Readonly<Record<string, FormulaSourceField>> = {
   spent: { type: 'currency', currencyConfig: { currencyMode: 'dynamic' } },
   probability: { type: 'percent' },
   quantity: { type: 'number' },
+  hours: { type: 'number' },
   discount_rate: { type: 'number' },
   flag: { type: 'boolean' },
   name: { type: 'text' },
@@ -119,9 +120,6 @@ describe('CONTROL — a numeric formula stays `number`', () => {
   it('nothing it cannot prove is money: a numeric expression over declared non-money units, or one that is not numeric, gets exactly the plain inference', () => {
     for (const source of [
       'record.quantity * 2',
-      // A ratio of two amounts in one currency is proven a plain number, and
-      // cel-js types it `dyn`: the plain inference answers `{}`.
-      'record.amount / record.tax',
       'record.amount > 100',
       'upper(record.name)',
       'today()',
@@ -194,8 +192,12 @@ describe('#35631 — an amount the proof cannot follow is unproven, never `numbe
     'record.account.balance * 0.9', // a hop through a reference
     'record.subtotal * 0.2', // a formula that declares no returnType
     "record['amount'] * 0.1", // the indexed spelling of an amount
-    'record.?amount * 0.1', // the optional spelling
-    "record[?'amount'] * 0.1", // the optional indexed spelling
+    // The optional spellings read through `orValue`: a bare `record.?amount`
+    // is an optional, which cel-js does not type as a number, so
+    // `record.?amount * 0.1` answers `{}` with or without the unit check and
+    // pins nothing. Unwrapped, the read types `double` and is judged.
+    'record.?amount.orValue(0) * 0.1', // the optional spelling
+    "record[?'amount'].orValue(0) * 0.1", // the optional indexed spelling
     'record.unknown_field * 2', // a name the map does not declare
     // One shape per leg of the unit check.
     '100 / record.weighted', // a formula declared `currency`
@@ -215,10 +217,66 @@ describe('#35631 — an amount the proof cannot follow is unproven, never `numbe
   });
 
   it('CONTROL — every spelling of a quantity read, and a formula declared `number`, still answers `number`', () => {
-    for (const source of ["record['quantity'] * 2", 'record.count_formula * 2', 'quantity * 2', 'record.probability * 2']) {
+    for (const source of [
+      "record['quantity'] * 2",
+      'record.?quantity.orValue(0) * 2',
+      "record[?'quantity'].orValue(0) * 2",
+      'record.count_formula * 2',
+      'quantity * 2',
+      'record.probability * 2',
+    ]) {
       expect(inferFormulaReturn(source, FIELDS), source).toEqual(plainStamp(source));
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual({ returnType: 'number' });
     }
-    expect(inferFormulaReturn("record['quantity'] * 2", FIELDS)).toEqual({ returnType: 'number' });
+  });
+});
+
+describe('#35815 — a proven plain number whose CEL type is `dyn` answers `number`', () => {
+  // A field read is `dyn` to cel-js, so an operator over two field reads types
+  // `dyn` and the CEL type alone proves nothing. The unit proof read both
+  // operands' declared units: the result is a plain number, proved not money,
+  // so a stamp may withdraw a declared `currency` on it.
+  it('field-over-field quantity arithmetic answers `number`', () => {
+    for (const source of [
+      'record.quantity * record.hours',
+      'record.quantity / record.hours',
+      'record.quantity + record.hours',
+      'quantity * hours', // bare identifiers resolve like `record.<field>`
+      'record.flag ? record.quantity : record.hours',
+      'max(record.quantity, record.probability)',
+    ]) {
+      expect(inferExpressionType(source, { fields: NAMES }), source).toBe('unknown');
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual({ returnType: 'number' });
+    }
+  });
+
+  it('a ratio of two amounts in one currency answers `number`', () => {
+    expect(inferExpressionType('record.amount / record.tax', { fields: NAMES })).toBe('unknown');
+    expect(inferFormulaReturn('record.amount / record.tax', FIELDS)).toEqual({ returnType: 'number' });
+    expect(inferFormulaReturn('record.budget / record.spent', FIELDS)).toEqual({ returnType: 'number' });
+  });
+
+  it('CONTROL — money over two field reads still stamps `currency`, and an unproven `dyn` stays `{}`', () => {
+    expect(inferFormulaReturn('record.amount * record.quantity', FIELDS))
+      .toEqual({ returnType: 'currency', currencyConfig: USD });
+    for (const source of [
+      'record.amount / record.fee_eur', // a ratio across two currencies
+      'record.quantity / record.amount', // a quantity divided by an amount
+      'record.amount * record.tax', // an amount times an amount
+      'record.quantity * record.subtotal', // a formula that declares no returnType
+      'record.quantity * record.rollup', // a roll-up operand
+      'record.quantity * record.name', // a text operand
+      'record.quantity * record.unknown_field', // a name the map does not declare
+    ]) {
+      expect(inferFormulaReturn(source, FIELDS), source).toEqual({});
+    }
+  });
+
+  it('accepted limit — a quantity read through a relationship stays unproven: its unit is not in the host map', () => {
+    // The producer header records this limit: the related object's fields are
+    // not an input, so the leaf's unit cannot be read.
+    expect(inferExpressionType('record.account.employee_count * 2', { fields: NAMES })).toBe('number');
+    expect(inferFormulaReturn('record.account.employee_count * 2', FIELDS)).toEqual({});
   });
 });
 
