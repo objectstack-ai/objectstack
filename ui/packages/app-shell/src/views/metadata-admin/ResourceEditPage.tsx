@@ -183,6 +183,7 @@ import { useNavigationWrites } from '../../hooks/useNavigationSync.js';
 import { RefusalMessage } from '../../components/RefusalMessage.js';
 import { authoredBuffer, authoredPublished, editsAuthoredLayers, type AuthoredLayers } from './authoredObjectBuffer.js';
 import { clearPublishChecksShown, markPublishChecksShown } from '../../preview/publishChecksShown.js';
+import { declaredBoundObjectPath, objectNameAt } from './formBoundObject.js';
 
 /** What an environment section is handed: the item's name and its definition on screen. */
 interface EnvironmentSectionProps {
@@ -1332,11 +1333,15 @@ function MetadataResourceEditPageImpl({
   // widgets (e.g. the interface-page filter-mode selector). For a page the
   // source is `interfaceConfig.source` (interface mode) or the bound
   // `object`; other types fall back to their own `object`/`objectName`.
+  // objectstack#37309 — and last, the path the type's form declares on its
+  // field-picker rows (`dependsOn`, under the composites they sit in), so a
+  // knowledge source's pickers offer the fields of its `source.object`.
   const sourceObjectName: string | undefined =
     ((draft as any)?.interfaceConfig?.source as string | undefined) ||
     ((draft as any)?.data?.object as string | undefined) ||
     ((draft as any)?.object as string | undefined) ||
-    ((draft as any)?.objectName as string | undefined);
+    ((draft as any)?.objectName as string | undefined) ||
+    objectNameAt(draft, declaredBoundObjectPath(entry?.form));
   // The field catalog and the action catalog come from ONE `client.get('object',
   // …)` call, so they succeed together and fail together — one `LoadState` for
   // the pair, not two that could disagree (objectui#5170).
