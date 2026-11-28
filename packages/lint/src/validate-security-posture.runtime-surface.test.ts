@@ -585,7 +585,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     expect(stackKeyForType('object_extension')).toBe('objectExtensions');
     // [#33217] The validation-rule artifact checks (regex, JSON schema) cross on it too.
     expect(runtimeAuthoringRulesFor('object_extension').map((r) => r.name))
-      .toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
+      .toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintOptionColors', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
 
     const roleSelect = { type: 'select', label: 'Group Function', options: [{ value: 'l1', label: 'Tier 1' }] };
     const refused = runRuntimeAuthoringRules({
@@ -600,7 +600,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     // positional and names it.
     expect(refused.errors[0].path).toBe('objectExtensions[0].fields.role.name');
     expect(refused.errors[0].where).toBe('field "sd_agent.role"');
-    expect(refused.rulesRun).toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
+    expect(refused.rulesRun).toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintOptionColors', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
 
     // The two labels the entry serves, at the same door.
     const labelled = runRuntimeAuthoringRules({
@@ -620,7 +620,7 @@ describe('validateSecurityPosture at the runtime publish surface (#7576 → #830
     });
     expect(clean.errors).toEqual([]);
     expect(clean.advisories).toEqual([]);
-    expect(clean.rulesRun).toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
+    expect(clean.rulesRun).toEqual(['validateStackExpressions', 'lintFieldReferenceShapes', 'lintOptionColors', 'lintDuplicateFieldLabels', 'validateSecurityRoleWord', 'validateRuleCompilability', 'validateRuleSchemaFormats']);
 
     // Not a context row: the baseline carries no `objectExtensions`, and the
     // candidate holds exactly the written item.

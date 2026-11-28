@@ -36,6 +36,8 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias).
+import '@objectstack/metadata';
 import { HttpDispatcher } from './http-dispatcher.js';
 
 /**
@@ -99,7 +101,7 @@ function makeDispatcher(opts: {
                 n === 'objectql' || n === 'data' ? ql : n === 'metadata' ? metadata : n === 'auth' ? auth : null,
         },
     };
-    return { dispatcher: new HttpDispatcher(kernel) as any, executeAction };
+    return { dispatcher: new HttpDispatcher(kernel) as any, executeAction, ql };
 }
 
 const ctx = (): any => ({ request: {}, environmentId: 'platform', executionContext: { userId: 'u1', systemPermissions: [] } });
@@ -198,15 +200,19 @@ describe('REST /actions — object-less ("global") action key (#3913)', () => {
         expect(res.response.body.data).toEqual({ scope: 'object' });
     });
 
-    it('does not try to load a record for an object-less action', async () => {
-        const { dispatcher } = makeDispatcher({
+    it('an object-less action accepts no record: a record id is refused 400 naming it, with no load and no run', async () => {
+        const { dispatcher, executeAction, ql } = makeDispatcher({
             registered: { 'global:log_call': (c: any) => ({ record: c.record }) },
         });
 
         const res = await dispatcher.handleActions('/global/log_call/rec_1', 'POST', {}, ctx());
 
-        // No `get` against an object named 'global' — only the id echo.
-        expect(res.response.body.data.record).toEqual({ id: 'rec_1' });
+        expect(res.response.status).toBe(400);
+        expect(res.response.body.error.code).toBe('VALIDATION_FAILED');
+        expect(res.response.body.error.details.fields[0].field).toBe('recordId');
+        // No `get` against an object named 'global', and the handler never ran.
+        expect(ql.find).not.toHaveBeenCalled();
+        expect(executeAction).not.toHaveBeenCalled();
     });
 
     it('404s an unregistered action, naming the ROUTED object rather than the last probe', async () => {

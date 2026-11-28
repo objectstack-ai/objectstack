@@ -187,7 +187,9 @@ import {
   lintLegacyOrganizationComposites,
   lintInlineEditBulk,
   lintFieldReferenceShapes,
+  lintOptionColors,
   summaryRollupFindings,
+  type OptionColorPicklist,
 } from './data-model-rules.js';
 import { objectExtensionsByTarget, objectsAsServed } from './object-graph.js';
 
@@ -2782,6 +2784,62 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
           hint: f.fix ?? '',
         }),
       );
+    },
+  },
+  // A select option `color` the option badge renders neutral
+  // (`field/option-color-renders-neutral`): since the ruling on
+  // objectstack#36882 (option A) an option is coloured only by its declared
+  // colour, and a declared colour outside the nine palette families and the
+  // `#rgb` / `#rrggbb` hex paints the same neutral grey as no colour at all.
+  // ADVISORY: `SelectOption.color` stays a free string (charts and gantt hand
+  // it to the browser as a CSS colour), so nothing is refused.
+  //
+  // On the runtime publish gate's `object` and `object_extension` writes,
+  // where the written entry's own options are the whole input, so the
+  // differential charges a write only with a colour it declares. This is an
+  // advisory-tier rule at the object door, and that is this rule's own card's
+  // crossing, not one of the fenced rules': the fence
+  // (`RUNTIME_OBJECT_ADVISORY_VOLUME`) prices advisory VOLUME, and this rule
+  // fires on 0 of the platform's and the examples' declared option colours
+  // (every one is a family name or a 6-digit hex), so a save hears it only
+  // when its author wrote a colour that will not paint. `picklist` is not a
+  // runtime-creatable type, so picklists are judged on the CLI alone.
+  {
+    name: 'lintOptionColors',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack) => {
+      const extensions = [...objectExtensionsByTarget(stack).entries()].flatMap(([target, list]) =>
+        list.map((ext) => ({ target, path: ext.path, fields: ext.fields })),
+      );
+      const picklists: OptionColorPicklist[] = [];
+      const collect = (key: 'picklists' | 'picklistExtensions', nameKey: 'name' | 'extend', noun: string) => {
+        const entries = (stack as AnyRec)[key];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry: AnyRec, i: number) => {
+          const name = typeof entry?.[nameKey] === 'string' ? (entry[nameKey] as string) : '';
+          if (!name) return;
+          picklists.push({ name, path: `${key}[${i}]`, where: `${noun} "${name}"`, options: entry.options });
+        });
+      };
+      collect('picklists', 'name', 'picklist');
+      collect('picklistExtensions', 'extend', 'picklist extension of');
+      return lintOptionColors(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        extensions,
+        picklists,
+      ).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      }));
     },
   },
   // Two visible fields of one object served under one label

@@ -175,7 +175,17 @@ describe('3. the tree as it stands satisfies the rule', () => {
     const output = execFileSync(process.execPath, [GATE], { cwd: repoRoot, encoding: 'utf8' });
 
     expect(output).toContain('No test source names a pending changeset');
-  });
+    // ⏱ Explicit, because this is one whole-tree scan in a child process and the
+    // default 15s is not enough on a loaded shard. Measured: the CLI alone takes
+    // ~3.1s on a quiet 4-core box, and on the same Test UI 1/16 shard the file
+    // took 4.4s in the green 4-hourly run 46060926437 but 15.7s and 16.0s in the
+    // two red ones (scheduled run 46086203867, PR run 46013507104) — about 5x
+    // the local cost, so 60s keeps ~4x over the worst reading. The call is
+    // synchronous, so vitest can only judge it after it returns: a scan that
+    // stops terminating still hangs the shard and is caught by the job timeout.
+    // Follows the per-case `60_000` precedent of body-dialect-census.test.ts.
+    // ⛔ Not a global `testTimeout` bump, and ⛔ never a skip or a narrowed scan.
+  }, 60_000);
 });
 
 describe('4. the wiring — both shapes that can break the rule reach this suite', () => {
