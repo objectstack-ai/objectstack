@@ -975,7 +975,7 @@ describe('#38103 — a declarative update answers the `notice` and `droppedField
         engine.registerHook('beforeUpdate', async (ctx: any) => {
             if (ctx.input?.data?.status === 'closed') ctx.notice(NOTICE);
         }, { object: FB_OBJECT });
-        await engine.insert(FB_OBJECT, { id: FB_RECORD, status: 'open', priority: 'low' }, { context: { isSystem: true } } as any);
+        await engine.insert(FB_OBJECT, { id: FB_RECORD, status: 'open', priority: 'low' }, { context: { isSystem: true } });
         const protocol = new ObjectStackProtocolImplementation(engine as never);
         return { engine, protocol };
     }
@@ -1005,7 +1005,7 @@ describe('#38103 — a declarative update answers the `notice` and `droppedField
         };
         const context: any = { request: {}, environmentId: 'platform', executionContext: ec(OWNER) };
         const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', {}, context);
-        const stored: any = await engine.findOne(FB_OBJECT, { where: { id: FB_RECORD }, context: { isSystem: true } } as any);
+        const stored: any = await engine.findOne(FB_OBJECT, { where: { id: FB_RECORD }, context: { isSystem: true } });
         return { response: res.response, stored };
     }
 
