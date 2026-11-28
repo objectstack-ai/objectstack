@@ -1215,6 +1215,15 @@ export function extractTriggerPaths(workflowText) {
  * It too discriminates events, never paths, and it says a different WHEN: the
  * job skips the PR and runs on the merge-queue build and the full battery.
  *
+ * ⭐ So is the QUEUE-PATH clause, under the same two conditions (ruling record
+ * 7146156389, ci.yml's `temporal-conformance`): `&& github.event_name !=
+ * 'pull_request' && (github.event_name != 'merge_group' || needs.<job>.outputs.
+ * <o> != 'false')`. It says a third WHEN: never on the PR, on the merge-queue
+ * build only when output `<o>` matched the entry's diff, and always on the full
+ * battery. The output is returned as `queueGate` so a row can say which of the
+ * two the CARD's paths get; its globs never join the population, which stays
+ * the filter outputs ahead of the clause.
+ *
  * ⛔ Stripped is not FORGOTTEN (#24073). The clause decides nothing about paths,
  * but it decides WHEN: such a job never runs on the PR, and under the
  * full-battery clause never in the merge queue either. `jobIfReading` below
@@ -1229,6 +1238,8 @@ const JOB_IF_STATUS_TERM = /(?:^|\s)!\s*cancelled\(\)\s*&&\s*/g;
 const JOB_IF_FULL_BATTERY_TERM =
   /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*&&\s*github\.event_name\s*!=\s*'merge_group'\s*$/;
 const JOB_IF_QUEUE_AND_FULL_TERM = /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*$/;
+const JOB_IF_QUEUE_PATH_TERM =
+  /\s*&&\s*github\.event_name\s*!=\s*'pull_request'\s*&&\s*\(\s*github\.event_name\s*!=\s*'merge_group'\s*\|\|\s*needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)\s*!=\s*'false'\s*\)\s*$/;
 const JOB_FILTER_OUTPUT_TERM =
   /^needs\.([A-Za-z_][\w-]*)\.outputs\.([A-Za-z_][\w-]*)\s*(?:!=\s*(['"])false\3|==\s*(['"])true\4)$/;
 
@@ -1243,29 +1254,57 @@ export function jobFilterOutputRefs(ifExpression) {
 }
 
 /**
- * The whole reading of a job `if:` — `{ refs, fullBatteryOnly, notOnPullRequest }`,
+ * The whole reading of a job `if:` — `{ refs, fullBatteryOnly, notOnPullRequest, queueGate }`,
  * or null on exactly the refusals `jobFilterOutputRefs` makes, because that
  * function IS this one with the event facts dropped. `fullBatteryOnly` is true
  * when the full-battery clause was stripped as the last conjunct: the job runs
  * on `main`'s push and hourly runs and NEVER on a `pull_request` or
- * `merge_group` event. `notOnPullRequest` is true when either clause was
- * stripped: the job never runs on the PR (alone, the queue-and-full clause —
- * the merge-queue build runs it). Both are read in the same pass as the refs,
+ * `merge_group` event. `notOnPullRequest` is true when any of the three event
+ * clauses was stripped: the job never runs on the PR (with the queue-and-full
+ * clause the merge-queue build runs it; with the queue-path clause it runs it
+ * only when `queueGate` matched). `queueGate` is `{ job, output }` when the
+ * queue-path clause was stripped (the queue build runs the job only when that
+ * output matched), else null. All are read in the same pass as the refs,
  * from the same text, so the population and the event facts cannot describe
  * two different `if:`s.
+ *
+ * ⛔ An UNPARENTHESISED `A || B` ahead of a stripped event clause is refused:
+ * GitHub binds `&&` tighter than `||`, so the clause would bind to `B` alone,
+ * and reading both refs under it would put an event fact on `A` that its text
+ * does not carry. The parenthesised `(A || B)` reads as before.
  */
+function wrappedWhole(expr) {
+  if (!expr.startsWith('(') || !expr.endsWith(')')) return false;
+  let depth = 0;
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === '(') depth++;
+    else if (expr[i] === ')') depth--;
+    if (depth === 0 && i < expr.length - 1) return false;
+  }
+  return true;
+}
+const bareOr = (expr) => expr.includes('||') && !wrappedWhole(expr.trim());
+
 export function jobIfReading(ifExpression) {
   if (typeof ifExpression !== 'string') return null;
   let expr = ifExpression.trim();
   const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
   if (wrapped) expr = wrapped[1].trim();
   expr = expr.replace(JOB_IF_STATUS_TERM, ' ').trim();
+  const queuePath = JOB_IF_QUEUE_PATH_TERM.exec(expr);
+  if (queuePath) {
+    if (bareOr(expr.slice(0, queuePath.index))) return null;
+    const rest = jobIfReading(expr.slice(0, queuePath.index));
+    if (!rest || rest.notOnPullRequest) return null;
+    return { ...rest, notOnPullRequest: true, queueGate: { job: queuePath[1], output: queuePath[2] } };
+  }
   const fullFree = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
   const fullBatteryOnly = fullFree !== expr;
   // Only when the full-battery clause was NOT there: stripping both would read
   // `!= 'pull_request' && != 'pull_request'` as one clause.
   const eventFree = fullBatteryOnly ? fullFree : expr.replace(JOB_IF_QUEUE_AND_FULL_TERM, '').trim();
   const notOnPullRequest = eventFree !== expr;
+  if (notOnPullRequest && bareOr(eventFree)) return null;
   expr = eventFree;
   // One balanced outer paren pair at a time — `(A || B)` is the live spelling.
   for (;;) {
@@ -1287,7 +1326,7 @@ export function jobIfReading(ifExpression) {
     if (!m) return null;
     refs.push({ job: m[1], output: m[2] });
   }
-  return refs.length ? { refs, fullBatteryOnly, notOnPullRequest } : null;
+  return refs.length ? { refs, fullBatteryOnly, notOnPullRequest, queueGate: null } : null;
 }
 
 /**
@@ -1486,7 +1525,10 @@ const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
  * The path population a job's `if:` resolves to, or null — the whole of
  * direction 1, assembled from the three readings above.
  *
- * Returns `{ paths, outputs, dropped, fullBatteryOnly, notOnPullRequest }`.
+ * Returns `{ paths, outputs, dropped, fullBatteryOnly, notOnPullRequest, queueGate, queuePaths }`;
+ * `queuePaths` are the queue-path output's translatable globs (null without the clause), and an
+ * untranslatable negation there, or an output the workflow does not declare, refuses the job;
+ * `queueUncertain` is true when a positive extglob was dropped from them or one is a plain negation.
  * `paths` is a UNION: the `if:` is an OR of filter outputs, so CI schedules the
  * job when ANY of them matched. The two flags are `jobIfReading`'s event facts,
  * carried so a row built from this population can say WHEN CI schedules it
@@ -1495,7 +1537,19 @@ const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
 export function jobFilterPopulation(job, filterStepsByOutputSource) {
   const reading = jobIfReading(job.if);
   if (!reading) return null;
-  const { refs, fullBatteryOnly, notOnPullRequest } = reading;
+  const { refs, fullBatteryOnly, notOnPullRequest, queueGate } = reading;
+  let queuePaths = null;
+  let queueUncertain = false;
+  if (queueGate) {
+    const globs = filterStepsByOutputSource.get(`${queueGate.job}.${queueGate.output}`);
+    if (!globs || globs.some((g) => g.startsWith('!') && EXTGLOB_CONSTRUCT.test(g))) return null;
+    queuePaths = globs.filter((g) => !EXTGLOB_CONSTRUCT.test(g));
+    // A dropped positive extglob narrows the list; a plain negation is read by
+    // dorny/paths-filter (picomatch, per pattern) and by GitHub's ordered
+    // `paths:` language differently. Either way "none of your paths matched"
+    // is stronger than the evidence, so the row hedges instead (N1, #38087).
+    if (queuePaths.length !== globs.length || queuePaths.some((g) => g.startsWith('!'))) queueUncertain = true;
+  }
   const paths = [];
   const outputs = [];
   let dropped = 0;
@@ -1514,12 +1568,13 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
     }
     outputs.push(`${ref.job}.${ref.output}`);
   }
-  return paths.length ? { paths, outputs, dropped, fullBatteryOnly, notOnPullRequest } : null;
+  return paths.length ? { paths, outputs, dropped, fullBatteryOnly, notOnPullRequest, queueGate, queuePaths, queueUncertain } : null;
 }
 
 /**
  * Every job in one workflow whose `if:` resolves to a path population, WITH the
- * job's own text: `[{ job, name, text, outputs, paths, dropped, fullBatteryOnly, notOnPullRequest }]`.
+ * job's own text: `[{ job, name, text, outputs, paths, dropped, fullBatteryOnly, notOnPullRequest,
+ * queueGate, queuePaths, queueUncertain }]` — the last three from the queue-path clause, null/false without it.
  *
  * ⛔ No check filter here, and that is the whole reason this is its own
  * function. The caller below drops a job that invokes no discoverable check
@@ -2885,7 +2940,15 @@ export function alwaysRunSteps(entries) {
  * `main`'s push and hourly runs ONLY — never on this PR, never in the merge
  * queue. A row whose clause was the queue-and-full one carries
  * `notOnPullRequest: true` alone (#30461): never on this PR, first on the
- * merge-queue build. Both renderings print the fact on the row's own line, so
+ * merge-queue build. A queue-path row (ruling record 7146156389) carries
+ * `queueOutput` and decides per CARD, on a glob matching the path ITSELF
+ * (`queueGlob`, with the path in `queuePath`): a match keeps `notOnPullRequest`
+ * alone; no match sets `fullBatteryOnly` too. ⛔ Never `triggerListCovers`'
+ * directory reach here: a directory surface such as `packages/runtime` reaches
+ * into a one-file glob under it, which says CI MAY run the leg, not that it
+ * will. A surface that only reaches, or a queue list `queueUncertain` marks,
+ * carries `queueHedged` and a sentence that says it depends on the files.
+ * Both renderings print the fact on the row's own line, so
  * "scheduled BY YOUR PATHS" cannot be read as "this PR runs it".
  *
  * ⛔ NOT claimed: that a row is a test, a build or a setup step.
@@ -2973,9 +3036,25 @@ export function jobFilteredSteps(entries, paths) {
       }
       if (steps.length === 0) continue;
       counts.named += 1;
+      const queueOutput = job.queueGate ? `${job.queueGate.job}.${job.queueGate.output}` : null;
+      let queue = {};
+      let queueMiss = false;
+      if (queueOutput !== null) {
+        const exact = paths.map((p) => ({ path: p, glob: triggerListMatches(job.queuePaths, p) })).find((h) => h.glob);
+        const reach = paths.find((p) => triggerListCovers(job.queuePaths, p));
+        if (job.queueUncertain === true || (!exact && reach)) {
+          queue = { queueOutput, queueHedged: true, ...(reach ? { queuePath: reach } : {}) };
+        } else if (exact) {
+          queue = { queueOutput, queuePath: exact.path, queueGlob: exact.glob };
+        } else {
+          queue = { queueOutput };
+          queueMiss = true;
+        }
+      }
       rows.push({
         workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped,
-        fullBatteryOnly: job.fullBatteryOnly === true, notOnPullRequest: job.notOnPullRequest === true, steps,
+        fullBatteryOnly: job.fullBatteryOnly === true || queueMiss,
+        notOnPullRequest: job.notOnPullRequest === true, ...queue, steps,
       });
     }
   }
@@ -7878,6 +7957,22 @@ export function triggerCovers(pattern, inputPath) {
   if (triggerPatternRegex(pattern).test(inputPath)) return true;
   const literalPrefix = pattern.split(/[*?+[]/)[0];
   return literalPrefix.length > 0 && literalPrefix.startsWith(`${inputPath}/`);
+}
+
+/**
+ * `triggerListCovers` WITHOUT the directory reach: the deciding pattern only
+ * when one matches the path itself, in the same last-match-wins order. The
+ * queue-path row reads this (ruling record 7146156389): a directory that a
+ * one-file glob reaches into is not a changed file that glob matches.
+ */
+export function triggerListMatches(patterns, inputPath) {
+  let decided = null;
+  for (const raw of patterns ?? []) {
+    const negated = raw.startsWith('!');
+    if (!triggerPatternRegex(negated ? raw.slice(1) : raw).test(inputPath)) continue;
+    decided = negated ? null : raw;
+  }
+  return decided;
 }
 
 /**
@@ -12899,7 +12994,9 @@ export function alwaysRunLines(rows, counts) {
  * on the PR like any other.
  *
  * Read off `row.fullBatteryOnly` and `row.notOnPullRequest`, the facts
- * `jobIfReading` took from the job's own `if:`; ⛔ never keyed on a job name, so
+ * `jobIfReading` took from the job's own `if:`, and for a queue-path row
+ * (ruling record 7146156389) `row.queueOutput` with `row.queueGlob` or
+ * `row.queueHedged`, the per-card split `jobFilteredSteps` made; ⛔ never keyed on a job name, so
  * a job that gains or loses either event clause gains or loses the clause here
  * with nothing to update. A queue-and-full row (#30461) says the PR skips the
  * job and the merge-queue build is its first run.
@@ -12908,6 +13005,20 @@ export function alwaysRunLines(rows, counts) {
  * pins — and the first run was `main`'s push battery, red.
  */
 export function fullBatteryOnlyClause(row) {
+  const gate = typeof row?.queueOutput === 'string' ? row.queueOutput : null;
+  if (gate && row.fullBatteryOnly === true) {
+    return '⛔ does NOT run on this PR or in the merge queue: its `if:` excludes the pull_request event and admits merge_group' +
+      ` only when \`${gate}\` matched, which none of your paths does, so its first run on this change is \`main\`'s push battery, AFTER the merge`;
+  }
+  if (gate && row.notOnPullRequest === true && row.queueHedged === true) {
+    return '⛔ does NOT run on this PR: its `if:` excludes the pull_request event, and the merge-queue build runs it only if a' +
+      ` changed file is in \`${gate}\`${row.queuePath ? ` (your surface \`${row.queuePath}\` reaches into it but does not match it)` : ''};` +
+      " otherwise its first run on this change is `main`'s push battery, AFTER the merge";
+  }
+  if (gate && row.notOnPullRequest === true && typeof row.queueGlob === 'string') {
+    return '⛔ does NOT run on this PR: its `if:` excludes the pull_request event,' +
+      ` and your paths hit \`${gate}\` (\`${row.queuePath}\` ⇢ '${row.queueGlob}'), so its first run on this change is the merge-queue build, after the PR is enqueued`;
+  }
   if (row?.fullBatteryOnly === true) {
     return '⛔ does NOT run on this PR or in the merge queue: its `if:` excludes the pull_request and merge_group events,' +
       " so its first run on this change is `main`'s push battery, AFTER the merge";

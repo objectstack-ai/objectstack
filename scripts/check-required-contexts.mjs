@@ -374,16 +374,20 @@ const UNATTRIBUTED_BATTERY = '(no battery open)';
  * ⛔ TOMBSTONE — `Temporal Conformance (live PG + MySQL)`
  * (ci.yml:temporal-conformance), dropped by the
  * #22998 ruling (two-speed CI; ruling record 6120820653 on #22991): its leg
- * runs in the FULL BATTERY only — `main`'s push, hourly and dispatch runs — so a
- * PR or queue build carries the fast set and the context left the
- * required set. The order is the #9325 two-step: the registry and the
+ * moved to the FULL BATTERY — `main`'s push, scheduled and dispatch runs — off
+ * the PR and queue builds' fast set, and the context left the
+ * required set. Since ruling record 7146156389 (#37095) the leg also runs on a
+ * `merge_group` entry whose diff hits ci.yml's `temporal_live` filter paths
+ * (never on `pull_request`); it is still no required context, so that queue run
+ * is advisory and its red lands on `main` — whether it rejoins the set is the
+ * maintainer's call, made in the ruleset. The order is the #9325 two-step: the registry and the
  * instruction surfaces drop the row in the PR, and the maintainer removes the
  * context from the ruleset in the same sitting as the merge; until then
  * `--verify-required-set` reports it in direction B (required, pinned by no
  * row), report-only, which is the sitting's own reminder. Prose and not a
  * RETIRED_CONTEXT_NAMES row, for the reason the `Build Docs` / `Console Pin
  * Gate` tombstone above gives: the name is not dead — the job still publishes
- * this check-run on every full-battery run, and the instruction files name
+ * this check-run on every full-battery run and on such a queue entry, and the instruction files name
  * where it runs.
  * Returned: `Dogfood Regression Gate` (ci.yml:dogfood-gate) left with it by #22998 and is back since #30461 (letter B 6663883327 put its shards on `merge_group`; letter A 6669982756 re-enrolled the row below).
  */
