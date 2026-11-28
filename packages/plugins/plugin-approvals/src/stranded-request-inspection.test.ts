@@ -795,8 +795,17 @@ describe('#37808 — past 500 decided requests, a new strand is still reported',
     svc.attachAutomation(surface(strandedRuns) as any);
     return svc;
   };
+  // [#38223] Seeded in batches through the engine's own array insert, not one
+  // `insert` per row: 1200 serial single-row writes were ~90% of the slowest
+  // case's ~1 s locally and 5.8–13 s on loaded merge-queue runners, past the
+  // 5 s test default. The rows, their order and every assertion are unchanged;
+  // the batch is ≤ 200 rows because SQLite refuses a multi-row INSERT past its
+  // 500-term compound SELECT limit.
+  const SEED_BATCH = 200;
   const insertAll = async (rows: FakeRow[]) => {
-    for (const row of rows) await engine.insert('sys_approval_request', row, { context: { isSystem: true } } as any);
+    for (let i = 0; i < rows.length; i += SEED_BATCH) {
+      await engine.insert('sys_approval_request', rows.slice(i, i + SEED_BATCH), { context: { isSystem: true } } as any);
+    }
   };
 
   // A fresh in-memory store per test: each one counts rows from zero.
@@ -837,6 +846,8 @@ describe('#37808 — past 500 decided requests, a new strand is still reported',
     // The newest decision: its run is gone.
     await insertAll([decided(++seq, { flow_run_id: 'run_new_strand' })]);
     const out = await freshService(['run_new_strand']).inspectStrandedRequests();
+    // Newest window (ids 102–601) plus the first walk page (ids 1–500): every one of the 601 seeded rows is read.
+    expect(out.scanned).toBe(601);
     expect(out.stranded.map(s => s.runId)).toEqual(['run_new_strand']);
   });
 
