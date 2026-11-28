@@ -1355,7 +1355,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       // The 'wide' passages as a scope of records alone: the record index serves the exact scan from the
       // rows in scope, so there is no second pass, whatever the first pool.
       const records = corpus(s)
-        .filter((d) => (d.metadata.tags as string[]).includes('wide'))
+        .filter((d) => (d.metadata?.tags as string[] | undefined)?.includes('wide'))
         .flatMap((d) => d.sourceRecordId ?? []);
       ({ hits, from } = await search([{ kind: 'record', ids: records }]));
       expect(ids(hits)).toEqual(['best_1', 'best_2']);
