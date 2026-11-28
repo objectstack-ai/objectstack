@@ -5503,8 +5503,6 @@ const ja = {
     openAppNamed: "{{name}} を開く",
     editApp: "アプリを編集",
     editAppNamed: "{{name}} を編集",
-    editWithAi: "AI で編集",
-    editWithAiNamed: "{{name}} を AI で編集",
     enableApp: "アプリを有効化",
     disableApp: "アプリを無効化",
     enableAppNamed: "{{name}} を有効化",

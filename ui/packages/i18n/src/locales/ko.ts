@@ -5500,8 +5500,6 @@ const ko = {
     openAppNamed: "{{name}} 열기",
     editApp: "앱 편집",
     editAppNamed: "{{name}} 편집",
-    editWithAi: "AI로 편집",
-    editWithAiNamed: "AI로 {{name}} 편집",
     enableApp: "앱 활성화",
     disableApp: "앱 비활성화",
     enableAppNamed: "{{name}} 활성화",

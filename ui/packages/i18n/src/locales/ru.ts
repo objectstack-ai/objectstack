@@ -5816,8 +5816,6 @@ const ru = {
     openAppNamed: "Открыть {{name}}",
     editApp: "Редактировать приложение",
     editAppNamed: "Редактировать {{name}}",
-    editWithAi: "Редактировать с ИИ",
-    editWithAiNamed: "Редактировать {{name}} с ИИ",
     enableApp: "Включить приложение",
     disableApp: "Отключить приложение",
     enableAppNamed: "Включить {{name}}",
