@@ -3534,7 +3534,7 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Kind",
         helpText: "What the source indexes. A source indexes the records of one object.",
         options: {
-          object: "Records of an object"
+          object: "Записи объекта"
         }
       },
       "source.object": {
@@ -3561,9 +3561,9 @@ export const ruMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Strategy",
         helpText: "Whole: one passage per document. Recursive: cut at blank lines, then line breaks, then sentence ends. Markdown: one passage per heading, carrying its heading path.",
         options: {
-          whole: "Whole document",
-          recursive: "Recursive",
-          markdown: "Markdown sections"
+          whole: "Документ целиком",
+          recursive: "Рекурсивно",
+          markdown: "Разделы Markdown"
         }
       },
       "source.split.maxChars": {

@@ -3534,7 +3534,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "Kind",
         helpText: "What the source indexes. A source indexes the records of one object.",
         options: {
-          object: "Records of an object"
+          object: "物件的記錄"
         }
       },
       "source.object": {
@@ -3561,9 +3561,9 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
         label: "Strategy",
         helpText: "Whole: one passage per document. Recursive: cut at blank lines, then line breaks, then sentence ends. Markdown: one passage per heading, carrying its heading path.",
         options: {
-          whole: "Whole document",
-          recursive: "Recursive",
-          markdown: "Markdown sections"
+          whole: "整份文件",
+          recursive: "遞迴",
+          markdown: "Markdown 章節"
         }
       },
       "source.split.maxChars": {

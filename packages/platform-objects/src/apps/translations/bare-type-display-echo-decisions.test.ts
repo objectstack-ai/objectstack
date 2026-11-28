@@ -821,16 +821,19 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     // #37143), so it is a panel type now.
     // 15 → 16: `form` joined bare (ADR-0159 card ②, #37086).
     // 16 / 18 → 17 / 18: `knowledge_source` arrives bare (#37304).
-    expect(BARE_TYPES.length).toBe(17);
-    expect(PANEL_TYPES.length).toBe(18);
+    // 17 / 18 → 16 / 19: `knowledge_source` gained its form (ADR-0161 K4
+    // clause 2, #37309), so it is a panel type now.
+    expect(BARE_TYPES.length).toBe(16);
+    expect(PANEL_TYPES.length).toBe(19);
     expect(BARE_TYPES.length + PANEL_TYPES.length).toBe(REGISTRY_TYPES.length);
     for (const type of ['seed', 'mapping', 'api', 'doc', 'book', 'capability', 'picklist', 'sharing_rule', 'queue', 'assignment_rule', 'object_extension']) {
       expect(BARE_TYPES, `${type} is bare`).toContain(type);
     }
     for (const type of AUTHORED_BARE_TYPES) expect(BARE_TYPES, `${type} is bare`).toContain(type);
-    // 28 leaves: seventeen labels, and a description on the eleven that carry one.
-    expect(BARE_LEAVES.length).toBe(28);
-    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(17);
+    // 27 leaves: sixteen labels, and a description on the eleven that carry one
+    // (`knowledge_source`, label only, left the class with its form, #37309).
+    expect(BARE_LEAVES.length).toBe(27);
+    expect(BARE_LEAVES.filter((l) => l.prop === 'label').length).toBe(16);
     expect(BARE_LEAVES.filter((l) => l.prop === 'description').length).toBe(11);
     expect(BARE_LEAVES.every((l) => ['label', 'description'].includes(l.prop))).toBe(true);
   });
@@ -912,13 +915,13 @@ describe('#19403 round 7 — the population, DERIVED from the registry and a sha
     expect(flagged.length).toBe(BARE_LEAVES.length);
   });
 
-  it('⭐ this class is now DONE — zero of its 28 leaves echoes in all three locales', () => {
+  it('⭐ this class is now DONE — zero of its 27 leaves echoes in all three locales', () => {
     const echoing = BARE_LEAVES.filter((l) =>
       TRANSLATED_LOCALES.every(([, forms]) => forms[l.type]?.[l.prop] === l.en),
     );
     expect(echoing.map((l) => `${l.type}.${l.prop}`)).toEqual([]);
     // Lit — and it really walked the class, which a zero alone would not show.
-    expect(BARE_LEAVES.length).toBe(28);
+    expect(BARE_LEAVES.length).toBe(27);
   });
 });
 
