@@ -27,7 +27,7 @@ export const entry: SemanticMigration = {
     'the form\'s layout: delete the retired value for the `simple` default, or write `tabbed` (one tab '
     + 'per section) or `wizard`. Where the form opens is the caller\'s: a list opens a clicked record in '
     + 'the drawer by default (`navigation.mode`), the console\'s New and Edit dialogs open the record form '
-    + 'themselves (sized by `modalSize`), and an action `type: \'modal\'` opens the page it targets. A '
+    + 'themselves and choose their own size, and an action `type: \'modal\'` opens the page it targets. A '
     + 'record beside its list is a reader\'s own preference in the list\'s Display menu; child records '
     + 'edited beside the parent are `subforms`, and on a page that is an `object-master-detail-form` '
     + 'block. An `object-form` block that opened in a drawer or dialog keeps its `drawer` or `modal` '

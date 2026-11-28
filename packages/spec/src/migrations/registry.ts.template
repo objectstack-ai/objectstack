@@ -3742,7 +3742,10 @@ const step19: MigrationStep = {
     + '`source.content`, a list of field names in which `\'*\'` is refused, because each listed field '
     + 'is sent to the embedding provider; `embedding`, `vectorStore`, `adapterConfig` and '
     + '`refresh.cron`, which nothing read, are removed; and the `file` and `http` source kinds leave '
-    + 'with their four keys, so a source indexes the records of one object.',
+    + 'with their four keys, so a source indexes the records of one object. '
+    + 'A form view\'s `modalSize` leaves the shape, on a `form` item too: no form view opens in a dialog '
+    + 'since the console\'s New and Edit dialogs stopped loading one, so the key is deleted, which changes '
+    + 'nothing a reader sees; the React `ObjectForm` block and the `object-form` page block keep their own.',
   // Derived, not listed, as step 18's are: every major-19 conversion graduates
   // into this step in the order `CONVERSIONS_BY_MAJOR[19]` applies them. Add a
   // conversion there, never here.

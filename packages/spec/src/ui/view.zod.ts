@@ -5399,6 +5399,26 @@ const FORM_VIEW_DRAWER_WIDTH_RETIRED =
   + 'bucket, and the React `ObjectForm` block keeps its own `drawerWidth` prop for the drawer it opens. '
   + FORM_VIEW_TYPE_RETIRED_FIX;
 
+// [#36544] `modalSize` (ADR-0049 enforce-or-remove; seat ruling on the card:
+// retire). Its one form-view reader was the console's New / Edit record
+// dialog, and since #36425 that dialog loads no form view: it lays the record
+// out by the object's field groups and chooses its own size. A named or public
+// form opens on a page of its own (`/forms/NAME`), never in a dialog, and no
+// server surface reads the key, so a stored `modalSize: 'lg'` saved, served and
+// changed nothing. The one modal that reads a `modalSize` is the container the
+// React `ObjectForm` block opens with `formType='modal'`, and that block keeps
+// the prop as its own (`react-blocks.ts` overlay; the `object-form` page
+// block's `ObjectFormPropsSchema` declares it too). The
+// `form-view-modal-size-removed` conversion (ADR-0087 D2) strips it from
+// stored rows and sources. Declared with `//` on purpose, as above.
+const FORM_VIEW_MODAL_SIZE_RETIRED =
+  '`view.form.modalSize` was removed in @objectstack/spec 19.0.0 (ADR-0049) — no form view opens in a '
+  + 'dialog, so nothing reads it from a form view. Delete the key: the console\'s New and Edit dialogs lay '
+  + 'a record out by the object\'s `fieldGroups` and choose their own size, a form opened by name gets a '
+  + 'page of its own, and the React `ObjectForm` block keeps its own `modalSize` prop for the modal it '
+  + 'opens with `formType=\'modal\'`. '
+  + 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
 // Form-view `layout` retired-value prescriptions (#20221, ADR-0049
 // enforce-or-remove). Declared with `//` on purpose — the
 // `LIST_VIEW_EXPORT_PDF_RETIRED` placement note applies here too. An
@@ -5696,11 +5716,12 @@ export const FormViewSchema = lazySchema(() => strictObject({
   /** [#29012] RETIRED — {@link FORM_VIEW_DRAWER_WIDTH_RETIRED}. */
   drawerWidth: retiredKey(FORM_VIEW_DRAWER_WIDTH_RETIRED),
   /**
-   * Size bucket of the dialog a caller opens this form in. [#36425] The
-   * console's New / Edit dialog no longer reads a form view, so it is not that
-   * caller: it sizes itself. Its liveness verdict is re-audited on #36544.
+   * [#36544] RETIRED — {@link FORM_VIEW_MODAL_SIZE_RETIRED}. Inert on a form
+   * view since the console's New / Edit dialog stopped loading one (#36425);
+   * the React `ObjectForm` block declares its own `modalSize` in its overlay
+   * (`react-blocks.ts`).
    */
-  modalSize: z.enum(['sm', 'default', 'lg', 'xl', 'full']).optional().describe("Size bucket of the dialog a caller opens this form in: the console's New / Edit dialog, or the modal container of the React `ObjectForm` block (formType 'modal')"),
+  modalSize: retiredKey(FORM_VIEW_MODAL_SIZE_RETIRED),
 
   /**
    * Data Source Configuration. NOT removed in the #3896 sweep despite the

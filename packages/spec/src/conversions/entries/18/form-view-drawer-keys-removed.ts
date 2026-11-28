@@ -90,8 +90,9 @@ const formViewDrawerKeysRemoved: MetadataConversion = {
           // Both keys go; the rest of the form rides through.
           form: { columns: 2, drawerSide: 'left', drawerWidth: '480px', sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
-            // `modalSize` is live (the console's record dialog reads it) and stays.
-            quick: { modalSize: 'lg', drawerWidth: '50%' },
+            // A live key beside it stays. ([#36544] Not `modalSize`, which
+            // `form-view-modal-size-removed` strips at 19.)
+            quick: { tabPosition: 'left', drawerWidth: '50%' },
             // A form without the keys rides through by reference.
             plain: { columns: 1 },
           },
@@ -125,7 +126,7 @@ const formViewDrawerKeysRemoved: MetadataConversion = {
           object: 'fvd_task',
           form: { columns: 2, sections: [{ label: 'Main', fields: ['title'] }] },
           formViews: {
-            quick: { modalSize: 'lg' },
+            quick: { tabPosition: 'left' },
             plain: { columns: 1 },
           },
         },

@@ -140,6 +140,7 @@ import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mo
 // identifier order.
 import { actionLocationsActedOn } from './entries/19/action-locations-acted-on.js';
 import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
+import { formViewModalSizeRemoved } from './entries/19/form-view-modal-size-removed.js';
 import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
 import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
 import { knowledgeSourceInertKeysRemoved } from './entries/19/knowledge-source-inert-keys-removed.js';
@@ -321,11 +322,14 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * The knowledge source's three (ADR-0161 K6) apply in the order rename the
  * name, rename the content list, drop the inert keys; they touch no type the
  * permission conversion or the agent's touches, so the ties at `order: 1` and
- * `order: 2` are settled by `id`.
+ * `order: 2` are settled by `id`. The form view's `modalSize` delete touches
+ * form payloads only, which no other entry of this major walks, and applies
+ * last.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: actionLocationsActedOn, order: 3 },
   { conversion: agentModelProviderRemoved, order: 2 },
+  { conversion: formViewModalSizeRemoved, order: 4 },
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
   { conversion: knowledgeSourceIdToName, order: 1 },
   { conversion: knowledgeSourceInertKeysRemoved, order: 3 },

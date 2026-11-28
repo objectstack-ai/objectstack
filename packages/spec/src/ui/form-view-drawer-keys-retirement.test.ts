@@ -21,6 +21,23 @@
  *   4. Tree-scoped absence: no form view inside the declared radius still
  *      authors either key.
  *
+ * ## `FormView.modalSize` (#36544), retired at 19 — the same kit, in this file
+ *
+ * `modalSize` was the key this retirement's controls kept: the console's New /
+ * Edit record dialog read it. That dialog loads no form view since #36425, and
+ * a form opened by name gets a page of its own, so no form-view surface reads
+ * it (ADR-0049 enforce-or-remove, seat ruling on the card: retire). It shares
+ * the doors, the block that keeps the prop and the tree walk below, so its
+ * pins are the `modalSize` describes of this file and not a file of their own:
+ *   5. A `retiredKey()` tombstone refused with its prescription at every
+ *      form-view door, the `form` item (ADR-0159) included, and `defineStack`.
+ *   6. The modal that reads it keeps it: the React `ObjectForm` block's
+ *      overlay and the `object-form` page block.
+ *   7. One D2 conversion at 19, retired from the load path:
+ *      `form-view-modal-size-removed`; its D3 entry is
+ *      `ui-form-view-modal-size-retired`.
+ *   8. Tree-scoped absence, on the same walk.
+ *
  * On the assertion set: a schema refusal raises a `ZodError` whose issues carry
  * `code` and `path` but no ADR-0112 `status` (that envelope belongs to the
  * doors), so each schema refusal is pinned by the `path` and the
@@ -44,7 +61,7 @@ import { MIGRATIONS_BY_MAJOR, RETIRED_KEYS_BY_MAJOR } from '../migrations/regist
 import { defineStack } from '../stack.zod';
 import { ObjectFormPropsSchema } from './component.zod';
 import { REACT_BLOCKS, REACT_OVERLAY_SHADOWS } from './react-blocks';
-import { FormViewSchema, VIEW_METADATA_MEMBERS, ViewItemSchema, ViewSchema } from './view.zod';
+import { FormSchema, FormViewSchema, VIEW_METADATA_MEMBERS, ViewItemSchema, ViewSchema } from './view.zod';
 
 const CONVERSION_ID = 'form-view-drawer-keys-removed';
 const D3_ID = 'ui-form-view-drawer-keys-retired';
@@ -104,8 +121,9 @@ describe('FormView.drawerSide / drawerWidth — tombstones at every form-view do
     });
   }
 
-  it.each(DOORS.map((d) => [d.name, d] as const))('CONTROL: %s still accepts the same form without the keys, `modalSize` included', (_, door) => {
-    const r = door.parse({ type: 'simple', sections: SECTIONS, modalSize: 'lg' });
+  it.each(DOORS.map((d) => [d.name, d] as const))('CONTROL: %s still accepts the same form without the keys, a live key beside them included', (_, door) => {
+    // [#36544] The live key was `modalSize` until it became a tombstone too.
+    const r = door.parse({ type: 'simple', sections: SECTIONS, columns: 2 });
     expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
   });
 
@@ -129,7 +147,7 @@ describe('FormView.drawerSide / drawerWidth — tombstones at every form-view do
       expect(issue.message.startsWith(FIRST_SENTENCE[key]), issue.message).toBe(true);
     }
     expect(() => defineStack({
-      views: [{ object: 'crm_lead', formViews: { quick: { sections: SECTIONS, modalSize: 'lg' } } }],
+      views: [{ object: 'crm_lead', formViews: { quick: { sections: SECTIONS, columns: 2 } } }],
     } as never)).not.toThrow();
   });
 
@@ -185,7 +203,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
       object: 'crm_lead',
       form: { sections: SECTIONS, columns: 2 },
       formViews: {
-        quick: { sections: SECTIONS, modalSize: 'lg', drawerSide: 'left', drawerWidth: '480px' },
+        quick: { sections: SECTIONS, columns: 2, drawerSide: 'left', drawerWidth: '480px' },
       },
     };
     expect(ViewSchema.safeParse(row).success).toBe(false);
@@ -198,7 +216,7 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
     const parsed = ViewSchema.parse(out);
     expect(parsed.formViews?.quick).not.toHaveProperty('drawerSide');
     expect(parsed.formViews?.quick).not.toHaveProperty('drawerWidth');
-    expect(parsed.formViews?.quick?.modalSize).toBe('lg');
+    expect(parsed.formViews?.quick?.columns).toBe(2);
     // A form without the keys is the author's and is never touched.
     expect(out.form).toBe(row.form);
     // Copy-on-write: the stored row is not mutated.
@@ -261,20 +279,217 @@ describe(`the D2 conversion ${CONVERSION_ID}`, () => {
   });
 });
 
+// ─── `FormView.modalSize` (#36544), retired at 19 ───────────────────────────
+
+const MODAL_CONVERSION_ID = 'form-view-modal-size-removed';
+const MODAL_D3_ID = 'ui-form-view-modal-size-retired';
+const MODAL_FIRST_SENTENCE =
+  '`view.form.modalSize` was removed in @objectstack/spec 19.0.0 (ADR-0049) — no form view opens in a '
+  + 'dialog, so nothing reads it from a form view.';
+const MODAL_MIGRATE_SENTENCE = 'Run `os migrate meta --from 18` to list the mechanical edits for existing sources;';
+/** Every value the key accepted while it was declared. */
+const MODAL_VALUES = ['sm', 'default', 'lg', 'xl', 'full'] as const;
+
+/** The form-view doors, and the `form` item (ADR-0159), whose body keys are the form view's by reference. */
+const MODAL_DOORS: readonly Door[] = [
+  ...DOORS,
+  {
+    name: '`form` item',
+    parse: (f) => FormSchema.safeParse({ name: 'crm_lead.intake', object: 'crm_lead', ...f }),
+    at: [],
+  },
+];
+
+describe('FormView.modalSize — a tombstone at every form-view door', () => {
+  it.each(MODAL_DOORS.map((d) => [d.name, d] as const))('%s refuses `modalSize`, whatever it carries, with its prescription', (_, door) => {
+    for (const value of MODAL_VALUES) {
+      const r = door.parse({ type: 'simple', sections: SECTIONS, modalSize: value });
+      expect(r.success, value).toBe(false);
+      const issues = payloadIssues(r, door);
+      expect(issues, JSON.stringify(issues)).toHaveLength(1);
+      expect(issues[0]!.path).toEqual([...door.at, 'modalSize']);
+      expect(issues[0]!.message.startsWith(MODAL_FIRST_SENTENCE), issues[0]!.message).toBe(true);
+      expect(issues[0]!.message).toContain(MODAL_MIGRATE_SENTENCE);
+    }
+  });
+
+  it.each(MODAL_DOORS.map((d) => [d.name, d] as const))('CONTROL: %s still accepts the same form without the key', (_, door) => {
+    const r = door.parse({ type: 'simple', sections: SECTIONS, columns: 2 });
+    expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+  });
+
+  it('defineStack refuses it with the ADR-0112 envelope and the prescription', () => {
+    let refusal: unknown;
+    try {
+      defineStack({
+        views: [{ object: 'crm_lead', form: { sections: SECTIONS, modalSize: 'full' }, formViews: { quick: { sections: SECTIONS, modalSize: 'lg' } } }],
+      } as never);
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+    expect(issues.map((i) => i.path.join('.')).sort()).toEqual([
+      'views.0.form.modalSize',
+      'views.0.formViews.quick.modalSize',
+    ]);
+    for (const issue of issues) {
+      expect(issue.message.startsWith(MODAL_FIRST_SENTENCE), issue.message).toBe(true);
+    }
+  });
+
+  it('is registered in RETIRED_KEYS_BY_MAJOR[19] under both exact def keys', () => {
+    expect(RETIRED_KEYS_BY_MAJOR[19]).toEqual(expect.arrayContaining(['ui/FormView:modalSize', 'ui/Form:modalSize']));
+  });
+
+  it('fails tsc at the authoring site: the tombstone admits only absence', () => {
+    const form: z.input<typeof FormViewSchema> = {
+      sections: SECTIONS,
+      // @ts-expect-error — `modalSize` is a `retiredKey()` tombstone, typed `never`.
+      modalSize: 'lg',
+    };
+    const item: z.input<typeof FormSchema> = {
+      name: 'crm_lead.intake',
+      object: 'crm_lead',
+      sections: SECTIONS,
+      // @ts-expect-error — the `form` item takes the same tombstone by reference.
+      modalSize: 'lg',
+    };
+    expect(FormViewSchema.safeParse(form).success).toBe(false);
+    expect(FormSchema.safeParse(item).success).toBe(false);
+  });
+});
+
+describe('the modal that reads `modalSize` keeps it', () => {
+  const objectForm = REACT_BLOCKS.find((b) => b.tag === 'ObjectForm')!;
+
+  it('<ObjectForm> publishes it from its overlay, no longer from the form view schema', () => {
+    const prop = objectForm.interactions.find((i) => i.name === 'modalSize');
+    expect(prop).toBeDefined();
+    expect(prop!.kind).toBe('binding');
+    expect(prop!.type).toBe("'sm' | 'default' | 'lg' | 'xl' | 'full'");
+    expect(prop!.description).toContain("formType 'modal'");
+    expect(objectForm.dataProps).not.toContain('modalSize');
+    // The collision with the tombstone's name is ledgered, not accidental.
+    expect(REACT_OVERLAY_SHADOWS.ObjectForm).toContain('modalSize');
+  });
+
+  it('the `object-form` page block still accepts every value with its modal container', () => {
+    for (const modalSize of MODAL_VALUES) {
+      const r = ObjectFormPropsSchema.safeParse({ objectName: 'crm_contact', formType: 'modal', modalSize });
+      expect(r.success, JSON.stringify(r.error?.issues)).toBe(true);
+    }
+  });
+});
+
+describe(`the D2 conversion ${MODAL_CONVERSION_ID}`, () => {
+  const oursModal = (n: ConversionNotice) => n.conversionId === MODAL_CONVERSION_ID;
+
+  it('a STORED view container replays to a body the strict door accepts', () => {
+    const row = {
+      object: 'crm_lead',
+      form: { sections: SECTIONS, columns: 2 },
+      formViews: {
+        quick: { sections: SECTIONS, columns: 2, modalSize: 'lg' },
+      },
+    };
+    expect(ViewSchema.safeParse(row).success).toBe(false);
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('view', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(oursModal).map(brief)).toEqual([
+      { conversionId: MODAL_CONVERSION_ID, path: 'views[0].formViews.quick.modalSize', from: 'modalSize', to: '(removed)' },
+    ]);
+    const parsed = ViewSchema.parse(out);
+    expect(parsed.formViews?.quick).not.toHaveProperty('modalSize');
+    expect(parsed.formViews?.quick?.columns).toBe(2);
+    // A form without the key is the author's and is never touched.
+    expect(out.form).toBe(row.form);
+    // Copy-on-write: the stored row is not mutated.
+    expect(row.formViews.quick).toHaveProperty('modalSize', 'lg');
+  });
+
+  it('a STORED form view item record converts its `config`', () => {
+    const row = { name: 'crm_lead.peek', object: 'crm_lead', viewKind: 'form', config: { sections: SECTIONS, modalSize: 'full' } };
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('view', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(oursModal).map((n) => n.path)).toEqual(['views[0].config.modalSize']);
+    expect(out.config).toEqual({ sections: SECTIONS });
+    expect(ViewItemSchema.safeParse(out).success).toBe(true);
+  });
+
+  it('a STORED `form` item converts its top-level body', () => {
+    const row = { name: 'crm_lead.intake', object: 'crm_lead', sections: SECTIONS, modalSize: 'sm' };
+    expect(FormSchema.safeParse(row).success).toBe(false);
+    const notices: ConversionNotice[] = [];
+    const out = applyConversionsToStoredItem('form', row, { onNotice: (n) => notices.push(n) }) as typeof row;
+    expect(notices.filter(oursModal).map((n) => n.path)).toEqual(['forms[0].modalSize']);
+    expect(out).toEqual({ name: 'crm_lead.intake', object: 'crm_lead', sections: SECTIONS });
+    expect(FormSchema.safeParse(out).success).toBe(true);
+  });
+
+  it('never touches the `object-form` page block, whose modal reads the key', () => {
+    const input = {
+      pages: [{
+        name: 'desk',
+        regions: [{ name: 'main', components: [{ type: 'object-form', properties: { objectName: 'o', formType: 'modal', modalSize: 'lg' } }] }],
+      }],
+    };
+    const { stack, notices } = collectConversionNotices(input, { includeRetired: true });
+    expect(notices.filter(oursModal)).toEqual([]);
+    expect(stack).toEqual(input);
+  });
+
+  it('is idempotent by construction: a second replay converts nothing', () => {
+    const { stack } = collectConversionNotices(
+      { views: [{ object: 'o', form: { sections: SECTIONS, modalSize: 'xl' } }] },
+      { includeRetired: true },
+    );
+    const replay = collectConversionNotices(stack, { includeRetired: true });
+    expect(replay.notices.filter(oursModal)).toEqual([]);
+    expect(replay.stack).toBe(stack);
+  });
+
+  it('is retired from the load path — the authoring funnel rewrites no live source', () => {
+    const input = { views: [{ object: 'o', form: { sections: SECTIONS, modalSize: 'lg' } }] };
+    const { stack, notices } = collectConversionNotices(input);
+    expect(notices.filter(oursModal)).toEqual([]);
+    expect(stack).toEqual(input);
+  });
+
+  it('is wired into the step-19 chain as a retired entry stamped after 18.6.0', () => {
+    expect(MIGRATIONS_BY_MAJOR[19]!.conversionIds).toContain(MODAL_CONVERSION_ID);
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === MODAL_CONVERSION_ID);
+    expect(conversion).toBeDefined();
+    expect(conversion!.toMajor).toBe(19);
+    expect(conversion!.retiredFromLoadPath).toBe(true);
+    expect(conversion!.retiredAfter).toBe('18.6.0');
+  });
+
+  it(`carries the D3 entry ${MODAL_D3_ID}, naming its D2 conversion`, () => {
+    const entries = MIGRATIONS_BY_MAJOR[19]!.semantic.filter((s) => s.id === MODAL_D3_ID);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.reason).toContain(`\`${MODAL_CONVERSION_ID}\``);
+    expect(entries[0]!.conversionIds).toEqual([MODAL_CONVERSION_ID]);
+    expect(entries[0]!.acceptanceCriteria.length).toBeGreaterThan(0);
+  });
+});
+
 // ─── Tree-scoped absence, inside the radius the package already declares ───
 //
 // `tsc` sweeps the TYPED authoring sites; this walk covers every text file
 // under the five repo roots `scripts/cross-package-test-inputs.mjs` declares
 // for `@objectstack/spec#test` (mirrored in `turbo.json`), with the example
-// apps' own `src/` trees. It judges the two places a form view is written as
-// an object literal: a `form: { … }` literal whose own top-level keys include
-// a drawer key, and a `formViews: { … }` literal one of whose entries does. The
+// apps' own `src/` trees. It judges the places a form is written as an object
+// literal: a `form: { … }` literal whose own top-level keys include a retired
+// key, a `formViews: { … }` literal one of whose entries does, and
+// ([#36544]) the literal handed to `defineForm({ … })`. The
 // bound, stated: the keys stay legal on the React `ObjectForm` block (JSX
 // attributes) and the `object-form` page block (`properties: { … }`), which
-// neither shape matches; a form assembled by spread or a computed key, a
+// no shape here matches; a form assembled by spread or a computed key, a
 // ViewItem form record's `config`, YAML, and the console under `ui/` (outside
-// this radius) are outside what this walk sees.
-describe('tree-scoped absence: no form view inside the declared radius still authors a drawer key', () => {
+// this radius) are outside what this walk sees. One pass over the tree
+// serves both retirements: the drawer keys and `modalSize`.
+describe('tree-scoped absence: no form view inside the declared radius still authors a retired key', () => {
   const SPEC_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
   const REPO_ROOT = path.resolve(SPEC_ROOT, '../..');
   const THIS_FILE = path.relative(REPO_ROOT, fileURLToPath(import.meta.url)).split(path.sep).join('/');
@@ -284,7 +499,10 @@ describe('tree-scoped absence: no form view inside the declared radius still aut
   const EXAMPLES_EXT = new Set(['.json', '.md', '.mdx']);
   const EXAMPLE_APP_SRC_TS = /^examples\/[^/]+\/src\/.+\.ts$/;
   const SKIPPED_DIRS = new Set(['node_modules', 'dist', '.turbo', '.cache', '.objectstack', 'coverage', '.next', '.source']);
-  const DRAWER_KEY = /(?:^|[\s,{])["']?(?:drawerSide|drawerWidth)["']?\s*:/;
+  /** `name:` written as a key, quoted or bare — never as a substring of another key. */
+  const keyAuthored = (...names: string[]) => new RegExp(`(?:^|[\\s,{])["']?(?:${names.join('|')})["']?\\s*:`);
+  const DRAWER_KEY = keyAuthored('drawerSide', 'drawerWidth');
+  const MODAL_KEY = keyAuthored('modalSize');
 
   /** The text of each `{ … }` literal at `depth` inside the literal opened at `start`. */
   const topLevelText = (text: string, start: number, depth: number): string[] => {
@@ -305,18 +523,21 @@ describe('tree-scoped absence: no form view inside the declared radius still aut
     return out;
   };
 
-  /** Whether some form view literal holds a drawer key among its own top-level keys. */
-  const judge = (raw: string): boolean => {
+  /** Whether some form literal holds one of `key`'s names among its own top-level keys. */
+  const judgeFor = (key: RegExp) => (raw: string): boolean => {
     // Inline code spans are prose; newline-bounded, so a fenced example is still judged.
     const text = raw.replace(/`[^`\n]*`/g, '');
-    const opener = /["']?\b(form|formViews)["']?\s*:\s*\{/g;
+    const opener = /["']?\b(form|formViews)["']?\s*:\s*\{|\bdefineForm\(\s*\{/g;
     for (let m = opener.exec(text); m; m = opener.exec(text)) {
       const brace = m.index + m[0].length - 1;
-      const depth = m[1] === 'form' ? 1 : 2;
-      if (topLevelText(text, brace, depth).some((t) => DRAWER_KEY.test(t))) return true;
+      // `formViews` holds named forms one level down; `form` and `defineForm` hold the form itself.
+      const depth = m[1] === 'formViews' ? 2 : 1;
+      if (topLevelText(text, brace, depth).some((t) => key.test(t))) return true;
     }
     return false;
   };
+  const judge = judgeFor(DRAWER_KEY);
+  const judgeModal = judgeFor(MODAL_KEY);
 
   /**
    * Structural exclusions — the retirement kit, each with its reason. ⛔ NOT an
@@ -328,7 +549,7 @@ describe('tree-scoped absence: no form view inside the declared radius still aut
     THIS_FILE,
   ]);
   const EXCLUDED_PREFIXES = [
-    // The D2 conversion's fixture authors the pre-retirement form on purpose.
+    // The D2 conversions' fixtures author the pre-retirement form on purpose.
     'packages/spec/src/conversions/',
     // Release-owned prose records the removal; never edited by a code PR.
     'content/docs/releases/',
@@ -346,22 +567,40 @@ describe('tree-scoped absence: no form view inside the declared radius still aut
 
   it('the matcher recognises an authoring and ignores its neighbours (anti-vacuity)', () => {
     expect(judge("form: { type: 'simple', drawerSide: 'left', sections: [] },")).toBe(true);
-    expect(judge("formViews: { quick: { modalSize: 'lg', drawerWidth: '480px' } },")).toBe(true);
+    expect(judge("formViews: { quick: { columns: 2, drawerWidth: '480px' } },")).toBe(true);
+    expect(judge("defineForm({ name: 'task.intake', object: 'task', drawerSide: 'left' })")).toBe(true);
     expect(judge('{ "formViews": {\n  "quick": { "drawerSide": "left" }\n} }')).toBe(true);
     expect(judge("Prose.\n\n```ts\nform: { drawerWidth: '50%' }\n```\n")).toBe(true);
     // Neighbours that must NOT match: the blocks that keep the keys, and deeper nesting.
     expect(judge("properties: { objectName: 'task', formType: 'drawer', drawerSide: 'right' },")).toBe(false);
     expect(judge('<ObjectForm formType="drawer" drawerSide="right" objectName="task" />')).toBe(false);
-    expect(judge("form: { modalSize: 'lg', sections: [{ label: 'A', fields: [] }] },")).toBe(false);
-    expect(judge("formViews: { quick: { modalSize: 'lg' } },")).toBe(false);
+    expect(judge("form: { columns: 2, sections: [{ label: 'A', fields: [] }] },")).toBe(false);
+    expect(judge("formViews: { quick: { columns: 2 } },")).toBe(false);
     expect(judge("form: { sections: [{ props: { drawerSide: 'left' } }] }")).toBe(false);
     expect(judge('a form once wrote `form: { drawerSide: "left" }`.')).toBe(false);
   });
 
-  it('no form view authoring `drawerSide` or `drawerWidth` survives inside the declared radius', () => {
-    const offenders: string[] = [];
-    let visited = 0;
-    let mentioning = 0;
+  it('the `modalSize` matcher recognises an authoring and ignores its neighbours (anti-vacuity)', () => {
+    expect(judgeModal("form: { type: 'simple', modalSize: 'lg', sections: [] },")).toBe(true);
+    expect(judgeModal("formViews: { quick: { columns: 2, modalSize: 'full' } },")).toBe(true);
+    expect(judgeModal('{ "formViews": {\n  "quick": { "modalSize": "lg" }\n} }')).toBe(true);
+    expect(judgeModal("Prose.\n\n```ts\nform: { modalSize: 'sm' }\n```\n")).toBe(true);
+    expect(judgeModal("defineForm({ name: 'task.intake', object: 'task', modalSize: 'lg' })")).toBe(true);
+    // Neighbours that must NOT match: the blocks that keep the key, and deeper nesting.
+    expect(judgeModal("properties: { objectName: 'task', formType: 'modal', modalSize: 'lg' },")).toBe(false);
+    expect(judgeModal('<ObjectForm formType="modal" modalSize="lg" objectName="task" />')).toBe(false);
+    expect(judgeModal("form: { columns: 2, sections: [{ label: 'A', fields: [] }] },")).toBe(false);
+    expect(judgeModal("form: { sections: [{ props: { modalSize: 'lg' } }] }")).toBe(false);
+    expect(judgeModal("formViews: { quick: { drawerWidth: '480px' } },")).toBe(false);
+    expect(judgeModal('a form once wrote `form: { modalSize: "lg" }`.')).toBe(false);
+  });
+
+  /** One pass over the declared radius, judged for both retirements. */
+  type Walk = { visited: number; mentioning: number; drawer: string[]; modal: string[] };
+  let walked: Walk | undefined;
+  const walkOnce = (): Walk => {
+    if (walked) return walked;
+    const walk: Walk = { visited: 0, mentioning: 0, drawer: [], modal: [] };
     const skipDir = (name: string) => SKIPPED_DIRS.has(name) || name.startsWith('.');
     for (const root of WALK_ROOTS) {
       for (const full of listRepoWalkFiles(path.join(REPO_ROOT, root), { skipDir })) {
@@ -375,17 +614,31 @@ describe('tree-scoped absence: no form view inside the declared radius still aut
         if (name === 'CHANGELOG.md') continue; // release prose records the removal
         if (EXCLUDED.has(rel) || EXCLUDED_PREFIXES.some((p) => rel.startsWith(p))) continue;
         if (TSUP_BUNDLED_CONFIG.test(name)) continue;
-        visited += 1;
+        walk.visited += 1;
         const text = readIfPresent(full);
         if (text === undefined) continue;
-        if (/["']?\bformViews["']?\s*:\s*\{/.test(text)) mentioning += 1;
-        if (judge(text)) offenders.push(rel);
+        if (/["']?\bformViews["']?\s*:\s*\{/.test(text)) walk.mentioning += 1;
+        if (judge(text)) walk.drawer.push(rel);
+        if (judgeModal(text)) walk.modal.push(rel);
       }
     }
+    walked = walk;
+    return walk;
+  };
+
+  it('no form view authoring `drawerSide` or `drawerWidth` survives inside the declared radius', () => {
+    const walk = walkOnce();
     // Anti-vacuity: the walk covered the tree, and files that DO author a
     // `formViews` block were really judged.
-    expect(visited).toBeGreaterThan(1000);
-    expect(mentioning).toBeGreaterThan(0);
-    expect(offenders, 'a form view authoring a drawer key means the retirement is being undone').toEqual([]);
+    expect(walk.visited).toBeGreaterThan(1000);
+    expect(walk.mentioning).toBeGreaterThan(0);
+    expect(walk.drawer, 'a form view authoring a drawer key means the retirement is being undone').toEqual([]);
+  });
+
+  it('no form view authoring `modalSize` survives inside the declared radius', () => {
+    const walk = walkOnce();
+    expect(walk.visited).toBeGreaterThan(1000);
+    expect(walk.mentioning).toBeGreaterThan(0);
+    expect(walk.modal, 'a form view authoring `modalSize` means the retirement is being undone').toEqual([]);
   });
 });

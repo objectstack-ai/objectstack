@@ -526,6 +526,8 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     refusal("view.scope 'personal'", () => ViewScopeSchema.safeParse('personal')),
     tombstone(ViewSharingSchema, 'view.list.sharing', 'type'),
   ],
+  // #36544: `modalSize`, tombstoned on the form view at 19.
+  'form-view-modal-size-removed': [tombstone(FormViewSchema, 'view.form', 'modalSize')],
   // #27155: the form view `type` narrowed to the form's layout — each retired
   // member refused by the enum's own error map, plus the three split-only keys
   // tombstoned beside it.
