@@ -472,6 +472,11 @@ describe('[#25549] a public object admits a share to an external member of the r
       // A list the write guard refuses today; the test is "exactly external".
       { id: 'm7', user_id: 'usr_mixed', organization_id: 'org_a', role: 'external,member' },
     ];
+    // [#33912] Every member is a user: a manual share's recipient must resolve
+    // to one (`SharingService.userRecipientRefusal`), and `sys_user` is
+    // registered here (as one of the inert objects above).
+    engine._tables.sys_user = ['usr_owner', 'usr_ext', 'usr_staff', 'usr_dual', 'usr_dual2', 'usr_mixed']
+      .map((id) => ({ id }));
   });
 
   it('an EXTERNAL recipient is admitted, the row carries the record’s organization, and it is LIVE for that record only', async () => {

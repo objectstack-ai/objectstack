@@ -862,6 +862,32 @@ export class SharingRuleService implements ISharingRuleService {
         const refusal = this.sharing.sharingRuleObjectRefusal(input.object);
         if (refusal) throw new SharingRuleObjectNotEnforcedError(input.object, refusal);
       }
+      // [#33912] A `user` recipient is materialised verbatim into every
+      // grant's `recipient_id`, so one that names no user the gates could
+      // match saves a rule that grants no one anything. Judged by the same
+      // verdict as a manual share (`SharingService.userRecipientRefusal`), in
+      // the rule's organization; an upsert that keeps the stored recipient is
+      // not re-judged, so a rule whose user has since left can still be
+      // switched off.
+      //
+      // The rule's organization is the caller's or, for a platform operator
+      // with no active organization (whose lookup above is by name alone),
+      // the STORED row's: that write is `engine.update`, which the engine's
+      // organization rule does not refuse (it is insert-only, ADR-0131 D9), so
+      // the recipient is judged in the organization the rule already grants
+      // in, with the same refusal and sentence. Only a NEW rule with no
+      // organization reaches the verdict with `null` under a wall: the check
+      // stands aside and the engine refuses that insert for every recipient
+      // alike. A stored row carrying no organization is not judged either; the
+      // ownership ceremony leaves none on a certified deployment (D10).
+      if (
+        input.recipientType === 'user'
+        && (!stored || stored.recipient_type !== 'user' || stored.recipient_id !== input.recipientId)
+      ) {
+        const ruleOrgId = orgId ?? (stored?.organization_id || null);
+        const unresolved = await this.sharing.userRecipientRefusal(String(input.recipientId), ruleOrgId, 'rule');
+        if (unresolved) throw new Error(`VALIDATION_FAILED: ${unresolved}`);
+      }
     }
 
     if (Array.isArray(existing) && existing[0]) {
