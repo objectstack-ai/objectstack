@@ -193,7 +193,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → L1 审核 → 
 - `GOVERNED_REPOS` 同治理、行可限仓,执行席恒随落地仓车道。
 - 恒 H:守卫仪器 `scripts/pm/check-governed-merges.mjs`+`scripts/pm/check-governed-queue-guard.mjs`+`scripts/pm/record-recognisers.mjs`+`scripts/pm/dispatch-gates.mjs`+守卫 workflow+settings+hooks。
 - 定档 Tier H ⇒ ACCEPT 换终局四件套,混合 diff ⛔ 不按比例判;要拆让 dev 单独开 PR。
-- >3000 行(含生成物,additions+deletions)或申报收窄同换终局四件套含③请审,⛔ 无 Tier S 例外。
+- 按卡合计 >3000 行(见 `landing-operations.md`)或申报收窄同换终局四件套含③请审,⛔ 无 Tier S 例外。
 - ① 席位记录落 PR 先于 `pr_ready`/入队且钉 head:速读四行+席位意见,其下 `## 席位核对`。
 - ② PR 悬着等人批,同笔挂 `pm:awaiting-merge`;人工直合即审核记录,授权批准 ⇒ 席位落地。
 - 指针 `ACCEPT → PR #n comment <id>`;受管/spec 面欠 ①–④,席只达档补审现 head 记录未盖处。

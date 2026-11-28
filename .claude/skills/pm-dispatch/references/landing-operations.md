@@ -32,7 +32,7 @@
   (`Blocked-by`/串行行),该线经维护者或账户主人定为最高优先;(c) 账户主人点名要它插队。
 - 送出前先在 PR 贴审计评论点名字母与依据;一笔一 PR,同仓同时至多一个插队者在队。
 - 中继另拒 draft、head 已移、受管面与发版 PR;读回非队首即 FAILED,⛔ 不重发,报维护者。
-- 逾 3,000 行须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
+- 过线卡的 PR 须授权批准在现 head,或维护者非席位签名评论点名现 head 承接(`approval_comment`)。
 - 出队(中继 `pr_dequeue`)限三因:(a) 与基座冲突;(b) 自身改动致队列构建红,三事实判非 flake;
   (c) PR 正文签名尾行之席以签名评论自请。审计评论在先,回读离队且仍开未合才落地。
 - 该 op 实测离队见 `readings-queue.md`;在队受管面 PR 亦由落地席发(Prime Directive #14)。
@@ -66,6 +66,9 @@
 - 落地评论 = 两个读数的探针表 + 一行状态变更(摘标/关卡/收口),⛔ 不复述 `## 席位核对`。
 - 转 ready/入队前跑 `check-governed-merges.mjs --pr N`,判定读全文 ⛔ 不 tail/head;四件套照 SKILL.md。
 - ⛔ 两层不由席位批准;清标即落地同受此闸,漏判会被队列守卫在 merge group 里拒收。
+- 行数线按卡计:该卡全部 PR(含拆出的后续与已合并)additions+deletions(含生成物)之和 >3000 即过线卡,
+  每张 PR 皆 Tier H。例:一卡拆两张各 2,000 行 PR,两张皆 Tier H。
+- 拆分仍交维护者,派发令 ⛔ 不写「停下提拆分」;`--pr N`、队列守卫与中继只读单 PR,卡合计席位自加。
 - 挂 auto-merge 的同一动作里重测生成物漂移,⛔ 不复用更早的零;非零 ⇒ 按 A 的固定序。
 - 零 `enqueued` 事件按序查三条:① `mergeable_state` 是否 `dirty`。
 - ② enable-auto-merge 调用根本没落地,重发与效果验证序列见 `readings-queue.md`。
