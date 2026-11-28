@@ -427,7 +427,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "Ui Readonly When",
-        helpText: "CEL predicate over the record (e.g. record.status in ['confirmed', 'done']) — while it is TRUE, people cannot edit any field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. A field that sets its own hand lock (uiReadonly or uiReadonlyWhen) is judged by that instead, so uiReadonlyWhen: false on a field keeps it editable. Actions, imports, the API and flows still write every field, judged by the object's validations. Reads the record's own columns. The in-app assistant acting for a person does not honour it yet."
+        helpText: "CEL predicate over the record (e.g. record.status in ['confirmed', 'done']) — while it is TRUE, people cannot edit any field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. A field that sets its own hand lock (uiReadonly turned on, or uiReadonlyWhen) is judged by that instead, so uiReadonlyWhen: false on a field keeps it editable; uiReadonly turned off does not, and the field follows this lock. Actions, imports, the API and flows still write every field, judged by the object's validations. Reads the record's own columns. The in-app assistant acting for a person does not honour it yet."
       },
       activityMilestones: {
         label: "Activity Milestones",

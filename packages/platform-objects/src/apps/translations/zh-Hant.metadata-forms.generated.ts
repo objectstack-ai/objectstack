@@ -427,7 +427,7 @@ export const zhHantMetadataForms: NonNullable<TranslationData['metadataForms']> 
       },
       uiReadonlyWhen: {
         label: "記錄介面唯讀條件",
-        helpText: "基於記錄的 CEL 述詞（例如 record.status in ['confirmed', 'done']）——為 TRUE 時，使用者無法在主控台中編輯既有記錄的任何欄位（編輯對話框、記錄頁、表格、看板、行事曆與甘特圖拖曳、工時表）；新記錄的建立對話框不做判斷。自行宣告了手動鎖定（uiReadonly 或 uiReadonlyWhen）的欄位依其自身宣告裁決，因此欄位上的 uiReadonlyWhen: false 可讓它保持可編輯。動作、匯入、API 與流程仍可寫入每個欄位，並由物件的驗證規則裁決。讀取記錄自身的欄。代表使用者操作的應用程式內助理暫不遵循此設定。"
+        helpText: "基於記錄的 CEL 述詞（例如 record.status in ['confirmed', 'done']）——為 TRUE 時，使用者無法在主控台中編輯既有記錄的任何欄位（編輯對話框、記錄頁、表格、看板、行事曆與甘特圖拖曳、工時表）；新記錄的建立對話框不做判斷。自行宣告了手動鎖定（開啟 uiReadonly，或 uiReadonlyWhen）的欄位依其自身宣告裁決，因此欄位上的 uiReadonlyWhen: false 可讓它保持可編輯；關閉 uiReadonly 不算，欄位仍隨此鎖定。動作、匯入、API 與流程仍可寫入每個欄位，並由物件的驗證規則裁決。讀取記錄自身的欄。代表使用者操作的應用程式內助理暫不遵循此設定。"
       },
       activityMilestones: {
         label: "活動里程碑",

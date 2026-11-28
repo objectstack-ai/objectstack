@@ -427,7 +427,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       uiReadonlyWhen: {
         label: "레코드 전체를 화면에서 읽기 전용으로 하는 조건",
-        helpText: "레코드에 대한 CEL 조건식(예: record.status in ['confirmed', 'done']) — TRUE인 동안 콘솔 어디에서도 기존 레코드의 어떤 필드도 사람이 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반, 캘린더와 간트 드래그, 타임시트). 새 레코드의 생성 대화상자는 판정하지 않습니다. 자체 수동 잠금(uiReadonly 또는 uiReadonlyWhen)을 선언한 필드는 그 선언으로 판정되므로, 필드에 uiReadonlyWhen: false를 두면 편집 가능한 상태로 유지됩니다. 작업, 가져오기, API, 플로는 여전히 모든 필드에 쓰며 객체의 검증 규칙이 판정합니다. 레코드 자체의 열을 읽습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이 설정을 따르지 않습니다."
+        helpText: "레코드에 대한 CEL 조건식(예: record.status in ['confirmed', 'done']) — TRUE인 동안 콘솔 어디에서도 기존 레코드의 어떤 필드도 사람이 편집할 수 없습니다(편집 대화상자, 레코드 페이지, 그리드, 칸반, 캘린더와 간트 드래그, 타임시트). 새 레코드의 생성 대화상자는 판정하지 않습니다. 자체 수동 잠금(uiReadonly 켜기 또는 uiReadonlyWhen)을 선언한 필드는 그 선언으로 판정되므로, 필드에 uiReadonlyWhen: false를 두면 편집 가능한 상태로 유지됩니다. uiReadonly를 끈 것은 해당하지 않으며 필드는 이 잠금을 따릅니다. 작업, 가져오기, API, 플로는 여전히 모든 필드에 쓰며 객체의 검증 규칙이 판정합니다. 레코드 자체의 열을 읽습니다. 사용자를 대신해 작업하는 앱 내 어시스턴트는 아직 이 설정을 따르지 않습니다."
       },
       activityMilestones: {
         label: "활동 마일스톤",

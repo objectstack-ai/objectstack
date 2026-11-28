@@ -427,7 +427,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       uiReadonlyWhen: {
         label: "记录界面只读条件",
-        helpText: "基于记录的 CEL 谓词（例如 record.status in ['confirmed', 'done']）——为 TRUE 时，用户无法在控制台中编辑已有记录的任何字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。自行声明了手动锁定（uiReadonly 或 uiReadonlyWhen）的字段按其自身声明裁决，因此字段上的 uiReadonlyWhen: false 可让它保持可编辑。动作、导入、API 和流程仍可写入每个字段，并由对象的校验规则裁决。读取记录自身的列。代表用户操作的应用内助手暂不遵循此设置。"
+        helpText: "基于记录的 CEL 谓词（例如 record.status in ['confirmed', 'done']）——为 TRUE 时，用户无法在控制台中编辑已有记录的任何字段（编辑对话框、记录页、表格、看板、日历和甘特图拖动、工时表）；新建记录的创建对话框不做判断。自行声明了手动锁定（开启 uiReadonly，或 uiReadonlyWhen）的字段按其自身声明裁决，因此字段上的 uiReadonlyWhen: false 可让它保持可编辑；关闭 uiReadonly 不算，字段仍随此锁定。动作、导入、API 和流程仍可写入每个字段，并由对象的校验规则裁决。读取记录自身的列。代表用户操作的应用内助手暂不遵循此设置。"
       },
       activityMilestones: {
         label: "活动里程碑",
