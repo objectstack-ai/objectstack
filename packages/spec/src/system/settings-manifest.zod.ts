@@ -26,7 +26,8 @@ import { LIFECYCLE_DURATION_REGEX } from '../data/object.zod';
  *   1. process.env override   (source='env',     locked=true)
  *   2. sys_setting scope=tenant
  *   3. sys_setting scope=user
- *   4. manifest specifier.default
+ *   4. what the running deployment declares for the key, else the manifest
+ *      specifier.default (source='default'; ADR-0007 rung 4 as amended)
  */
 
 // ---------------------------------------------------------------------------
@@ -162,7 +163,8 @@ export type SpecifierHandlerParsed = z.infer<typeof SpecifierHandlerSchema>;
  *
  * Specifier resolution scopes. Listed in cascade order (low → high
  * priority): `env` always wins, then walk down `global → tenant → user`,
- * falling back to `default` (declared on the specifier). Adding a new
+ * falling back to `default` (what the running deployment declares for the
+ * key, else the specifier's own `default`). Adding a new
  * scope here requires updating the SettingsService cascade resolver and
  * the source-badge i18n entries on the UI side.
  *
