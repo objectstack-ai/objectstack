@@ -28,15 +28,26 @@ const manifest = (namespace: string): SettingsManifest => ({
     { type: 'number', key: 'limit', label: 'Limit', default: 5 },
     // No manifest default: its OS_* type comes from the declaration alone.
     { type: 'toggle', key: 'bare', label: 'Bare' },
-    { type: 'text', key: 'extra', label: 'Extra', required: true, visible: '${data.feature_on !== false}' },
   ],
 } as unknown as SettingsManifest);
+
+/** A switch with a required key shown only while it is not off. */
+const gated = {
+  namespace: 'gated',
+  label: 'gated',
+  scope: 'global',
+  specifiers: [
+    { type: 'toggle', key: 'switch_on', label: 'Switch', default: true },
+    { type: 'text', key: 'extra', label: 'Extra', required: true, visible: '${data.switch_on !== false}' },
+  ],
+} as unknown as SettingsManifest;
 
 function rig(env: Record<string, string> = {}) {
   const logger = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
   const svc = new SettingsService({ env, logger } as any);
   svc.registerManifest(manifest('demo'));
   svc.registerManifest(manifest('plain'));
+  svc.registerManifest(gated);
   return { svc, logger };
 }
 
@@ -118,15 +129,15 @@ describe('SettingsService declared default', () => {
   });
 
   it('a clear in a patch takes the declaration for the patch\'s visibility map', async () => {
-    // Declared off: clearing feature_on hides `extra`, so its `required` is not judged.
+    // Declared off: clearing switch_on hides `extra`, so its `required` is not judged.
     const { svc } = rig();
-    svc.registerDeclaredDefault('demo', 'feature_on', () => false);
-    await svc.setMany('demo', { feature_on: true, extra: 'x' });
-    await expect(svc.setMany('demo', { feature_on: null, extra: '' })).resolves.toBeDefined();
+    svc.registerDeclaredDefault('gated', 'switch_on', () => false);
+    await svc.setMany('gated', { switch_on: true, extra: 'x' });
+    await expect(svc.setMany('gated', { switch_on: null, extra: '' })).resolves.toBeDefined();
     // CONTROL: no provider, the clear falls back to the manifest default (on), so `extra` is required.
     const { svc: plain } = rig();
-    await plain.setMany('demo', { feature_on: false });
-    await expect(plain.setMany('demo', { feature_on: null, extra: '' })).rejects.toMatchObject({
+    await plain.setMany('gated', { switch_on: false });
+    await expect(plain.setMany('gated', { switch_on: null, extra: '' })).rejects.toMatchObject({
       code: 'SETTINGS_VALIDATION',
       fields: [expect.objectContaining({ field: 'extra', code: 'required' })],
     });
