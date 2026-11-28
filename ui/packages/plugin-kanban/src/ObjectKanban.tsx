@@ -89,6 +89,7 @@ import { resolveCardOwner, type KanbanCardOwner } from './KanbanCardOwner';
 import { lanesFromOptions, type LaneLifecycleKind } from './kanbanLaneLifecycle';
 import { laneKeyOf, lanesFromRecords, laneValueOf } from './kanbanReferenceLanes';
 import {
+  LANE_COUNT_ALIAS,
   compileLaneReadQuery,
   isLaneAggregate,
   readLaneCounts,
@@ -1886,6 +1887,92 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     ? laneReadHeld?.totals ?? null
     : undefined;
   /**
+   * objectstack#37844 — the swimlane read. A board drawn in swimlanes that
+   * holds a WINDOW of its query (a page its host hands in, or its own fetch
+   * that saturated its window) asks ONE grouped read on both keys, the lane
+   * field and the swimlane field, each group's `COUNT(*)`, under the same
+   * filter and search as the lane read. A swimlane row's count is the sum of
+   * its groups, and on the board that queries itself, a column's count is the
+   * sum of its groups too (the board handed a page reads its columns off the
+   * lane read above). A board that holds every record of its query asks
+   * nothing: its cards are the whole count. The board that queries itself
+   * knows it from its own fetch (`countsAreWindowed`); the board handed a page
+   * knows it once the lane read answers, when its counts add up to more
+   * records than the board holds. No door, a refusal or a cut answer
+   * (`hasMore`) answers no counts, and the rows stay marked `+`.
+   */
+  const selfWindowed = boardQueriesItself && countsAreWindowed;
+  const hostWindowed =
+    hostLaneRead && !!hostLaneCounts
+    && Object.values(hostLaneCounts).reduce((sum, count) => sum + count, 0) > (Array.isArray(boardData) ? boardData.length : 0);
+  const swimlaneReadField =
+    !!schema.groupBy && !!effectiveSwimlaneField && effectiveSwimlaneField !== schema.groupBy
+      ? effectiveSwimlaneField
+      : undefined;
+  const swimlaneReadAsked = !!swimlaneReadField && (hostWindowed || selfWindowed);
+  const swimlaneQuestion = useMemo((): string => {
+    if (!swimlaneReadAsked || !swimlaneReadField || !schema.groupBy) return '';
+    if (!objectDefReady || typeof dataSource?.queryGroupHeaders !== 'function') return '';
+    const hostSearch = JSON.parse(hostSearchKey) as { $search?: string; $searchFields?: string[] };
+    const query = compileLaneReadQuery({
+      laneField: schema.groupBy,
+      laneCount: true,
+      filter: queryFilter,
+      search: hostSearch.$search,
+      searchFields: hostSearch.$searchFields,
+    });
+    if (!query || swimlaneReadField === LANE_COUNT_ALIAS) return '';
+    return JSON.stringify([schema.objectName, { ...query, groupBy: [schema.groupBy, swimlaneReadField] }]);
+  }, [swimlaneReadAsked, swimlaneReadField, schema.groupBy, schema.objectName, objectDefReady, dataSource, hostSearchKey, queryFilter]);
+  type SwimlaneReadAnswer = {
+    question: string;
+    lanes: Record<string, number> | null;
+    swimlanes: Record<string, number> | null;
+  };
+  const [swimlaneRead, setSwimlaneRead] = useState<SwimlaneReadAnswer | null>(null);
+  useEffect(() => {
+    if (!swimlaneQuestion || !dataSource?.queryGroupHeaders || !schema.groupBy || !swimlaneReadField) return;
+    let cancelled = false;
+    const [objectName, query] = JSON.parse(swimlaneQuestion) as [string, Parameters<NonNullable<DataSource['queryGroupHeaders']>>[1]];
+    const lanes = JSON.parse(statisticLanesKey) as { ids: string[] | null; foldCase: boolean };
+    const laneField = schema.groupBy;
+    const swimlaneField = swimlaneReadField;
+    const question = swimlaneQuestion + statisticLanesKey;
+    Promise.resolve().then(() => dataSource.queryGroupHeaders!(objectName, query)).then(
+      (rows) => {
+        if (cancelled) return;
+        setSwimlaneRead({
+          question,
+          // Folded by the lane key alone: each column's groups across every swimlane.
+          lanes: readLaneCounts(rows, { laneField, laneIds: lanes.ids, foldCase: lanes.foldCase, uncolumnedId: KANBAN_UNCOLUMNED_ID }),
+          // Folded by the swimlane key alone, keyed as `laneKeyOf` keys a
+          // value: the no-value swimlane under `''`.
+          swimlanes: readLaneCounts(rows, { laneField: swimlaneField, laneIds: null, foldCase: false, uncolumnedId: '' }),
+        });
+      },
+      () => {
+        if (!cancelled) setSwimlaneRead({ question, lanes: null, swimlanes: null });
+      },
+    );
+    return () => { cancelled = true; };
+  }, [swimlaneQuestion, statisticLanesKey, dataSource, schema.groupBy, swimlaneReadField, refreshKey, invalidationNonce, hostReloadKey]);
+  const swimlaneReadHeld =
+    swimlaneRead && swimlaneQuestion !== '' && swimlaneRead.question === swimlaneQuestion + statisticLanesKey
+      ? swimlaneRead
+      : null;
+  // Each swimlane row's whole count; `null` (not answered, or no answer to
+  // give) keeps the rows' page counts marked `+`. Absent where nothing is asked.
+  const swimlaneCounts: Readonly<Record<string, number>> | null | undefined = swimlaneReadAsked
+    ? swimlaneReadHeld?.swimlanes ?? null
+    : undefined;
+  // The columns' counts the board draws: the lane read's on the board handed a
+  // page, the swimlane read's on a windowed board that queries itself.
+  const boardLaneCounts: Readonly<Record<string, number>> | null | undefined = hostLaneRead
+    ? hostLaneCounts
+    : swimlaneReadAsked
+      ? swimlaneReadHeld?.lanes ?? null
+      : undefined;
+  /**
    * objectstack#37327 — the lanes past the page. A board whose lanes come from
    * the data draws one lane per value the page holds; the lane read's group
    * keys name every lane of the query, so a lane whose records all sit past
@@ -2760,7 +2847,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         onLaneRowsChange={onRowGroupsChange}
         // objectstack#37327 — each lane's whole count on the board handed one
         // page (see `hostLaneCounts`). A PROP for the reason `objectFields` is.
-        laneCounts={hostLaneCounts}
+        laneCounts={boardLaneCounts}
+        // objectstack#37844 — each swimlane row's whole count on a windowed
+        // board (see `swimlaneCounts`). A PROP for the reason `laneCounts` is.
+        swimlaneCounts={swimlaneCounts}
         // objectstack#37516 — the "Uncategorized" lane whose records all sit
         // past the page (see `keepUncolumned`).
         keepUncolumned={keepUncolumned}

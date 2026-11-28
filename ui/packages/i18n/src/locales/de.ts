@@ -4488,6 +4488,8 @@ const de = {
     statusExecuted: "Ausgeführt",
     statusFailed: "Fehlgeschlagen",
     statusRejected: "Abgelehnt",
+    statusExpired: "Abgelaufen",
+    expiredDetail: "Nicht rechtzeitig beantwortet, oder die anfragende Person hat keinen Zugriff mehr.",
     colTool: "Werkzeug",
     colAction: "Aktion",
     colObject: "Objekt",

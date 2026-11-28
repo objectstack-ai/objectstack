@@ -253,6 +253,14 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     // never success wording. Borrowed from the inbox's status label so the
     // badge and the card say the same words.
     const heldForApprovalLabel = tt('aiApprovals.statusHeld', 'Waiting for approval');
+    // A decision that met a lapsed pending action (decision state `expired`,
+    // objectstack#34255): the inbox's status word and its reason, so the card
+    // and the inbox row say the same thing.
+    const expiredLabel = tt('aiApprovals.statusExpired', 'Expired');
+    const expiredDetailLabel = tt(
+      'aiApprovals.expiredDetail',
+      'Not answered in time, or the person who asked for it lost access.',
+    );
     // objectstack#32984 — a message typed during a running turn waits here.
     const queuedLabel = tt('chatbot.composer.queued', 'Sends when the current reply finishes');
     const queuedCancelLabel = tt('chatbot.composer.queuedCancel', 'Cancel');
@@ -605,6 +613,8 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       L,
       toolStatusLabels,
       heldForApprovalLabel,
+      expiredLabel,
+      expiredDetailLabel,
       toolApproveLabel,
       toolDenyLabel,
       toolDenyReason,

@@ -89,21 +89,29 @@ const deals = (stage: string, n: number): Row[] =>
 // 20 open deals (amounts 0 … 19, sum 190), 4 won (sum 6).
 const ROWS = [...deals('open', 20), ...deals('won', 4)];
 
-/** A grouped aggregate over `rows` as the platform's door answers it. */
-function groupHeadersOver(rows: Row[]) {
+/**
+ * A grouped aggregate over `rows` as the platform's door answers it: one group
+ * per distinct value of every `groupBy` key (objectstack#37844 asks two).
+ * `cut` answers the first two groups and `hasMore`, as the door cuts a grouped
+ * read to its default page size.
+ */
+function groupHeadersOver(rows: Row[], cut = false) {
   const store = new ValueDataSource<Row>({ items: rows });
   return vi.fn(async (_object: string, query: any) => {
     const kept = extractRecords(
       await store.find(OBJECT, { ...(query.where ? { $filter: query.where } : {}), $top: 100000 } as any),
     ) as Row[];
-    const key = query.groupBy[0];
-    const groups = new Map<unknown, Row[]>();
+    const keys: string[] = query.groupBy;
+    const groups = new Map<string, { values: unknown[]; members: Row[] }>();
     for (const row of kept) {
-      const k = row[key] ?? null;
-      groups.set(k, [...(groups.get(k) ?? []), row]);
+      const values = keys.map((key) => row[key] ?? null);
+      const id = JSON.stringify(values);
+      const group = groups.get(id) ?? { values, members: [] };
+      group.members.push(row);
+      groups.set(id, group);
     }
-    return [...groups].map(([k, members]) => {
-      const out: Row = { [key]: k };
+    const answer: Row[] & { hasMore?: boolean } = [...groups.values()].map(({ values: k, members }) => {
+      const out: Row = Object.fromEntries(keys.map((key, i) => [key, k[i]]));
       for (const agg of query.aggregations) {
         const values = members.map((m) => m[agg.field]) as number[];
         out[agg.alias] = agg.function === 'count'
@@ -118,10 +126,14 @@ function groupHeadersOver(rows: Row[]) {
       }
       return out;
     });
+    if (!cut) return answer;
+    const partial: Row[] & { hasMore?: boolean } = answer.slice(0, 2);
+    partial.hasMore = true;
+    return partial;
   });
 }
 
-function adapter(rows: Row[], door: 'answers' | 'refuses' = 'answers') {
+function adapter(rows: Row[], door: 'answers' | 'refuses' | 'cuts' | 'none' = 'answers') {
   const store = new ValueDataSource<Row>({ items: rows });
   return {
     find: vi.fn(async (object: string, params: any) => store.find(object, params)),
@@ -130,19 +142,23 @@ function adapter(rows: Row[], door: 'answers' | 'refuses' = 'answers') {
     update: vi.fn(),
     delete: vi.fn(),
     getObjectSchema: vi.fn(async () => DEF),
-    queryGroupHeaders: door === 'answers'
-      ? groupHeadersOver(rows)
-      : vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); }),
+    ...(door === 'none'
+      ? {}
+      : {
+          queryGroupHeaders: door === 'refuses'
+            ? vi.fn(async () => { throw Object.assign(new Error('forbidden'), { status: 403 }); })
+            : groupHeadersOver(rows, door === 'cuts'),
+        }),
   } as any;
 }
 
 const SWIMLANES = { swimlaneField: 'region' };
 
-function mount(source: any, summary: unknown, handed?: { rows: Row[] }) {
+function mount(source: any, summary: unknown, handed?: { rows: Row[] }, extra: Record<string, unknown> = {}) {
   return render(
     <SchemaRendererProvider dataSource={source}>
       <ObjectKanban
-        schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary, ...SWIMLANES } as any}
+        schema={{ type: 'object-kanban', objectName: OBJECT, groupBy: 'stage', cardFields: ['amount'], summary, ...SWIMLANES, ...extra } as any}
         dataSource={source}
         {...(handed ? { data: handed.rows, laneStatisticQuery: { search: '', reloadKey: '0' } } : {})}
       />
@@ -189,22 +205,30 @@ describe('a swimlane board draws the view\'s lane statistic (objectstack#37326)'
     expect(footRow(container)!.textContent).toContain('Count');
   });
 
-  it('(c) on a page handed in with its query, a column counts the whole lane and a swimlane row is marked a floor', async () => {
+  it('(c) on a page handed in with its query, a column counts the whole lane and a swimlane row its whole swimlane (objectstack#37844)', async () => {
     const source = adapter(ROWS);
-    // The page: 3 open deals, 1 won; the query holds 20 and 4.
+    // The page: 3 open deals, 1 won; the query holds 20 and 4, 12 north and 12 south.
     const { container } = mount(source, { type: 'sum', field: 'amount' }, { rows: [...deals('open', 3), ...deals('won', 1)] });
     await waitFor(() => expect(columnCounts(container)).toEqual(['20', '4']));
     expect(footFigures(container)).toEqual(['190', '6']);
-    // north holds open-000, open-002, won-000 on the page; south open-001.
-    expect(swimlaneCounts(container)).toEqual(['3+', '1+']);
-    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    // The page holds 3 north and 1 south; the swimlane read counts 12 and 12.
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['12', '12']));
+    // The lane read, then ONE read on both keys, counting each group.
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(2);
+    expect(source.queryGroupHeaders.mock.calls[1][1]).toEqual({
+      groupBy: ['stage', 'region'],
+      aggregations: [{ function: 'count', alias: 'count' }],
+    });
     expect(source.find).not.toHaveBeenCalled();
   });
 
-  it('(d) CONTROL: handed every record of its query, every count is bare', async () => {
-    const { container } = mount(adapter(ROWS), undefined, { rows: ROWS });
+  it('(d) CONTROL: handed every record of its query, every count is bare, and no swimlane read is asked', async () => {
+    const source = adapter(ROWS);
+    const { container } = mount(source, undefined, { rows: ROWS });
     await waitFor(() => expect(columnCounts(container)).toEqual(['20', '4']));
     expect(swimlaneCounts(container)).toEqual(['12', '12']);
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(source.queryGroupHeaders.mock.calls[0][1].groupBy).toEqual(['stage']);
   });
 
   it('(e) a refused read marks the page\'s column counts `+`, and draws no figure', async () => {
@@ -216,10 +240,13 @@ describe('a swimlane board draws the view\'s lane statistic (objectstack#37326)'
     expect(footFigures(container)).toEqual([null, null]);
   });
 
-  it('(f) CONTROL: with no statistic the board draws no foot row', async () => {
-    const { container } = mount(adapter(ROWS), undefined);
+  it('(f) CONTROL: with no statistic the board draws no foot row, and a board holding every record asks no read', async () => {
+    const source = adapter(ROWS);
+    const { container } = mount(source, undefined);
     await waitFor(() => expect(swimlaneCounts(container)).toEqual(['12', '12']));
     expect(footRow(container)).toBeNull();
+    expect(columnCounts(container)).toEqual(['20', '4']);
+    expect(source.queryGroupHeaders).not.toHaveBeenCalled();
   });
 
   // 20 open deals (amounts 0 … 19), 4 won (0 … 3).
@@ -234,6 +261,68 @@ describe('a swimlane board draws the view\'s lane statistic (objectstack#37326)'
     expect(footRow(container)!.textContent).toContain(`${word} · Amount`);
     expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
     expect(source.queryGroupHeaders.mock.calls[0][1].groupBy).toEqual(['stage']);
+  });
+});
+
+/**
+ * objectstack#37844 — a board drawn in swimlanes that queries its own cards
+ * through a window (`limit` 10 over the query's 24 records: 10 open, all
+ * north and south alternating, 5 + 5) reads every swimlane row's count and
+ * every column's count whole from ONE grouped read on both keys.
+ */
+describe('a windowed swimlane board counts each whole swimlane and column from one two-key read (objectstack#37844)', () => {
+  const WINDOW = { limit: 10 };
+
+  it('a board that queries itself through a full window counts 12 and 12 swimlanes, 20 and 4 columns', async () => {
+    const source = adapter(ROWS);
+    const { container } = mount(source, undefined, undefined, WINDOW);
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['12', '12']));
+    expect(columnCounts(container)).toEqual(['20', '4']);
+    // The window: 10 cards, all open.
+    expect(container.querySelectorAll('[role="listitem"]')).toHaveLength(10);
+    expect(source.find).toHaveBeenCalledTimes(1);
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
+    expect(source.queryGroupHeaders.mock.calls[0][1]).toEqual({
+      groupBy: ['stage', 'region'],
+      aggregations: [{ function: 'count', alias: 'count' }],
+    });
+  });
+
+  it('reads under the board\'s own filter', async () => {
+    const source = adapter(ROWS);
+    // amount >= 2: open 2 … 19 (18: 9 north, 9 south), won 2, 3 (north, south).
+    const { container } = mount(source, undefined, undefined, { ...WINDOW, filter: [['amount', '>=', 2]] });
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['10', '10']));
+    expect(columnCounts(container)).toEqual(['18', '2']);
+    expect(source.queryGroupHeaders.mock.calls[0][1].where).toBeDefined();
+  });
+
+  it.each([
+    ['has no grouped door', 'none'],
+    ['refuses the read', 'refuses'],
+    ['cuts the read (hasMore)', 'cuts'],
+  ] as const)('CONTROL: when the source %s, the window\'s counts stay marked `+`', async (_, door) => {
+    const source = adapter(ROWS, door);
+    const { container } = mount(source, undefined, undefined, WINDOW);
+    if (door !== 'none') await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['5+', '5+']));
+    expect(columnCounts(container)).toEqual(['10+', '0+']);
+  });
+
+  it('CONTROL: a window the query does not fill asks no read and writes bare counts', async () => {
+    const source = adapter(ROWS);
+    const { container } = mount(source, undefined, undefined, { limit: 50 });
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['12', '12']));
+    expect(columnCounts(container)).toEqual(['20', '4']);
+    expect(source.queryGroupHeaders).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a page handed in whose lane read is cut asks no swimlane read; its rows stay marked `+`', async () => {
+    const source = adapter(ROWS, 'cuts');
+    const { container } = mount(source, undefined, { rows: [...deals('open', 3), ...deals('won', 1)] });
+    await waitFor(() => expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(swimlaneCounts(container)).toEqual(['3+', '1+']));
+    expect(source.queryGroupHeaders).toHaveBeenCalledTimes(1);
   });
 });
 

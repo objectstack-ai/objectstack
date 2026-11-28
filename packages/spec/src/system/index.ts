@@ -42,9 +42,12 @@ export * from './stack-server.zod';
 // D8 "design+enforce or remove": the whole module had zero consumers — the LIVE
 // audit path (plugin-audit) captures unconditionally via engine hooks and defines
 // its own sys_audit_log row shape, and `AuditConfigSchema.enabled` contradicted
-// the always-on compliance-ledger contract (object.zod `trackHistory`). The
-// enforced authoring surface is object/field `trackHistory` + the object
-// `lifecycle` `audit` category (retention), with per-org overrides in settings.
+// the always-on compliance-ledger contract (object.zod `enable.trackHistory`:
+// capture is always on, the flag only opens the ledger's view). The enforced
+// authoring surface is the object's `enable.trackHistory` (the record page's
+// ledger view and the `history` verb) + the object `lifecycle` `audit` category
+// (retention), with per-org overrides in settings. Field-change values on the
+// activity stream are `fieldHistory`'s, not part of this surface.
 export * from './logging.zod';
 export * from './metrics.zod';
 export * from './tracing.zod';

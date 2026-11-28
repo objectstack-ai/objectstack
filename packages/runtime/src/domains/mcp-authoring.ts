@@ -160,11 +160,11 @@
 import { createRequire } from 'node:module';
 import { resolveUserAuthzGrants, userTextLocalesOf } from '@objectstack/core';
 import {
-    KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
     authoredKnowledgeSourceRefusal,
     metaWriteCapabilityVerdict,
     walledCatalogWriteVerdict,
 } from '@objectstack/metadata-core';
+import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
 import {
     createMetaItemReadGate,
     createMetaListReadGate,
@@ -435,11 +435,12 @@ export interface OpenAuthoringWriter {
     /** The walled refusal for a write of `type` (`walledCatalogWriteVerdict`). */
     writeVerdict(type: string): Promise<{ allowed: true } | { allowed: false; code: ErrorCode; message: string; status: number }>;
     /**
-     * [ADR-0161 K4, guard two] The refusal of a `knowledge_source` save whose
-     * author may not themselves search what it would index
+     * [ADR-0161 K4, guard two] The refusal of a `knowledge_source` save
      * (`authoredKnowledgeSourceRefusal`, judged for the admitted human), or
-     * on a deployment with no knowledge service, or `undefined` when the save
-     * may go on. Every other type answers `undefined`.
+     * `undefined` when the save may go on. A save is refused when its author
+     * may not themselves search what it would index, and when no knowledge
+     * service serves the request's environment. Every other type answers
+     * `undefined`.
      */
     itemSaveRefusal(type: string, item: unknown): Promise<{ code: ErrorCode; message: string; status: number } | undefined>;
 }
@@ -674,11 +675,12 @@ function openWriter(
                 item,
                 // The human the door admitted: their grants, never the envelope's.
                 executionContext: reader,
-                // The classified lookup (`resolveServiceOrLoud`): an absent
-                // service answers `undefined` and the predicate refuses the
-                // save `503`, naming the remedy; a registered one that cannot
-                // be resolved rejects and the predicate answers `503`.
-                resolveKnowledgeService: () => deps.resolveServiceOrLoud(context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, context.environmentId),
+                // The classified lookup (`resolveKnowledgeServiceForSave`): an
+                // absent service, and a registration with no instance in this
+                // scope, are each refused `503` with their own sentence; a
+                // registered one that cannot be resolved rejects and the
+                // predicate answers `503`.
+                resolveKnowledgeService: () => resolveKnowledgeServiceForSave(deps, context),
             });
             if (!refused) return undefined;
             return {
