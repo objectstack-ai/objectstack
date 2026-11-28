@@ -37,7 +37,7 @@
  * collapse or the not-found envelope is mocked away.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 // Paid at collection, not inside a case's clock (check:test-source-alias).
 import '@objectstack/metadata';
 
@@ -47,10 +47,11 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import '@objectstack/metadata';
 
 import { ObjectQL } from '@objectstack/objectql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 
 import { HttpDispatcher } from './http-dispatcher.js';
+import { installDefaultOrganization } from './default-organization.testkit.js';
 import {
     callData,
     invokeBusinessAction,
@@ -920,7 +921,7 @@ describe('#37867 — a declarative update answers the `warnings` its data-plane 
  * action's `patch` is answered as a plain success.
  *
  * Unlike the blocks above, nothing here is a double: a REAL `ObjectQL` engine
- * on the REAL `InMemoryDriver`, the REAL `ObjectStackProtocolImplementation`
+ * on the REAL `SqlDriver` (better-sqlite3, `:memory:`), the REAL `ObjectStackProtocolImplementation`
  * as the `protocol` service, and an object whose `closed_reason` is
  * `readonly: true` — the strip, the hook's message and the data door's answer
  * are the producers' own. Each case compares the action's answer with the
@@ -955,12 +956,21 @@ describe('#38103 — a declarative update answers the `notice` and `droppedField
         actions: [CLOSE_WITH_REASON, SET_PRIORITY],
     };
     const quiet = { info() {}, debug() {}, warn() {}, error() {} };
+    const booted: ObjectQL[] = [];
+    afterEach(async () => {
+        for (const engine of booted.splice(0)) {
+            try { await engine.destroy(); } catch { /* noop */ }
+        }
+    });
 
     async function boot() {
         const engine = new ObjectQL({ logger: quiet } as any);
-        engine.registerDriver(new InMemoryDriver() as any, true);
+        booted.push(engine);
+        engine.registerDriver(new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true }) as any, true);
         await engine.init();
         engine.registry.registerObject(FB_OBJECT_DEF as never, 'com.objectstack.test.38103');
+        await engine.syncSchemas();
+        await installDefaultOrganization(engine);
         // The hook says what closing did, from the write it is handed.
         engine.registerHook('beforeUpdate', async (ctx: any) => {
             if (ctx.input?.data?.status === 'closed') ctx.notice(NOTICE);
