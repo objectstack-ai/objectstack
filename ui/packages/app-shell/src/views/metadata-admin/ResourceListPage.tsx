@@ -527,21 +527,28 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       navigate(`./new${pkgSuffix}`);
       return;
     }
+    // Setup's catalog (positions and permission sets, decisions Q-a of topic
+    // objectstack#37424): the create opens in the environment scope, which
+    // binds no package, and the editor's Save asks for one, once. An answer
+    // asked here would not survive: Studio's area drops `?package=` under the
+    // environment scope (`areaLocationRedirect`), so Save asked a second time.
+    if (envScope) {
+      navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
+      return;
+    }
     if (packagesPending) return;
     // Setup's list, scoped to a package the person named.
-    if (!envScope && !allLeg && packageNamed && activePackage) {
+    if (!allLeg && packageNamed && activePackage) {
       navigate(`./new?package=${encodeURIComponent(activePackage)}`);
       return;
     }
-    // Setup's catalog (positions and permission sets, decisions Q-a of topic
-    // objectstack#37424), the cross-package leg, and a Setup list on a
-    // heuristic pick: ask. The environment scope keeps its own address.
+    // The cross-package leg, and a Setup list on a heuristic pick: ask.
     const chosen = await askPackage({
-      preselect: envScope ? null : pickedPackage,
+      preselect: pickedPackage,
       typeLabel: translateMetadataType(type, locale, entry?.label ?? type),
     });
     if (!chosen) return;
-    navigate(`./new?${envScope ? `${ENVIRONMENT_SCOPE_QUERY}&` : ''}package=${encodeURIComponent(chosen)}`);
+    navigate(`./new?package=${encodeURIComponent(chosen)}`);
   }, [activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog, packagesPending, packageNamed, askPackage, type, locale, entry?.label]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on

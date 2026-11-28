@@ -15,7 +15,8 @@
  *    no ask, the create opens there;
  *  - while the packages load: New is disabled;
  *  - Setup's catalog (the environment scope, decisions Q-a of topic
- *    objectstack#37424): New asks, and the create keeps the scope;
+ *    objectstack#37424): New opens the create in the scope with no ask; the
+ *    editor's Save asks, once (`ResourceListPage.catalogAsksOnce-38149`);
  *  - Studio's cross-package leg (`/studio/~all/metadata/TYPE`): New asks;
  *  - Cancel opens nothing.
  */
@@ -185,17 +186,15 @@ describe('Setup list: New waits for the packages (objectstack#38149)', () => {
   });
 });
 
-describe('Setup catalog: a new permission set asks for its package (objectstack#38149, Q-a)', () => {
-  it('New asks with nothing pre-selected, and the create keeps the environment scope', async () => {
+describe('Setup catalog: a new permission set opens in the environment scope (objectstack#38149, Q-a)', () => {
+  // The environment scope binds no package, and Studio's area drops a
+  // `?package=` under it: an answer asked here was lost, and Save asked again.
+  it('New asks nothing and opens the create in the scope, naming no package', async () => {
     mount('?scope=environment');
     fireEvent.click(await screen.findByRole('button', { name: new RegExp(t('engine.list.create', 'en-US')) }));
-    const dialog = await ask();
-    const alpha = await within(dialog).findByTestId(`package-create-ask-option-${PKG_A}`);
-    expect(alpha).toHaveAttribute('data-state', 'unchecked');
-    expect(within(dialog).getByTestId('package-create-ask-continue')).toBeDisabled();
-    fireEvent.click(alpha);
-    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
-    expect(await screen.findByTestId('create-opened')).toHaveTextContent(`?scope=environment&package=${PKG_A}`);
+    expect(await screen.findByTestId('create-opened')).toHaveTextContent('?scope=environment');
+    expect(screen.getByTestId('create-opened')).not.toHaveTextContent('package=');
+    expect(screen.queryByTestId('package-create-ask')).toBeNull();
   });
 });
 
