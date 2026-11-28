@@ -847,7 +847,19 @@ export const CEILINGS = new Map([
   // the retired action location word `list_item` (-7 bytes); the row follows the measurement
   // down, 24384 bytes (24357 priced) -> 24377 (24350 priced) -> 6088 tokens.
   ['skills/objectstack-formula/SKILL.md', 6088], //     -53 (was 6055), then -5 A2′ (was 6002), then +11 (was 5997), then +82 (was 6008), then -2 (was 6090)
-  ['skills/objectstack-i18n/SKILL.md', 6333], //        -11 (was 6349), then -5 A2′ (was 6338)
+  // 6333 -> 6315: the top-level group list gains `packages` (`name` / `description` by
+  // `manifest.id`, the `os lint` warning `i18n/missing-package` and what clears it), and the
+  // `_relatedLists` row's remedy names both routes under a `.custom` arrangement (the owner's
+  // `label`, or the arrangement's own, read from the `.custom` package's bundle). Paid in full
+  // by deleting restatement in this file: the translation-reference paragraph's list of action
+  // keys judged against a declaration, each already conditioned in the `_actions` row (now one
+  // sentence pointing at that row, which gains "non-empty" on `submitText`), and the
+  // first example's three code-comment tails ("one TranslationData per locale", "assemble the
+  // locales into one bundle…", "…and register it on the stack"), which repeat the sentence
+  // introducing that example. No raise, no ruling spent:
+  // 25359 bytes (25332 priced) -> 25285 (25258 priced); the row follows the measurement down.
+  //   ceil(($(wc -c < skills/objectstack-i18n/SKILL.md) - 27) / 4) == ceil(25258 / 4)
+  ['skills/objectstack-i18n/SKILL.md', 6315], //        -11 (was 6349), then -5 A2′ (was 6338), then -18 (was 6333)
   // 12705 -> 12984 (2026-08-31 app-repo-principles raise, see the block above).
   // The largest of the five and the frame the other four are read under: what an
   // app IS (metadata under the platform's spec, authored from these skills,
@@ -1168,7 +1180,10 @@ export const CEILINGS = new Map([
   // ceiling +6, the measured remainder only, pinned AT the measurement (2 under the 2264 the
   // row held before the fence dropped its key). Standing ruling (2026-10-27, tap A):
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
-  ['skills/objectstack-ui/SKILL.md', 2262], // +6 to the measurement (was 2256)
+  // 2262 -> 2228: the Action Types table drops its `ask_ai` row and the footnote under it
+  // drops the same name, the type having left `ActionType` (ADR-0160 D7). 9075 bytes (9048
+  // priced) -> 8937 (8910 priced) -> 2228 tokens; the row follows the measurement down.
+  ['skills/objectstack-ui/SKILL.md', 2228], // -34 to the measurement (was 2262)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
@@ -1381,7 +1396,15 @@ export const CEILINGS = new Map([
   // 4201 -> 4181: the roll-up visibility paragraph no longer asks to remove Modify All before
   // masking a summary (19: it overrides no mask). 16801 -> 16723 bytes.
   //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16723 / 4)
-  ['skills/objectstack-data/rules/relationships.md', 4181], // -2 to the measurement (was 4203)
+  // 4181 -> 4179: the `relatedLists` bullet's remedy under a `.custom` arrangement names the
+  // arrangement's own `label` beside the owner's (translated in the `.custom` package's
+  // bundle). Paid by deleting restatement in this file: "(cascade delete)" in the type table
+  // (the Delete Behaviors section states it), "to aggregate" after the roll-up intro, and the
+  // grid example's "(a field group names invoice_line, as above)", and "places the lines and"
+  // in the inline-entry example's comment (the prose above it says so). 16724 -> 16714 bytes;
+  // the row follows the measurement down.
+  //   ceil($(wc -c < skills/objectstack-data/rules/relationships.md) / 4) == ceil(16714 / 4)
+  ['skills/objectstack-data/rules/relationships.md', 4179], // -2 to the measurement (was 4203), then -2 (was 4181)
   // NEW FILE (#14296 item 1 = A, condition (b)): the entry's Security & Access
   // Control block moved here whole. Pinned at its landed count — no headroom,
   // because a split that arrives with budget is a raise wearing a new path.

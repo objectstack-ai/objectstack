@@ -8,20 +8,19 @@ import type { SettingsCopyLocale } from './settings-copy-locale.js';
  * RUNS, when that differs from the switch on the page.
  *
  * The switch shows what `auth.email_password_enabled` resolves to. With nothing
- * stored that is the manifest default (on), while the running config takes
- * the deployment's own declaration (`emailAndPassword.enabled`): the settings
- * pass applies only stored or `OS_*` values, and the manifest default is a
- * console default that never rules (`auth-settings-declared.ts`). So a
- * deployment that declares email and password off, with nothing stored, shows
- * the switch on for a sign-in method that is off. A cloud-managed runtime that
- * holds it off (`emailPasswordHeldOffByHost`) shows a stored on that is not
- * applied the same way.
+ * stored that is the deployment's own declaration (`emailAndPassword.enabled`,
+ * `auth-settings-declared-defaults.ts`), which is what runs, so the switch
+ * itself says it and nothing is stated. What the value still cannot say is a
+ * stored value the runtime does not apply: on a cloud-managed runtime that
+ * holds email and password off (`emailPasswordHeldOffByHost`), a value stored
+ * on shows the switch on for a sign-in method that is off; and any other
+ * disagreement between the switch and what runs. Those head the page as a
+ * `warning`.
  *
  * The settings service's live-status seam (`registerLiveStatus`) is how a page
  * says what runs beside what is stored; its `values` serve option-bearing keys
  * only, so a toggle is stated in the banner that heads the page. Read at
- * request time, never recorded at boot; nothing is stated while the switch
- * and the running value agree.
+ * request time, never recorded at boot.
  *
  * Same shape as service-settings' `SettingsLiveStatus`, restated because this
  * plugin reaches the settings service through a structural surface and takes
@@ -47,10 +46,7 @@ export interface EmailPasswordLiveInput {
 
 /** The words of the statement, one entry per language on the platform locale table. */
 export interface AuthLiveStatusCopy {
-  /** Declared off by the deployment, nothing stored. */
-  declaredOffLabel: string;
-  declaredOffText: string;
-  /** Held off by the host on a cloud-managed runtime. */
+  /** Held off by the host on a cloud-managed runtime, over a value stored on. */
   managedOffLabel: string;
   managedOffText: string;
   /** Any other disagreement between the switch and what runs. */
@@ -60,10 +56,6 @@ export interface AuthLiveStatusCopy {
 
 export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCopy> = {
   en: {
-    declaredOffLabel: 'Email and password sign-in is off on this deployment',
-    declaredOffText: 'This deployment\'s own configuration turns email and password sign-in off, and nothing is '
-      + 'saved here, so the switch below shows the console default (on), not what runs. The sign-in page offers '
-      + 'no email and password form. A value saved here takes precedence over that configuration.',
     managedOffLabel: 'Email and password sign-in is off on this environment',
     managedOffText: 'This environment is cloud-managed and its deployment turns email and password sign-in off: '
       + 'people sign in through the identity provider of the organisation that hosts it, and the sign-in page '
@@ -73,9 +65,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'The switch below shows the saved setting, which is not what runs right now.',
   },
   'zh-CN': {
-    declaredOffLabel: '本部署已关闭邮箱/密码登录',
-    declaredOffText: '本部署自身的配置关闭了邮箱/密码登录，而这里没有保存任何值，所以下方开关显示的是控制台默认值（开），'
-      + '并非实际运行的状态。登录页不提供邮箱/密码表单。在这里保存的值优先于该配置。',
     managedOffLabel: '本环境已关闭邮箱/密码登录',
     managedOffText: '本环境由云端托管，其部署关闭了邮箱/密码登录：用户通过托管本环境的组织的身份提供方登录，'
       + '登录页不提供邮箱/密码表单。下方开关无法改变这一点，保存为开的值不会生效。',
@@ -83,9 +72,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: '下方开关显示的是已保存的设置，并非当前实际运行的状态。',
   },
   'zh-Hant': {
-    declaredOffLabel: '本部署已關閉電子郵件／密碼登入',
-    declaredOffText: '本部署自身的設定關閉了電子郵件／密碼登入，而這裡沒有儲存任何值，所以下方開關顯示的是主控台預設值（開），'
-      + '並非實際執行的狀態。登入頁不提供電子郵件／密碼表單。在這裡儲存的值優先於該設定。',
     managedOffLabel: '本環境已關閉電子郵件／密碼登入',
     managedOffText: '本環境由雲端代管，其部署關閉了電子郵件／密碼登入：使用者透過代管本環境之組織的身分識別提供者登入，'
       + '登入頁不提供電子郵件／密碼表單。下方開關無法改變這一點，儲存為開的值不會生效。',
@@ -93,10 +79,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: '下方開關顯示的是已儲存的設定，並非目前實際執行的狀態。',
   },
   'ja-JP': {
-    declaredOffLabel: 'このデプロイではメール/パスワードによるサインインはオフです',
-    declaredOffText: 'このデプロイ自身の構成でメール/パスワードによるサインインがオフになっており、ここには何も保存されていないため、'
-      + '下のスイッチは実際の動作ではなくコンソールの既定値（オン）を表示しています。サインインページにメール/パスワードのフォームは'
-      + '表示されません。ここで保存した値はその構成より優先されます。',
     managedOffLabel: 'この環境ではメール/パスワードによるサインインはオフです',
     managedOffText: 'この環境はクラウドで管理されており、そのデプロイでメール/パスワードによるサインインがオフになっています。'
       + 'ユーザーはこの環境をホストする組織の ID プロバイダーでサインインし、サインインページにメール/パスワードのフォームは'
@@ -105,11 +87,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: '下のスイッチは保存済みの設定を表示しており、現在の実際の動作とは異なります。',
   },
   'es-ES': {
-    declaredOffLabel: 'El inicio de sesión con correo y contraseña está desactivado en esta implementación',
-    declaredOffText: 'La propia configuración de esta implementación desactiva el inicio de sesión con correo y '
-      + 'contraseña y aquí no hay nada guardado, así que el interruptor de abajo muestra el valor predeterminado de la '
-      + 'consola (activado), no lo que se ejecuta. La página de inicio de sesión no ofrece formulario de correo y '
-      + 'contraseña. Un valor guardado aquí prevalece sobre esa configuración.',
     managedOffLabel: 'El inicio de sesión con correo y contraseña está desactivado en este entorno',
     managedOffText: 'Este entorno está gestionado en la nube y su implementación desactiva el inicio de sesión con '
       + 'correo y contraseña: las personas inician sesión mediante el proveedor de identidad de la organización que lo '
@@ -120,10 +97,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'El interruptor de abajo muestra el ajuste guardado, que no es lo que se ejecuta ahora mismo.',
   },
   ar: {
-    declaredOffLabel: 'تسجيل الدخول بالبريد الإلكتروني وكلمة المرور متوقف في هذا النشر',
-    declaredOffText: 'تُوقف إعدادات هذا النشر نفسها تسجيل الدخول بالبريد الإلكتروني وكلمة المرور، ولا يوجد شيء محفوظ هنا، '
-      + 'لذا يعرض المفتاح أدناه القيمة الافتراضية لوحدة التحكم (مُفعّل) وليس ما يعمل فعلًا. لا تعرض صفحة تسجيل الدخول نموذج '
-      + 'البريد الإلكتروني وكلمة المرور. القيمة المحفوظة هنا لها الأسبقية على تلك الإعدادات.',
     managedOffLabel: 'تسجيل الدخول بالبريد الإلكتروني وكلمة المرور متوقف في هذه البيئة',
     managedOffText: 'هذه البيئة مُدارة سحابيًا ويُوقف نشرها تسجيل الدخول بالبريد الإلكتروني وكلمة المرور: يسجّل الأشخاص '
       + 'الدخول عبر موفّر الهوية للمؤسسة التي تستضيفها، ولا تعرض صفحة تسجيل الدخول نموذج البريد الإلكتروني وكلمة المرور. '
@@ -133,11 +106,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'يعرض المفتاح أدناه الإعداد المحفوظ، وهو ليس ما يعمل الآن.',
   },
   fr: {
-    declaredOffLabel: 'La connexion par e-mail et mot de passe est désactivée sur ce déploiement',
-    declaredOffText: 'La configuration propre à ce déploiement désactive la connexion par e-mail et mot de passe, et '
-      + 'rien n\'est enregistré ici : l\'interrupteur ci-dessous affiche donc la valeur par défaut de la console '
-      + '(activé), pas ce qui s\'exécute. La page de connexion ne propose aucun formulaire e-mail et mot de passe. '
-      + 'Une valeur enregistrée ici l\'emporte sur cette configuration.',
     managedOffLabel: 'La connexion par e-mail et mot de passe est désactivée sur cet environnement',
     managedOffText: 'Cet environnement est géré dans le cloud et son déploiement désactive la connexion par e-mail et '
       + 'mot de passe : on se connecte via le fournisseur d\'identité de l\'organisation qui l\'héberge, et la page de '
@@ -148,10 +116,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'L\'interrupteur ci-dessous affiche le paramètre enregistré, qui n\'est pas ce qui s\'exécute en ce moment.',
   },
   'pt-BR': {
-    declaredOffLabel: 'O login com e-mail e senha está desativado nesta implantação',
-    declaredOffText: 'A própria configuração desta implantação desativa o login com e-mail e senha, e nada está salvo '
-      + 'aqui, então o interruptor abaixo mostra o padrão do console (ativado), não o que está em execução. A página de '
-      + 'login não oferece formulário de e-mail e senha. Um valor salvo aqui prevalece sobre essa configuração.',
     managedOffLabel: 'O login com e-mail e senha está desativado neste ambiente',
     managedOffText: 'Este ambiente é gerenciado na nuvem e sua implantação desativa o login com e-mail e senha: as '
       + 'pessoas entram pelo provedor de identidade da organização que o hospeda, e a página de login não oferece '
@@ -160,11 +124,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'O interruptor abaixo mostra a configuração salva, que não é o que está em execução agora.',
   },
   ru: {
-    declaredOffLabel: 'Вход по электронной почте и паролю отключён в этом развёртывании',
-    declaredOffText: 'Собственная конфигурация этого развёртывания отключает вход по электронной почте и паролю, а здесь '
-      + 'ничего не сохранено, поэтому переключатель ниже показывает значение консоли по умолчанию (включено), а не то, '
-      + 'что работает. Страница входа не предлагает форму электронной почты и пароля. Значение, сохранённое здесь, '
-      + 'имеет приоритет над этой конфигурацией.',
     managedOffLabel: 'Вход по электронной почте и паролю отключён в этой среде',
     managedOffText: 'Эта среда управляется в облаке, и её развёртывание отключает вход по электронной почте и паролю: '
       + 'пользователи входят через поставщика удостоверений организации, которая её размещает, а страница входа не '
@@ -174,11 +133,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'Переключатель ниже показывает сохранённую настройку, а не то, что работает сейчас.',
   },
   de: {
-    declaredOffLabel: 'Die Anmeldung mit E-Mail und Passwort ist in dieser Bereitstellung aus',
-    declaredOffText: 'Die eigene Konfiguration dieser Bereitstellung schaltet die Anmeldung mit E-Mail und Passwort aus, '
-      + 'und hier ist nichts gespeichert. Der Schalter unten zeigt daher den Konsolen-Standard (an), nicht das, was '
-      + 'läuft. Die Anmeldeseite bietet kein Formular für E-Mail und Passwort. Ein hier gespeicherter Wert hat '
-      + 'Vorrang vor dieser Konfiguration.',
     managedOffLabel: 'Die Anmeldung mit E-Mail und Passwort ist in dieser Umgebung aus',
     managedOffText: 'Diese Umgebung wird in der Cloud verwaltet, und ihre Bereitstellung schaltet die Anmeldung mit '
       + 'E-Mail und Passwort aus: Man meldet sich über den Identitätsanbieter der Organisation an, die sie hostet, und '
@@ -188,10 +142,6 @@ export const AUTH_LIVE_STATUS_COPY: Record<SettingsCopyLocale, AuthLiveStatusCop
     differsText: 'Der Schalter unten zeigt die gespeicherte Einstellung, nicht das, was gerade läuft.',
   },
   ko: {
-    declaredOffLabel: '이 배포에서는 이메일/비밀번호 로그인이 꺼져 있습니다',
-    declaredOffText: '이 배포 자체의 구성에서 이메일/비밀번호 로그인이 꺼져 있고 여기에 저장된 값이 없으므로, 아래 스위치는 '
-      + '실제 동작이 아니라 콘솔 기본값(켜짐)을 표시합니다. 로그인 페이지에는 이메일/비밀번호 양식이 표시되지 않습니다. '
-      + '여기에 저장한 값은 해당 구성보다 우선합니다.',
     managedOffLabel: '이 환경에서는 이메일/비밀번호 로그인이 꺼져 있습니다',
     managedOffText: '이 환경은 클라우드에서 관리되며, 배포에서 이메일/비밀번호 로그인이 꺼져 있습니다. 사용자는 이 환경을 '
       + '호스팅하는 조직의 ID 공급자를 통해 로그인하며, 로그인 페이지에는 이메일/비밀번호 양식이 표시되지 않습니다. 아래 '
@@ -209,7 +159,7 @@ export function authLiveStatusCopy(locale: string | undefined): AuthLiveStatusCo
   return AUTH_LIVE_STATUS_COPY[(picked ?? 'en') as SettingsCopyLocale];
 }
 
-/** The reading `bindAuthSettings` gives a resolved toggle: absent or unreadable is the manifest default, on. */
+/** The reading `bindAuthSettings` gives a resolved toggle: absent or unreadable reads on, the manifest default. */
 function shownToggle(value: unknown): boolean {
   if (typeof value === 'boolean') return value;
   if (typeof value === 'string') return value.toLowerCase() !== 'false';
@@ -225,17 +175,9 @@ export function describeEmailPasswordLiveStatus(input: EmailPasswordLiveInput): 
   const shown = shownToggle(input.shown?.value);
   if (shown === input.running) return undefined;
   const copy = authLiveStatusCopy(input.locale);
-  const nothingStored = (input.shown?.source ?? 'default') === 'default';
   if (!input.running && input.heldOffByHost) {
-    // A value stored on that is not applied is the operator's to clear: warn.
-    return {
-      label: copy.managedOffLabel,
-      bannerText: copy.managedOffText,
-      bannerSeverity: nothingStored ? 'info' : 'warning',
-    };
-  }
-  if (!input.running && nothingStored) {
-    return { label: copy.declaredOffLabel, bannerText: copy.declaredOffText, bannerSeverity: 'info' };
+    // A value stored on that is not applied is the operator's to clear.
+    return { label: copy.managedOffLabel, bannerText: copy.managedOffText, bannerSeverity: 'warning' };
   }
   return { label: copy.differsLabel(input.running), bannerText: copy.differsText, bannerSeverity: 'warning' };
 }

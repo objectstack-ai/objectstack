@@ -462,6 +462,137 @@ export function mapPageComponents(
 }
 
 /**
+ * Remove the components of one page list that `shouldRemove` names, and walk
+ * into each component it keeps. Returns the SAME array reference when nothing
+ * under it changed (the {@link mapPages} contract).
+ */
+function removeFromComponentList(
+  list: unknown[],
+  basePath: string,
+  shouldRemove: (component: Dict, path: string) => boolean,
+  depth: number,
+): unknown[] {
+  let changed = false;
+  const next: unknown[] = [];
+  list.forEach((child, i) => {
+    if (!isDict(child)) {
+      next.push(child);
+      return;
+    }
+    const path = `${basePath}[${i}]`;
+    if (shouldRemove(child, path)) {
+      changed = true;
+      return;
+    }
+    const kept = removeInComponentTree(child, path, shouldRemove, depth);
+    if (kept !== child) changed = true;
+    next.push(kept);
+  });
+  return changed ? next : list;
+}
+
+/** {@link removePageComponents} below one kept component, at every slot position. */
+function removeInComponentTree(
+  component: Dict,
+  path: string,
+  shouldRemove: (component: Dict, path: string) => boolean,
+  depth: number,
+): Dict {
+  if (depth >= MAX_COMPONENT_DEPTH) return component;
+  const properties = component.properties;
+  if (!isDict(properties)) return component;
+  let nextProps = properties;
+  for (const { key, panelKey } of pageComponentSlotPositions()) {
+    const list = nextProps[key];
+    if (!Array.isArray(list)) continue;
+    if (panelKey === undefined) {
+      const next = removeFromComponentList(list, `${path}.properties.${key}`, shouldRemove, depth + 1);
+      if (next !== list) nextProps = { ...nextProps, [key]: next };
+      continue;
+    }
+    let panelsChanged = false;
+    const nextPanels = list.map((panel, i) => {
+      if (!isDict(panel)) return panel;
+      const children = panel[panelKey];
+      if (!Array.isArray(children)) return panel;
+      const nextChildren = removeFromComponentList(
+        children,
+        `${path}.properties.${key}[${i}].${panelKey}`,
+        shouldRemove,
+        depth + 1,
+      );
+      if (nextChildren === children) return panel;
+      panelsChanged = true;
+      return { ...panel, [panelKey]: nextChildren };
+    });
+    if (panelsChanged) nextProps = { ...nextProps, [key]: nextPanels };
+  }
+  return nextProps === properties ? component : { ...component, properties: nextProps };
+}
+
+/**
+ * Immutably REMOVE every page component `shouldRemove` names, wherever it
+ * sits: {@link mapPageComponents}' reach (region components, a slot's one
+ * component or its list, and every slot position nested under a component,
+ * retired spellings included), with the same paths and the same copy-on-write
+ * contract. A component removed takes its sub-tree with it, unvisited. A slot
+ * that held the removed component alone is dropped from `slots`; a list keeps
+ * its other members in order. `shouldRemove` is called once per visited
+ * component, so a caller emits its notice there.
+ *
+ * Written for the rows of the retired action type (ADR-0160 D7, `action-type-ask-ai-removed`), where the
+ * smallest part that leaves the page parseable is the row itself.
+ */
+export function removePageComponents(
+  stack: Dict,
+  shouldRemove: (component: Dict, path: string) => boolean,
+): Dict {
+  return mapPages(stack, (page, pagePath) => {
+    let nextPage = page;
+    const regions = page.regions;
+    if (Array.isArray(regions)) {
+      let regionsChanged = false;
+      const nextRegions = regions.map((region, ri) => {
+        if (!isDict(region)) return region;
+        const components = region.components;
+        if (!Array.isArray(components)) return region;
+        const next = removeFromComponentList(components, `${pagePath}.regions[${ri}].components`, shouldRemove, 0);
+        if (next === components) return region;
+        regionsChanged = true;
+        return { ...region, components: next };
+      });
+      if (regionsChanged) nextPage = { ...nextPage, regions: nextRegions };
+    }
+    const slots = page.slots;
+    if (isDict(slots)) {
+      let slotsChanged = false;
+      const nextSlots: Dict = { ...slots };
+      for (const [slot, value] of Object.entries(slots)) {
+        const slotPath = `${pagePath}.slots.${slot}`;
+        if (Array.isArray(value)) {
+          const next = removeFromComponentList(value, slotPath, shouldRemove, 0);
+          if (next === value) continue;
+          nextSlots[slot] = next;
+          slotsChanged = true;
+        } else if (isDict(value)) {
+          if (shouldRemove(value, slotPath)) {
+            delete nextSlots[slot];
+            slotsChanged = true;
+            continue;
+          }
+          const kept = removeInComponentTree(value, slotPath, shouldRemove, 0);
+          if (kept === value) continue;
+          nextSlots[slot] = kept;
+          slotsChanged = true;
+        }
+      }
+      if (slotsChanged) nextPage = { ...nextPage, slots: nextSlots };
+    }
+    return nextPage;
+  });
+}
+
+/**
  * Immutably map every datasource in `stack.datasources[]`.
  *
  * `mapper` receives each datasource dict and its path (`datasources[i]`) and

@@ -58,7 +58,7 @@ after an operation — see [Before vs After](#before-vs-after-hooks).
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
 | **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes; no per-hook opt-out. Exits: a caller's open transaction decides; a hooked object off the default datasource, or a default driver with no transactions (Turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code (`registerHook`) opens none. A standalone MongoDB refuses every write of such a transaction (501 `NOT_IMPLEMENTED`); a single-node replica set is enough. On PostgreSQL and a MongoDB replica set a failed `ctx.api` statement refuses the outer write even when caught, logged (`onError: 'log'`) or retried (`25P02` / `251`); SQLite lets it through | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
-| **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
+| **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default**; set `onError: 'log'` on side-effect hooks |
 
 ---
 
@@ -145,8 +145,7 @@ in neither). So:
   `record.done == true` works on an update that only sets `status`.
 - `record` describes the record's **state**, not the diff. `record.done == true`
   fires on every update of an already-done record, not only on the update that
-  set it. **For the transition, compare against `previous`**:
-  `previous.done != true && record.done == true`. `previous` is the stored
+  set it. **For the transition, compare against `previous`**, as above. `previous` is the stored
   pre-write row, made total over the same declared fields, and it is the same
   binding a validation predicate reads.
 - **`previous` is `null` on insert** (`beforeInsert` / `afterInsert`), so
@@ -166,8 +165,7 @@ in neither). So:
   object) — the engine refuses the batch whole, before any write, when two rows'
   key sets differ (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`, status 400; ADR-0058
   Amendment II.3).
-- **`after*` hooks dispatch once per matched row too** (`record` is that row's
-  real state, not the bare payload), so a transition condition on `afterUpdate` /
+- **`after*` hooks dispatch once per matched row too**, so a transition condition on `afterUpdate` /
   `afterDelete` means the same whether the write carried an id or a predicate.
 - **Guard optional values with `!= null`, never with `has(...)`.** A declared
   field holding `null` is *present*, so `has(record.spent)` is uniformly true and
@@ -343,11 +341,7 @@ The body's VM is **not** Node:
 On `afterUpdate`, both `ctx.result` and `ctx.input` carry only the fields this
 PATCH touched (`ctx.result` adds `id`). A field you did **not** write — a lookup FK, a status
 you want to branch on — is **absent**, not stale. To read the whole record,
-re-query it:
-
-```js
-const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
-```
+re-query it by `ctx.result.id`, as the example below does.
 
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
 
@@ -367,8 +361,7 @@ write from a system-context automation.
 
 ### Copy-paste example — afterUpdate + cross-object update + re-query + capabilities
 
-When a `candidate` is marked `hired`, look up its `position` (a lookup FK that
-is **not** in the partial patch) and flip that position to `filled`:
+When a `candidate` is marked `hired`, look up its `position` and flip that position to `filled`:
 
 <!-- os:check -->
 ```typescript
@@ -404,10 +397,9 @@ export default fillPositionOnHire;
   wrapped message names the hook; the usual causes are a missing capability, a
   `FORBIDDEN` cross-object write (gotcha 2), or a `ReferenceError` from a free
   identifier or an unavailable global (e.g. `console`).
-- **`ctx.log.*` produced no output** — two independent causes: (1) without the
-  `log` capability the call **throws**; (2) **with** the
-  capability it emits only when the runtime wired a logger into the hook context —
-  otherwise it is a **silent no-op**. Treat `ctx.log` as best-effort diagnostics,
+- **`ctx.log.*` produced no output** — without the `log` capability the call
+  **throws**; **with** it, it emits only when the runtime wired a logger into the
+  hook context — otherwise it is a **silent no-op**. Treat `ctx.log` as best-effort diagnostics,
   never proof a hook ran; to observe an effect, assert on the data it writes.
 
 ---
@@ -723,14 +715,15 @@ export default defineStack({
 });
 ```
 
-**2. Programmatic — `ctx.ql.registerHook()`, the plugin escape hatch.** Pass
+**2. Programmatic — `ctx.ql.registerHook()`, the `onEnable` escape hatch.** Pass
 `packageId` so the hook can be unregistered cleanly. ⚠️ Hooks bound this way get
 **none** of the declarative `condition` / `retryPolicy` / `timeoutMs` / `onError` /
 `async` semantics — those apply only through `defineStack({ hooks })` or
 `ql.bindHooks([...])`.
 
 ```typescript
-// in your plugin's onEnable()
+// in the app's `onEnable` export (objectstack.config.ts). A kernel plugin has no
+// `ctx.ql`: from `start(ctx)`, `ctx.getService('objectql').registerHook(…)`.
 ctx.ql.registerHook('beforeInsert', async (hookCtx) => { /* ... */ },
   { object: 'account', priority: 100, packageId: 'my-plugin' });
 ```
@@ -812,8 +805,10 @@ export default defineHook({
 - For several reasons throw `reasons: [{ reason: 'on_loan', params: { due } }, …]`, not
   `reason`: one translated line each, filled from its own `params`. `userMessage` joins
   them by newlines and ends with the entry's `message`, filled from the throw's
-  top-level `params` (else its holes are empty); the HTTP doors answer
-  `details.refusals: [{ reason, message }]`, absent for a single `reason`.
+  `params` (else holes are empty). `@objectstack/rest`'s `/data` routes cut
+  `userMessage` (a single sentence's too) at 500 characters, so a long list loses its
+  closing line. They and `/actions` answer `details.refusals: [{ reason, message }]`
+  uncut (MCP tools relay them as text), absent for a single `reason`.
 - Translated via `hooks.<hook>.refusals.<CODE>.message` (or
   `….<CODE>.reasons.<REASON>.message`); the thrown text and `status` are unused.
 - An undeclared code (or none), or a reason missing from a code's `reasons` (a listed

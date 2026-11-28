@@ -70,7 +70,11 @@
  *     plugin node types whose contracts the spec declares, `approval` and
  *     `approval_revise`) cannot be named by `allowedFlowNodeTypes`, so it is
  *     governed by `allowCode`, and its refusal names that rule. The approval
- *     pair IS in the vocabulary, so the list judges it.
+ *     pair IS in the vocabulary, so the list judges it, and the list alone:
+ *     the open profile a self-hosted runtime serves lists the whole
+ *     vocabulary on every kernel and states no plugin composition, so against
+ *     such a target this reader does not check that the approvals plugin runs
+ *     there (the profile's `allowedFlowNodeTypes` reader rules).
  *  3. A `script` node calls a registered function, so under `allowCode: false`
  *     it is refused by `allowCode` alone — never by both rules.
  *

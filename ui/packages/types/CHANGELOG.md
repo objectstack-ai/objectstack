@@ -128,9 +128,9 @@
   |:--|:--|
   | `<ObjectGrid cellSelection={false}>` to keep click-to-edit and the "Save All" bar | drop the prop; an editable grid is select-first, and a read-only one opens a record on a click |
   | `<ObjectGrid onBatchSave={…}>` | pass `onRowSave(rowIndex, changes, row)` to own the write record by record, or pass nothing and let the grid save through its own `dataSource.update` |
-  | `data-table` schema `onBatchSave: (changes) => …` | `onRowSave` inside a `GridCellSelection` host, or render `object-grid` |
+  | `data-table` schema `onBatchSave: (changes) => …` | `onRowSave` inside a `GridCellSelectionProvider` host, or render `object-grid` |
   | `data-table` schema `singleClickEdit` | delete the key; a click selects the cell and double-click, Enter, F2 or typing opens its editor |
-  | an editable `data-table` with no `GridCellSelection` host or no `onRowSave` | mount `GridCellSelection` and pass `onRowSave`, or render `object-grid`; until then it renders read-only and warns |
+  | an editable `data-table` with no `GridCellSelectionProvider` host or no `onRowSave` | mount `GridCellSelectionProvider` and pass `onRowSave`, or render `object-grid`; until then it renders read-only and warns |
   
   The one-line fix: delete `cellSelection={false}`, `onBatchSave` and `singleClickEdit` wherever a host writes them, and pass `onRowSave` where a batch handler did the write. Passing `cellSelection={false}`, `onBatchSave` or `singleClickEdit` after upgrade fails `tsc` (`cellSelection` accepts only `true`, `onBatchSave` is `never`, `singleClickEdit` is no longer declared), and the `data-table` mirror refuses `onBatchSave` by name as retired. None of these is authorable metadata, so `os migrate meta` has nothing to rewrite; its D3 entry `data-table-staged-edit-retired` names what the upgrade still owes: host code that relied on one transaction per Save All, and help text and tests that describe the old gestures.
   

@@ -695,7 +695,10 @@ async function readEffectiveFormItem(
     const generic: any = await host.readMetaItemFace(request, 'served');
     // ONE effective read of the name, unscoped: the list scoped to a package
     // is the same resolution filtered to that address (`readEffectiveFormList`),
-    // so the address's answer and every address's are both read off it.
+    // so the address's answer and every address's are both read off it. It
+    // reads the `view` list once and each type's stored rows once (its request
+    // scope, `formRequestScope`); the generic read above reads only the rows
+    // of the name.
     const everywhere = await readEffectiveForms(host, { type: 'form', names: [request.name] }, 'served');
     const pkgOf = (item: unknown): unknown => (item as { _packageId?: unknown } | null)?._packageId;
     const listed = request.packageId === undefined
@@ -1081,13 +1084,19 @@ export async function readMetaItem(host: Pick<ProtocolHost, 'artifactLockLayerAt
                 && declinesPackageLessRowAt(host, request.type, request.name, draftRec as ServedOverrideRow)) {
                 draftRec = undefined;
             }
-            if (draftRec) {
-                const draftItem = host.convertStoredItem(
+            const draftItem = draftRec
+                ? host.convertStoredItem(
                     String(draftRec.type ?? request.type),
                     typeof draftRec.metadata === 'string'
                         ? JSON.parse(draftRec.metadata)
                         : draftRec.metadata,
-                ) as any;
+                ) as any
+                : undefined;
+            // ADR-0160 D7: the stored seam yields no item of a draft row of the
+            // retired action type, so there is no draft to preview and the
+            // active read below answers, as the list read's draft arm does.
+            if (draftItem === undefined) draftRec = undefined;
+            if (draftRec) {
                 let previewed = draftItem;
                 if (previewed && typeof previewed === 'object') {
                     const recPkg = (draftRec as { package_id?: string | null }).package_id ?? undefined;

@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { formTypeWriteRefusal } from './protocol-form-writes.js';
-import { readUnreadableFormBodies } from './protocol-form-reads.js';
+import { readInFormRequest, readUnreadableFormBodies } from './protocol-form-reads.js';
 import type {
     DataProtocol,
     FlowRegistration,
@@ -3540,6 +3540,11 @@ export class ObjectStackProtocolImplementation implements
         return readUnreadableFormBodies(protocolHost(this));
     }
 
+    /** Contract: {@link readInFormRequest} [ADR-0159 D5, D6]; the doors' five reads as one request reading, feature-detected likewise. */
+    async readFormRequest<T>(read: () => Promise<T>): Promise<T> {
+        return readInFormRequest(read);
+    }
+
     /**
      * [#28411, ADR-0146 D8 item 4] The served overrides of a base package's
      * items: each ACTIVE row of its paired `<base>.custom` package that
@@ -3628,30 +3633,25 @@ export class ObjectStackProtocolImplementation implements
     }
 
     /**
-     * The one body behind {@link getMetaItems},
-     * {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
-     * `audience` decides ONLY whether the serving decorations are applied at
-     * the very end; every source, merge and filter above that line is shared,
-     * so the list the engine executes and the list a caller is served cannot
+     * The one body behind {@link getMetaItems}, {@link getMetaItemsForExecution} and {@link getMetaItemsPerPackage}.
+     * `audience` decides ONLY whether the serving decorations are applied at the very end; every source, merge and
+     * filter above that line is shared, so the list the engine executes and the list a caller is served cannot
      * disagree about which items exist.
      *
-     * [#28409] `layer` decides ONLY whether the two steps of the one
-     * effective read are taken (ADR-0146 D8): a package's declared override
-     * served over its slot ({@link servedOverlayRowCandidates}'
-     * `servedOverride`), and, naming no package, a name exactly one code
-     * package ships listed once, under that package
-     * ({@link soleShippingPackageOf}). `'effective'` takes both; the
-     * per-package layer takes neither.
-     *
-     * `request` arrives already folded by the calling face (#4432).
+     * [#28409] `layer` decides ONLY whether the two steps of the one effective read are taken (ADR-0146 D8): a
+     * package's declared override served over its slot ({@link servedOverlayRowCandidates}' `servedOverride`), and,
+     * naming no package, a name exactly one code package ships listed once, under that package
+     * ({@link soleShippingPackageOf}). `'effective'` takes both; the per-package layer takes neither.
+     * `request` arrives already folded by the calling face (#4432). [ADR-0159 D5] `rows`, when given, is one
+     * request's stored-row reader (`formRequestScope`); omitted, {@link readActiveOverlayRows}.
      */
     private async readFlattenedMetaItems(
         request: { type: string; packageId?: string; names?: readonly string[]; previewDrafts?: boolean },
         audience: 'served' | 'execution',
-        layer: 'effective' | 'per-package' = 'effective',
+        layer: 'effective' | 'per-package' = 'effective', rows?: (request: { type: string; packageId?: string }) => Promise<any[]>,
     ) {
         // [#25467 E1] The body moved to `protocol-meta-list-reads.ts`; it reaches this class through `protocol-host.ts`.
-        return readFlattenedMetaItems(protocolHost(this), request, audience, layer);
+        return readFlattenedMetaItems(protocolHost(this), request, audience, layer, rows);
     }
 
     /**

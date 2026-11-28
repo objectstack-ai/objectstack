@@ -36,6 +36,10 @@ own summary, shortened, with the pull request that landed it; the changeset,
 and the `CHANGELOG.md` entry the version pass writes from it, carries the
 whole before and after. The 87 pull requests titled with `!` since 18.6.0 are
 all in this list.
+One entry landed after that measurement and is listed with them: the grid's
+staged edit retirement,
+[#37437](https://github.com/objectstack-ai/objectstack/pull/37437), under
+[自动迁移](#migrated-for-you).
 
 ### What makes it a major
 
@@ -297,6 +301,13 @@ not replay and `--from 17` does.
 - `object-grid`'s `singleClickEdit` is retired; every editable grid selects a
   cell first and saves each cell on its own.
   [#36357](https://github.com/objectstack-ai/objectstack/pull/36357)
+- The grid's staged edit model is retired with its host interface
+  ([#35827](https://github.com/objectstack-ai/objectstack/issues/35827)): an
+  editable grid has no "Save All" bar and saves each committed cell on its
+  own. Drop `cellSelection={false}`, `onBatchSave` and `data-table`'s
+  `singleClickEdit`, and pass `onRowSave` where a batch handler did the
+  write; `data-table-staged-edit-retired` lists what host code still owes.
+  [#37437](https://github.com/objectstack-ai/objectstack/pull/37437)
 - `columnState` is retired from the stored `view` row.
   [#36435](https://github.com/objectstack-ai/objectstack/pull/36435)
 - The boolean arm of a relationship field's `inlineEdit` is retired.

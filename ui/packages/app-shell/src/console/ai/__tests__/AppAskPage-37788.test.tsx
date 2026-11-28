@@ -26,7 +26,7 @@ import { AI_CHAT_COMPONENT_REF } from '@objectstack/spec/ui';
 
 const PKG = 'com.acme.policy';
 
-let surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+let surface = { enabled: true, isLoading: false, buildServed: true };
 let agents: Array<{ name: string; label?: string }> = [{ name: 'ask' }, { name: 'build' }];
 let apps: unknown[] = [];
 
@@ -111,7 +111,7 @@ const creates = () =>
 
 beforeEach(() => {
   localStorage.clear();
-  surface = { enabled: true, isLoading: false, buildServed: true, focusServed: false };
+  surface = { enabled: true, isLoading: false, buildServed: true };
   agents = [{ name: 'ask' }, { name: 'build' }];
   apps = [appWith({ title: 'Ask about our policies', subtitle: 'Rules, forms and deadlines.', placeholder: 'Type a question', suggestions: ['How do I apply?', 'What is the deadline?'] })];
   fetchMock = vi.fn();
@@ -225,7 +225,7 @@ describe('AppAskPage (objectstack#37788)', () => {
   });
 
   it('renders the unavailable state where this person has no AI', () => {
-    surface = { enabled: false, isLoading: false, buildServed: false, focusServed: false };
+    surface = { enabled: false, isLoading: false, buildServed: false };
     agents = [];
     mount();
     expect(screen.getByTestId('ai-unavailable')).toBeInTheDocument();
@@ -295,5 +295,98 @@ describe('AppAskPage recent conversations (objectstack#37790)', () => {
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('?c=p1'));
     await waitFor(() => expect(screen.getByTestId('chat-pane')).toHaveAttribute('data-conversation', 'p1'));
     expect(screen.queryByTestId('app-ask-home')).not.toBeInTheDocument();
+  });
+});
+
+describe('AppAskPage review follow-ups (objectstack#37908)', () => {
+  const conversationGets = (id: string) =>
+    fetchMock.mock.calls.filter((c) => String(c[0]).endsWith(`/conversations/${id}`) && !(c[1] as RequestInit | undefined)?.method);
+
+  it('a check that fails keeps ?c= and offers a retry, which opens the conversation', async () => {
+    let fail = true;
+    fetchMock.mockImplementation(async (input: unknown) => {
+      if (String(input).endsWith('/conversations/conv-9') && fail) return jsonResponse({ error: 'unavailable' }, 503);
+      return jsonResponse({ id: 'conv-9', messages: [{ id: 'm1', role: 'user', content: 'hi' }], metadata: { activePackageId: PKG } });
+    });
+    mount('/apps/brightrule/component/ai/chat?c=conv-9');
+    expect(await screen.findByTestId('app-ask-page-restore-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('?c=conv-9');
+    expect(screen.queryByTestId('app-ask-home')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-pane')).not.toBeInTheDocument();
+    fail = false;
+    fireEvent.click(screen.getByTestId('app-ask-page-restore-retry'));
+    await waitFor(() => expect(screen.getByTestId('chat-pane')).toHaveAttribute('data-conversation', 'conv-9'));
+  });
+
+  it('a check the network drops is a failure too, never another app\'s conversation', async () => {
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError('Failed to fetch');
+    });
+    mount('/apps/brightrule/component/ai/chat?c=conv-9');
+    expect(await screen.findByTestId('app-ask-page-restore-failed')).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('?c=conv-9');
+    expect(conversationGets('conv-9')).toHaveLength(1);
+  });
+
+  it('opening this app\'s conversation from ?c= reads its history once: the check\'s read hydrates the thread', async () => {
+    fetchMock.mockImplementation(async () =>
+      jsonResponse({ id: 'conv-9', messages: [{ id: 'm1', role: 'user', content: 'hi' }], metadata: { activePackageId: PKG } }),
+    );
+    mount('/apps/brightrule/component/ai/chat?c=conv-9');
+    await waitFor(() => expect(screen.getByTestId('chat-pane')).toHaveAttribute('data-conversation', 'conv-9'));
+    await act(async () => {});
+    expect(conversationGets('conv-9')).toHaveLength(1);
+  });
+
+  it('an app with no package says it cannot keep conversations, and offers no question box', async () => {
+    apps = [{ ...appWith({ suggestions: ['How do I apply?'] }), _packageId: undefined }];
+    fetchMock.mockImplementation(async () => jsonResponse({ conversations: [], hasMore: false }));
+    mount();
+    expect(screen.getByTestId('app-ask-page-no-package')).toHaveTextContent("This app can't keep conversations here");
+    expect(screen.queryByTestId('app-ask-input')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'How do I apply?' })).not.toBeInTheDocument();
+    await act(async () => {});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a question the entry declares twice draws twice, with no key warning', () => {
+    apps = [appWith({ suggestions: ['How do I apply?', 'How do I apply?'] })];
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      mount();
+      expect(screen.getAllByRole('button', { name: 'How do I apply?' })).toHaveLength(2);
+      expect(errors.mock.calls.map((c) => String(c[0])).filter((m) => /same key/i.test(m))).toEqual([]);
+    } finally {
+      errors.mockRestore();
+    }
+  });
+});
+
+describe('AppAskPage recent conversations read previews for listed rows only (objectstack#37959)', () => {
+  it('the home state reads no detail beyond the rows it lists', async () => {
+    const untitled = (id: string, updatedAt: string, metadata?: unknown) => ({
+      id,
+      createdAt: updatedAt,
+      updatedAt,
+      ...(metadata === undefined ? {} : { metadata }),
+    });
+    const rows = [
+      ...[1, 2, 3, 4, 5, 6, 7].map((n) => untitled(`p${n}`, `2026-11-1${n}T10:00:00Z`, { activePackageId: PKG })),
+      ...[1, 2, 3, 4, 5, 6].map((n) => untitled(`o${n}`, `2026-11-2${n}T10:00:00Z`, { activePackageId: 'com.other' })),
+      ...[1, 2, 3].map((n) => untitled(`d${n}`, `2026-11-0${n}T10:00:00Z`)),
+    ];
+    fetchMock.mockImplementation(async (input: unknown) => {
+      const url = String(input);
+      if (url.includes('/conversations?limit=')) return jsonResponse({ conversations: rows, hasMore: false });
+      const id = decodeURIComponent(url.split('/conversations/')[1] ?? '');
+      return jsonResponse({ ...rows.find((r) => r.id === id), messages: [{ role: 'user', content: `Asked in ${id}` }] });
+    });
+    mount();
+    await waitFor(() => expect(screen.getAllByTestId('empty-conversation-recent-item')[0]).toHaveTextContent('Asked in p7'));
+    const details = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((url) => url.includes('/conversations/'))
+      .map((url) => decodeURIComponent(url.split('/conversations/')[1]));
+    expect(details.sort()).toEqual(['p3', 'p4', 'p5', 'p6', 'p7']);
   });
 });
