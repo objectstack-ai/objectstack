@@ -717,8 +717,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const where: string[] = [];
     // Whether the record index can serve the exact scan: a scope of record terms alone.
     let recordScope = false;
-    // The ids of the scope's record terms, each once.
-    const recordIds = new Set<string>();
+    // The ids of the scope's record terms, term by term.
+    const recordTerms: string[][] = [];
     if (opts.organizationIds !== undefined) {
       args.push(JSON.stringify(opts.organizationIds));
       where.push(`organization_id IN (SELECT value FROM json_each(?${args.length}))`);
@@ -738,7 +738,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         const ids = `(SELECT value FROM json_each(?${args.length}))`;
         if (term.kind === 'record') {
           scopeTerms.push(`source_record_id IN ${ids}`);
-          for (const id of term.ids) recordIds.add(id);
+          recordTerms.push(term.ids);
           continue;
         }
         parentTerm = true;
@@ -840,7 +840,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         // A scope of record terms alone that the first pass is not expected
         // to answer goes straight to the exact scan, which the record index
         // serves from the rows in scope.
-        if (recordScope && (await this.recordScopeUnderCut(client, tableName, recordIds))) return client.execute(statement());
+        if (recordScope && (await this.recordScopeUnderCut(client, tableName, recordTerms))) return client.execute(statement());
         // A failed approximate statement (its index gone under this process's
         // memory of it) forgets that memory and is answered by the exact scan.
         const approximate = (candidates: number) =>
@@ -1270,7 +1270,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   }
 
   /**
-   * Whether a scope of record terms alone, of the distinct `recordIds`, keeps
+   * Whether a scope of record terms alone, of the ids `terms` hold, keeps
    * fewer of the passages of `table` than the first approximate pass needs to
    * be expected to keep {@link VECTOR_RECORD_SCOPE_POOL} × the floor in scope:
    * a share under that many times {@link VECTOR_MIN_POOL} /
@@ -1278,16 +1278,26 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * at most {@link VECTOR_SCOPE_SAMPLE} of the ids, spread evenly over them,
    * counted through the record index (exactly, for a scope of no more ids),
    * so a record of many passages counts as many and an id of no passage as
-   * none. The organization and metadata filters are not counted: the exact
-   * scan reads every row the record index finds for the scope. Runs inside
-   * the client's queue.
+   * none (an id two terms name is one id to the count, and weighs twice in
+   * the estimate of a sampled scope). The organization and metadata filters
+   * are not counted: the exact scan reads every row the record index finds
+   * for the scope. Runs inside the client's queue.
    */
-  private async recordScopeUnderCut(db: Pick<Client, 'execute'>, table: string, recordIds: ReadonlySet<string>): Promise<boolean> {
-    const ids = [...recordIds];
-    const sample =
-      ids.length <= VECTOR_SCOPE_SAMPLE
-        ? ids
-        : Array.from({ length: VECTOR_SCOPE_SAMPLE }, (_, i) => ids[Math.floor((i * ids.length) / VECTOR_SCOPE_SAMPLE)]);
+  private async recordScopeUnderCut(db: Pick<Client, 'execute'>, table: string, terms: readonly (readonly string[])[]): Promise<boolean> {
+    const total = terms.reduce((sum, ids) => sum + ids.length, 0);
+    const sample: string[] = [];
+    if (total <= VECTOR_SCOPE_SAMPLE) {
+      for (const ids of terms) sample.push(...ids);
+    } else {
+      // The ids at evenly spread positions of the terms taken one after another.
+      let term = 0;
+      let before = 0;
+      for (let i = 0; i < VECTOR_SCOPE_SAMPLE; i++) {
+        const at = Math.floor((i * total) / VECTOR_SCOPE_SAMPLE);
+        while (at >= before + terms[term].length) before += terms[term++].length;
+        sample.push(terms[term][at - before]);
+      }
+    }
     const t = quoted(table);
     const counted = await db.execute({
       sql: `SELECT (SELECT count(*) FROM ${t}) AS n,
@@ -1295,7 +1305,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       args: [JSON.stringify(sample)],
     });
     const n = Number(counted.rows[0].n);
-    const inScope = (Number(counted.rows[0].k) * ids.length) / Math.max(1, sample.length);
+    const inScope = (Number(counted.rows[0].k) * total) / Math.max(1, sample.length);
     return inScope * this.vectorIndexOverfetch < VECTOR_RECORD_SCOPE_POOL * VECTOR_MIN_POOL * n;
   }
 

@@ -1401,13 +1401,18 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect((await search([{ kind: 'record', ids: records(0, 20) }])).approximate).toBe(1);
       // Two terms of 40 records each, one id in both: 80 passages, under the cut.
       expect(await search([{ kind: 'record', ids: records(100, 140) }, { kind: 'record', ids: records(139, 180) }])).toEqual({ approximate: 0, exact: 1 });
+      // 340 ids, of which only the last 40 name a record of this source: estimated from 256 of them,
+      // spread over the 340, as about 40 passages, so the exact scan alone.
+      const absent = Array.from({ length: 300 }, (_, i) => `gone_${i}`);
+      expect(await search([{ kind: 'record', ids: [...absent, ...records(200, 240)] }])).toEqual({ approximate: 0, exact: 1 });
       // The narrow records beside a parent (metadata) term: the record index does not serve that scan, so
-      // the approximate passes run as before (a thin first pool, then the wider pass, which answers).
-      expect(await search([{ kind: 'record', ids: records(190, 240) }, { kind: 'metadata', field: 'status', ids: ['none'] }])).toEqual({ approximate: 2, exact: 0 });
-      // The count of the passages in scope binds the scope's ids alone, each once.
+      // the approximate pass runs as before, here answering from its first pool.
+      expect(await search([{ kind: 'record', ids: records(190, 240) }, { kind: 'metadata', field: 'status', ids: ['none'] }])).toEqual({ approximate: 1, exact: 0 });
+      // The count of the passages in scope binds the scope's ids alone, term by term.
       const counts = sql.flatMap((q, i) => (!q.includes('vec AS (') && q.includes('source_record_id IN (SELECT value FROM json_each(?1))') ? [args[i]] : []));
-      expect(counts.map((bound) => bound.length)).toEqual([1, 1, 1, 1]);
-      expect(JSON.parse(String(counts[3][0]))).toEqual(records(100, 180));
+      expect(counts.map((bound) => bound.length)).toEqual([1, 1, 1, 1, 1]);
+      expect(JSON.parse(String(counts[3][0]))).toEqual([...records(100, 140), ...records(139, 180)]);
+      expect(JSON.parse(String(counts[4][0]))).toHaveLength(256);
     }, 30_000);
 
     it('keeps the index in step with every write and removal; a generation swap and dropSource drop it whole', async () => {
