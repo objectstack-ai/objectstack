@@ -549,6 +549,26 @@ describe('[#25083] the password doors on a cloud-managed environment', () => {
     expect(s.credentialOf(s.ids.member)?.password).not.toBe(before);
   }, 120_000);
 
+  it('admin update-user takes no password: data.password is refused and no credential is written or moved', async () => {
+    // better-auth's own admin route refuses the key on every deployment
+    // (`PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER`); pinned here so a vendor
+    // upgrade that starts accepting it cannot open a password door on a
+    // managed runtime unnoticed.
+    const s = await stage();
+    setManaged(true);
+    const before = s.credentialOf(s.ids.member)?.password;
+    expect(before).toBeDefined();
+    for (const userId of [s.ids.member, s.ids.idp]) {
+      const v = await verdict(
+        await s.fire('/admin/update-user', { userId, data: { password: NEW_PASSWORD } }, s.bearers.admin),
+      );
+      expect(v.status, v.text).toBe(400);
+      expect(v.code, v.text).toBe('PASSWORD_CANNOT_BE_UPDATED_VIA_UPDATE_USER');
+    }
+    expect(s.credentialOf(s.ids.member)?.password).toBe(before);
+    expect(s.credentialOf(s.ids.idp)).toBeUndefined();
+  }, 120_000);
+
   it('set-initial-password refuses a caller without platform-admin standing with 409 and writes no credential', async () => {
     const s = await stage();
     setManaged(true);

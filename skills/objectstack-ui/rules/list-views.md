@@ -38,8 +38,7 @@ export const CaseViews = defineView({
 
 ### Data Source (`data`)
 
-Bare-key blocks in this file are fragments, so `check:skill-examples` skips
-them. Every view connects to data via one of two providers:
+Every view connects to data via one of two providers:
 
 ```typescript
 data: { provider: 'object', object: 'support_case' }
@@ -61,11 +60,7 @@ columns: [
   { field: 'status',  width: 120, align: 'center' },
   { field: 'priority' },
   { field: 'owner_id' },
-  {
-    field: 'due_date',
-    summary: 'min',       // plain enum value, not an object
-    sortable: true,
-  },
+  { field: 'due_date', sortable: true, summary: 'min' },  // plain enum value
 ]
 ```
 
@@ -126,7 +121,7 @@ it read-only.
 ### End-User Quick Filters (`userFilters`, ADR-0047)
 
 `filter` is the always-on base criteria. For the *end-user-facing* filter bar
-(Airtable "User filters") use `userFilters` — dropdowns, filter tabs, or
+use `userFilters` — dropdowns, filter tabs, or
 toggles the user combines at runtime:
 
 ```typescript
@@ -138,7 +133,7 @@ userFilters: {
   ],
 },
 
-// Runtime visualization whitelist (Airtable "Appearance → Visualizations"):
+// Runtime visualization whitelist:
 appearance: { allowedVisualizations: ['grid', 'kanban', 'gallery'] },  // one entry = locked, no switcher
 ```
 
@@ -275,6 +270,7 @@ const board: ListView = {
     showFieldLabels: false,                // optional, default true: cards name each field
     hideEmptyFields: false,                // optional, default true: cards drop an empty field
     columns: ['title', 'owner_id', 'priority'],   // fields shown on each card
+    cardFooter: { comments: true, attachments: true },  // optional foot counts
   },
   sort: [{ field: 'priority', order: 'desc' }],
 };
@@ -289,6 +285,8 @@ const board: ListView = {
 > `none`, `count`, or `sum` / `avg` / `min` / `max` of a `field`, computed by the
 > query over every record of the lane, lanes over a lookup field included. Omit
 > `summary` to keep the older `summarizeField`'s sum, or no statistic without it.
+> `cardFooter` takes those two members only: `comments` counts the record's open
+> top-level threads, `attachments` its files (shown only with `enable.files` on the object).
 
 ### Adding a board, calendar, gallery or gantt beside the list
 
@@ -333,10 +331,10 @@ const timeline: ListView = {
   gantt: {
     startDateField: 'start_date',
     endDateField: 'end_date',
-    titleField: 'name',                         // bar label
-    progressField: 'progress',                  // 0–100 fill
-    dependenciesField: 'depends_on',            // FS dependency arrows
-    parentField: 'parent',                      // builds the summary-bar tree
+    titleField: 'name',  // bar label
+    progressField: 'progress',  // 0–100 fill
+    dependenciesField: 'depends_on',  // FS dependency arrows
+    parentField: 'parent',  // builds the summary-bar tree
   },
 };
 ```
