@@ -147,6 +147,7 @@ import {
 import { builtinAggregateLabels, useSafeFieldLabel, useSafeTranslate, useDisplayLocale, useObjectTranslation, pickLocalized } from '@object-ui/i18n';
 import { useDataInvalidation, classifyLoadError } from '@object-ui/react';
 import { mergeFilters } from './mergeFilters';
+import { fillEmptyOptionGroups } from './emptyOptionGroups';
 import { measureDrillScope, sharedMeasureDrillScope, scopeDrillFilter, type MeasureDrillScope } from './measureDrillScope';
 import { useDatasetDimensionMeta, type DatasetDimensionMeta } from './useDatasetDimensionLabels';
 import {
@@ -1757,8 +1758,17 @@ function DatasetReportChart({
   // component). Mirrors `DatasetWidget`'s own call exactly. (Since
   // objectui#12243 the tables above read the same hook, for the declared order.)
   const dimensionMeta = useDatasetDimensionMeta(state.object, state.dimensionFields, chartDimensions);
-  const { categoryColors, dimensionLabels, categoryOrder, seriesOrder } = React.useMemo(() => {
-    if (!dimensionMeta) return { categoryColors: null, dimensionLabels: null, categoryOrder: null, seriesOrder: null };
+  const { categoryColors, dimensionLabels, categoryOrder, seriesOrder, xOptions, xLocalizedOptions } = React.useMemo(() => {
+    if (!dimensionMeta) {
+      return {
+        categoryColors: null,
+        dimensionLabels: null,
+        categoryOrder: null,
+        seriesOrder: null,
+        xOptions: undefined,
+        xLocalizedOptions: undefined,
+      };
+    }
     const { metaByPath, relabel } = dimensionMeta;
     // Colours and declared order read `option.label`, so they are fed the
     // LOCALIZED options — the same "translate the options, then render them"
@@ -1784,6 +1794,10 @@ function DatasetReportChart({
       dimensionLabels: deriveDimensionLabelMaps(metaByPath, relabel, fieldOptionLabel),
       categoryOrder: buildCategoryOrder(firstDimOptions),
       seriesOrder: buildCategoryOrder(secondDimOptions),
+      // The x-axis field's declared options, authored and translated, for the
+      // `showEmptyGroups` fill (objectstack#36722).
+      xOptions: firstDimMeta?.options as unknown,
+      xLocalizedOptions: firstDimOptions,
     };
   }, [dimensionMeta, fieldOptionLabel]);
 
@@ -1954,8 +1968,30 @@ function DatasetReportChart({
   // undeclared values next in the dataset's order, the empty bucket last. A
   // report whose `order` reaches this chart's selection keeps the server's
   // order. No drill reads these rows by index, so the reordered copy is safe.
-  const displayRows = relabelDimensions(state.rows, dimensionLabels);
-  const categoryRank = scopeOrder(order, queryDimensions, queryMeasures) ? null : buildCategoryRank(categoryOrder);
+  //
+  // objectstack#36722 — `chart.showEmptyGroups`: the declared options of the
+  // x-axis field that no row carries are added BEFORE the relabelling, carrying
+  // their stored value as an unresolved server row would, so they take the
+  // label, the declared position and the option colour every real group takes.
+  // Their measure cells read the executor's empty-group value for the column's
+  // aggregate (`fillEmptyOptionGroups`). Not filled under an order that reaches
+  // this selection: the server placed every row, and an added group has no
+  // position in an order it was never part of. A field with no declared options
+  // has no known set of values and is never filled; a date axis needs no fill
+  // here, the executor already answers every bucket of the report's period.
+  const chartOrder = scopeOrder(order, queryDimensions, queryMeasures);
+  const chartRows = chart.showEmptyGroups === true && !chartOrder
+    ? fillEmptyOptionGroups(state.rows, {
+      xAxis,
+      ...(seriesBy ? { seriesBy } : {}),
+      measures: compareTo && !seriesBy ? [yAxis, compareKey] : [yAxis],
+      aggregate: measureField(yAxis)?.aggregate,
+      options: xOptions,
+      localizedOptions: xLocalizedOptions,
+    })
+    : state.rows;
+  const displayRows = relabelDimensions(chartRows, dimensionLabels);
+  const categoryRank = chartOrder ? null : buildCategoryRank(categoryOrder);
   const plotLayout = arrangeByDeclaredOptions(
     displayRows,
     [xAxis],
@@ -2025,6 +2061,8 @@ function DatasetReportChart({
       });
       if (at < 0) return;
       const index = plotLayout ? plotLayout[at] : at;
+      // A group `showEmptyGroups` added counted no record: it opens no list.
+      if (index >= state.rows.length) return;
       const groupKey: Record<string, unknown> = {};
       for (const dim of queryDimensions) groupKey[dim] = displayRows[index]?.[dim];
       emitBucketDrill({
