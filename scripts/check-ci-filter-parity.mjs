@@ -232,37 +232,82 @@
  * JSON, no `tasks` map, and no generic `test` task. The self-test pins the task
  * pair against the real job's command.
  *
- * ## The fifth subject: Test UI and the root ADR files ui tests read (#37935)
+ * ## The fifth subject: Test UI and the files outside ui/ that ui tests read (#37935, #38133)
  *
  * `studioMenuPlacement.test.ts` (Test UI) holds ADR-0084's type-to-group table
  * equal to the Studio menu code, and it reads the ADR from the ROOT
  * `docs/adr/`, outside `ui/`. The `ui:` list named no such file, so a diff
  * confined to the ADR started no ui job on the PR, nor in the merge queue,
  * where the `ui` output reads the queue diff through the same list: the pin
- * first ran on the next ui PR, red on a change that PR did not make.
+ * first ran on the next ui PR, red on a change that PR did not make. The same
+ * holds for every file outside `ui/` a ui test reads -- a root document, a
+ * server source whose shape a ui test pins, a root script a ui test imports --
+ * so the population is all of them, not the one root that showed it first.
  *
  * `uiRootReadsOf` DERIVES the population from the ui tests themselves: every
  * tracked `ui/**` test file is read by `scanPathExpressions`, the walker
- * `check:cross-package-test-inputs` and the ui test selector already use, so
- * this is not a recognizer of its own and holds no list. Each read under
- * UI_READ_ROOTS must be covered, by the same pure-string rule, by a list the
- * `test-ui` job's `if:` ORs (read back out of it; `ui` must be among them),
- * and a `ui` row under those roots that no ui test reads is a leftover, since
- * it starts every ui job for an edit nothing there reads. The remedy is the
- * file VERBATIM, never `docs/adr/**`, which would start the ui battery on every
- * ADR edit for the one file a ui test reads.
+ * `check:cross-package-test-inputs` and the ui test selector already use, and
+ * an import is resolved by that gate's own `resolveImportTarget`, so this is
+ * not a recognizer of its own and holds no list. Each read must be covered, by
+ * the same pure-string rule, by a list the `test-ui` job's `if:` ORs (read
+ * back out of it; `ui` must be among them), or be DECLARED a trade-off.
  *
- * Known bounds: the population is the root `docs/adr/` alone, as ruled. Other
- * reads outside `ui/` that the walker sees and no ui list covers (measured on
- * the commit this subject landed on: a root markdown file, two server sources
- * and a root script) are a family of their own, each a scheduling trade-off
- * rather than a missing row, and are not judged here. A ui test whose read the
- * walker cannot resolve (an unread argument, a manifest-name `findUp`, which is
- * judged with no package name) is not in the population, exactly as the
- * walker's other callers do not see it. The walker reads each test file's own
- * text, so a read made inside a module the test IMPORTS is not seen either: a
- * `ui` row whose only reader is such a helper is reported as reader-less, and
- * the leftover direction therefore says check, then delete, never delete.
+ * Both answers live in one place in ci.yml, the reads group at the end of the
+ * `ui:` list: every row below its UI_READS_GROUP_MARKER heading is a file a ui
+ * test reads, named verbatim, and a `# ui-read trade-off: PATH -- REASON` line
+ * there is a read left unscheduled on purpose, with the reason that names what
+ * runs it instead. The remedy is the file verbatim, never a subtree, which
+ * would start the ui battery on every edit beside the one file a test reads.
+ * The other direction is judged in the group alone: a row below the heading no
+ * ui test reads is a leftover, and a trade-off for a read no test makes, or
+ * for one a row now covers, is stale. Rows above the heading are the ui jobs'
+ * own build and gate inputs, which no test read accounts for, and the sixth
+ * subject pins them instead. The group is read from the `filters:` TEXT
+ * because YAML drops the comments that carry it; a missing or doubled heading
+ * and an unreadable trade-off line are refusals.
+ *
+ * Known bounds: a ui test whose read the walker cannot resolve (an unread
+ * argument, a manifest-name `findUp`, which is judged with no package name) is
+ * not in the population, exactly as the walker's other callers do not see it.
+ * The walker reads each test file's own text, so a read made inside a module
+ * the test IMPORTS is not seen either: a reads-group row whose only reader is
+ * such a helper is reported as reader-less, and the leftover direction
+ * therefore says check, then delete, never delete.
+ *
+ * ## The sixth subject: the ui scheduling pin (#38132)
+ *
+ * The fifth subject holds the reads group to the reads, and nothing else in
+ * this gate read the rest of what decides whether a ui job starts: the other
+ * inputs of the paths-filter step (`predicate-quantifier`, `base`, `ref` and
+ * the rest each change which diff is read or how a row matches it), the
+ * `filter` job's output expressions the ui jobs read, the rows above the
+ * reads group, and every ui job's own `if:`. An edit to any of them could make
+ * a ui job skip on a diff where it ran before, and the gate stayed green.
+ *
+ * `judgeUiScheduling` holds the real ci.yml to UI_PIN_FILE, the least it may
+ * schedule the ui jobs. The step's `with:` keys and the pinned outputs are
+ * held EXACTLY, since neither has a direction this gate can read. The rows the
+ * pin lists for each filter are a FLOOR: a pinned row gone reds, a row added
+ * is free. Every job whose definition reads a ui output (UI_OUTPUT_NAMES) must
+ * carry a pinned condition, and each condition is a FLOOR too: the job's `if:`
+ * is read as clauses of a conjunction, each the set of its disjuncts
+ * (`conditionClauses`), and must be implied clause by clause by its pin
+ * (`conditionAtLeast`): dropping a clause or adding a disjunct passes, adding
+ * a clause, dropping a disjunct or rewriting an atom reds, naming the clause.
+ * The comparison is syntactic, so a rewrite that is in fact wider reds too,
+ * which is the safe direction; a condition wider than its pin is reported in
+ * the OK line, and raising the pin is how the wider schedule is then held. A
+ * deliberate change updates the pin in the same PR, so the change to what runs
+ * is read where it is made. The pin is a JSON record beside this script, not a
+ * table in it, so no path literal here is read as this gate's population.
+ *
+ * Known bounds: the rows of `core`, which only `live-e2e-ui` ORs in, are not
+ * floored here (the first, third and fourth subjects hold them); a narrowing
+ * through another job's output a ui `if:` reads (`borrowed-verdict`,
+ * `queue-verdict`, `test-ui-plan`), through `needs:`, or through a step-level
+ * `if:` inside a ui job is not judged; and the `ui-tree` step's own script is
+ * not read. Refusals: the pin file absent, not JSON, or missing any of its
+ * four parts or a ui output, and every refusal of the filter reader.
  *
  * ## Wiring
  *
@@ -318,12 +363,13 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) Build Core and the build inputs turbo.json declares': 42,
   '(10) Build Core and the scripts its own steps run': 30,
   '(11) Test Core and the generic test tasks\' root inputs': 18,
-  '(12) Test UI and the root ADR files ui tests read': 16,
+  '(12) Test UI and the files outside ui/ that ui tests read': 33,
+  '(13) the ui scheduling pin: the paths-filter input, the ui outputs, the ui rows and every ui job condition': 30,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 11;
+const SELF_TEST_BATTERY_FLOOR = 12;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -1952,7 +1998,7 @@ export async function selfTest() {
     try {
       mkdirSync(join(scratch, '.github', 'workflows'), { recursive: true });
       writeFileSync(join(scratch, CI_WORKFLOW), ciSource);
-      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST, ...realGuardPaths]) {
+      for (const rel of [TURBO_CONFIG, ROOT_MANIFEST, UI_PIN_FILE, ...realGuardPaths]) {
         mkdirSync(dirname(join(scratch, rel)), { recursive: true });
         writeFileSync(join(scratch, rel), readFileSync(join(REPO_ROOT, rel), 'utf8'));
       }
@@ -2389,11 +2435,13 @@ export async function selfTest() {
     `bound: every whole-package test \`turbo run\` the real \`${SCHEDULED_JOB}\` job makes names exactly ${TEST_TASKS.join(' ')} -- got ${JSON.stringify(turboTaskLists)}`,
   );
 
-  // ── (12) Test UI and the root ADR files ui tests read (#37935) ──────────
-  battery('(12) Test UI and the root ADR files ui tests read');
+  // ── (12) Test UI and the files outside ui/ that ui tests read (#37935) ──────────
+  battery('(12) Test UI and the files outside ui/ that ui tests read');
   const UI_IF =
     "${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}";
-  const uiWorkflow = ({ ui = ['ui/**'], consumers = ['packages/spec/**'], condition = UI_IF, job = 'test-ui' } = {}) => {
+  // The `ui` list's first row is the tree; every later row sits under the
+  // reads-group heading, followed by the trade-off lines, as in the real file.
+  const uiWorkflow = ({ ui = ['ui/**'], consumers = ['packages/spec/**'], condition = UI_IF, job = 'test-ui', tradeOffs = [], heading = true } = {}) => {
     const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
     return [
       'name: CI',
@@ -2405,7 +2453,10 @@ export async function selfTest() {
       '        with:',
       '          filters: |',
       '            ui:',
-      list(ui),
+      list(ui.slice(0, 1)),
+      ...(heading ? [`              # ── ${UI_READS_GROUP_MARKER} ──`, `              # prose naming \`${UI_TRADE_OFF_MARKER}\` declares nothing`] : []),
+      ...(ui.length > 1 ? [list(ui.slice(1))] : []),
+      ...tradeOffs.map((t) => `              # ${UI_TRADE_OFF_MARKER} ${t}`),
       '            ui_consumers:',
       list(consumers),
       `  ${job}:`,
@@ -2516,6 +2567,139 @@ export async function selfTest() {
   );
   assert(inScratchTree(uiRowDropped, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeUiReads`');
 
+  // #38133: the population is every read outside ui/, not the root docs/adr.
+  // A root document and an extensionless import of a server source, each
+  // found by the walker and resolved on disk.
+  const ROOT_DOC = ['CONTRIBUTING', 'md'].join('.');
+  const SERVER_SRC = ['packages', 'srv', 'src', 'endpoint.ts'].join('/');
+  const wideReader =
+    `${UI_SEED}import { columns } from '../../../../packages/srv/src/endpoint';\n` +
+    `readFileSync(resolve(HERE, '../../../../${ROOT_DOC}'), 'utf8');\n`;
+  const uiWide = uiScratch(
+    { [ROOT_DOC]: '# contributing\n', [SERVER_SRC]: 'export const columns = [];\n', 'ui/packages/p/src/w.test.ts': wideReader },
+    (r) => r,
+  );
+  assert(
+    uiPaths(uiWide.rows).join(',') === [ROOT_DOC, SERVER_SRC].join(','),
+    `the collector finds a root document and an extensionless import of a server source, both outside ui/ -- got ${JSON.stringify(uiWide.rows)}`,
+  );
+  const wideHole = judgeUiReads(uiWorkflow(), uiWide);
+  assert(uiPaths(wideHole.uncovered).join(',') === [ROOT_DOC, SERVER_SRC].join(','), `-- and both are reported uncovered with no row -- got ${uiPaths(wideHole.uncovered).join(', ')}`);
+  const wideRows = judgeUiReads(uiWorkflow({ ui: ['ui/**', ROOT_DOC, SERVER_SRC] }), uiWide);
+  assert(wideRows.uncovered?.length === 0 && wideRows.stale?.length === 0, `positive control: each named verbatim in the reads group is covered -- ${wideRows.refusal ?? uiPaths(wideRows.uncovered).join(', ')}`);
+  assert(judgeUiReads(uiWorkflow({ consumers: ['packages/srv/**'], ui: ['ui/**', ROOT_DOC] }), uiWide).uncovered?.length === 0, '-- and a server source under a `ui_consumers` subtree is covered by it');
+
+  // A declared trade-off: the read stays unscheduled and the gate stays green.
+  const traded = judgeUiReads(uiWorkflow({ ui: ['ui/**', ROOT_DOC], tradeOffs: [`${SERVER_SRC} -- its server twin runs in Test Core`] }), uiWide);
+  assert(
+    traded.uncovered?.length === 0 && uiPaths(traded.tradedOff).join(',') === SERVER_SRC && traded.staleTradeOffs?.length === 0 && quietly(() => reportUiReads(traded)) === 0,
+    `a read declared as a trade-off is neither uncovered nor stale, and the report path returns 0 -- got ${traded.refusal ?? JSON.stringify(traded.uncovered)}`,
+  );
+  const tradeGone = judgeUiReads(uiWorkflow({ ui: ['ui/**', ROOT_DOC, SERVER_SRC], tradeOffs: [`${SERVER_SRC} -- covered now`, 'packages/none/x.ts -- nobody reads it'] }), uiWide);
+  assert(
+    (tradeGone.staleTradeOffs ?? []).join(',') === [SERVER_SRC, 'packages/none/x.ts'].join(',') && quietly(() => reportUiReads(tradeGone)) === 1,
+    `a trade-off a row covers, and one for a read no test makes, are both stale and red -- got ${(tradeGone.staleTradeOffs ?? []).join(', ')}`,
+  );
+  assert(uiRefusal(judgeUiReads(uiWorkflow({ ui: ['ui/**', ROOT_DOC], tradeOffs: [SERVER_SRC] }), uiWide)), 'refuses a trade-off line with no `-- REASON`');
+  assert(uiRefusal(judgeUiReads(uiWorkflow({ heading: false, ui: ['ui/**', ROOT_DOC] }), uiWide)), 'refuses when the `ui` list carries no reads-group heading');
+  // A row ABOVE the heading is a job input, not a read, and is never a leftover.
+  const aboveHeading = judgeUiReads(uiWorkflow({ ui: ['pnpm-lock.yaml', ROOT_DOC, SERVER_SRC] }), uiWide);
+  assert(aboveHeading.stale?.length === 0, `a reader-less row above the heading is not judged as a leftover -- got ${(aboveHeading.stale ?? []).join(', ')}`);
+
+  // The real tree: each #38133 row and the declared trade-off, rolled back.
+  for (const [row, path] of [
+    ["              - 'CONTRIBUTING.md'\n", 'CONTRIBUTING.md'],
+    ["              - 'packages/plugins/plugin-auth/src/admin-import-users.ts'\n", 'packages/plugins/plugin-auth/src/admin-import-users.ts'],
+    ["              - 'scripts/ci-shard-matrix.mjs'\n", 'scripts/ci-shard-matrix.mjs'],
+  ]) {
+    const dropped = realSource.replace(row, '');
+    assert(
+      realSource.includes(row) && uiPaths(judgeUiReads(dropped, realUiReads).uncovered).join(',') === path,
+      `the checked-in ci.yml with the #38133 row for ${path} dropped reports exactly that path`,
+    );
+  }
+  const TRADE_LINE = `              # ${UI_TRADE_OFF_MARKER} packages/mcp/src/skill-md.ts -- the\n`;
+  const tradeDropped = realSource.replace(TRADE_LINE, '');
+  assert(
+    realSource.includes(TRADE_LINE) && uiPaths(judgeUiReads(tradeDropped, realUiReads).uncovered).join(',') === 'packages/mcp/src/skill-md.ts',
+    'the checked-in ci.yml with its declared trade-off line dropped reports packages/mcp/src/skill-md.ts uncovered',
+  );
+
+  // ── (13) the ui scheduling pin (#38132) ─────────────────────────────────
+  battery('(13) the ui scheduling pin: the paths-filter input, the ui outputs, the ui rows and every ui job condition');
+  const realPin = readPin(REPO_ROOT);
+  const pinOf = (source, pin = realPin) => judgeUiScheduling(source, pin);
+  const pinRed = (v) =>
+    !v.refusal &&
+    v.extraInputs.length + v.missingInputs.length + v.changedOutputs.length + v.missingRows.length + v.unpinnedJobs.length + v.vanishedJobs.length + v.narrowedJobs.length > 0;
+  const realPinVerdict = pinOf(realSource);
+  assert(
+    !realPinVerdict.refusal && !pinRed(realPinVerdict) && realPinVerdict.uiJobs.length === Object.keys(realPin.conditions).length && realPinVerdict.uiJobs.includes(UI_TEST_JOB),
+    `positive control: the checked-in ci.yml holds its pin, and every job reading a ui output is pinned -- ${realPinVerdict.refusal ?? JSON.stringify(realPinVerdict)}`,
+  );
+  assert(quietly(() => reportUiScheduling(realPinVerdict)) === 0, '-- and the report path returns 0 over it');
+
+  // The CNF reading of a condition, and the at-least-as-wide relation.
+  assert(
+    JSON.stringify(conditionClauses("${{ !cancelled() && (a != 'false' || b != 'false') && c }}")) === JSON.stringify([['!cancelled()'], ["a != 'false'", "b != 'false'"], ['c']]),
+    'a condition reads as clauses of a conjunction, each the set of its disjuncts, the `${{ }}` wrapper dropped',
+  );
+  assert(conditionAtLeast("x && (a || b || c)", "x && (a || b) && y").holds, 'dropping a clause or adding a disjunct is at least as wide');
+  assert(!conditionAtLeast("x && (a || b) && z", "x && (a || b)").holds, 'adding a clause is narrower');
+  assert(!conditionAtLeast("x && a", "x && (a || b)").holds, 'dropping a disjunct is narrower');
+  assert(!conditionAtLeast("x && a == 'false'", "x && a != 'false'").holds, 'changing an atom is narrower (syntactic: never a silent pass)');
+  assert(conditionAtLeast("(x) && ( a  ||  b )", "x && (b || a)").holds, 'whitespace, order and redundant parentheses do not matter');
+
+  // Each pinned part ablated on the REAL ci.yml.
+  const FILTERS_LINE = '        with:\n          filters: |\n';
+  assert(realSource.split(FILTERS_LINE).length === 2, 'the real paths-filter step carries one `with:` block that opens with `filters:`');
+  const inputAdded = realSource.replace(FILTERS_LINE, "        with:\n          predicate-quantifier: 'every'\n          filters: |\n");
+  const inputVerdict = pinOf(inputAdded);
+  assert((inputVerdict.extraInputs ?? []).join(',') === 'predicate-quantifier', `a \`with:\` input added to the paths-filter step reds by name -- got ${JSON.stringify(inputVerdict.extraInputs)}`);
+  assert(inScratchTree(inputAdded, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and main() returns 1 over it, the pin read from the scratch tree');
+
+  const UI_OUTPUT_LINE = "      ui: ${{ steps.changes.outputs.ui || 'true' }}\n";
+  assert(realSource.includes(UI_OUTPUT_LINE), 'the real `filter` job carries the pinned `ui` output line');
+  const outputNarrowed = pinOf(realSource.replace(UI_OUTPUT_LINE, "      ui: ${{ steps.changes.outputs.ui || 'false' }}\n"));
+  assert((outputNarrowed.changedOutputs ?? []).map((o) => o.name).join(',') === 'ui', `the \`ui\` output rewritten reds by name -- got ${JSON.stringify(outputNarrowed.changedOutputs)}`);
+
+  const UI_TREE_ROW = "              - 'ui/**'\n";
+  const SPEC_ROW = "              - 'packages/spec/**'\n";
+  assert(realSource.split(UI_TREE_ROW).length === 2 && realSource.split(SPEC_ROW).length === 2, 'the real ci.yml carries the `ui/**` and `packages/spec/**` rows once each');
+  const rowsDropped = pinOf(realSource.replace(UI_TREE_ROW, '').replace(SPEC_ROW, ''));
+  assert(
+    (rowsDropped.missingRows ?? []).map((r) => `${r.name}:${r.row}`).join(',') === 'ui:ui/**,ui_consumers:packages/spec/**',
+    `a pinned \`ui\` row and a pinned \`ui_consumers\` row dropped red by list and row -- got ${JSON.stringify(rowsDropped.missingRows)}`,
+  );
+  assert(!pinRed(pinOf(realSource.replace(UI_TREE_ROW, `${UI_TREE_ROW}              - 'extra/**'\n`))), 'control: a row ADDED to `ui` widens and stays green');
+
+  const TEST_UI_IF = `    if: \${{ ${realPin.conditions[UI_TEST_JOB]} }}\n`;
+  assert(realSource.includes(TEST_UI_IF), 'the real `test-ui` job carries its pinned `if:` verbatim');
+  const ifTo = (replacement) => pinOf(realSource.replace(TEST_UI_IF, `    if: \${{ ${replacement} }}\n`));
+  const narrowedIds = (v) => (v.narrowedJobs ?? []).map((j) => j.id).join(',');
+  const pinnedTestUi = realPin.conditions[UI_TEST_JOB];
+  assert(narrowedIds(ifTo(`${pinnedTestUi} && github.event_name != 'pull_request'`)) === UI_TEST_JOB, 'a conjunct added to `test-ui` reds it by job');
+  assert(narrowedIds(ifTo(pinnedTestUi.replace(" || needs.filter.outputs.ui_consumers != 'false'", ''))) === UI_TEST_JOB, '-- and so does dropping its `ui_consumers` disjunct');
+  assert(narrowedIds(ifTo(pinnedTestUi.replace("needs.filter.outputs.ui != 'false'", "needs.filter.outputs.ui == 'true'"))) === UI_TEST_JOB, '-- and so does rewriting its `ui` atom');
+  const ifWidened = ifTo(pinnedTestUi.replace(" && needs.test-ui-plan.outputs.shards != '[]'", ''));
+  assert(!pinRed(ifWidened) && (ifWidened.widenedJobs ?? []).join(',') === UI_TEST_JOB, 'control: a conjunct DROPPED widens, stays green, and is reported as wider than the pin');
+
+  const newUiJob = `${realSource}\n  probe-ui:\n    needs: filter\n    if: \${{ needs.filter.outputs.ui != 'false' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo probe\n`;
+  assert((pinOf(newUiJob).unpinnedJobs ?? []).join(',') === 'probe-ui', 'a new job reading a ui output with no pinned condition reds by name');
+  const LINT_UI_KEY = '\n  lint-ui:\n';
+  assert(realSource.split(LINT_UI_KEY).length === 2, 'the real ci.yml carries the `lint-ui` job key once');
+  assert((pinOf(realSource.replace(LINT_UI_KEY, '\n  lint-ui-renamed:\n')).vanishedJobs ?? []).join(',') === 'lint-ui', 'a pinned ui job renamed away reds as vanished (and its new name as unpinned)');
+  assert(quietly(() => reportUiScheduling(ifTo(`${pinnedTestUi} && false`))) === 1, 'the report path returns 1 over a narrowed condition');
+
+  // Refusals: a pin that cannot be read is never a clean zero.
+  const refusesPin = (pin) => typeof pinOf(realSource, pin).refusal === 'string';
+  assert(refusesPin(null) && refusesPin([]) && refusesPin({}), 'refuses a missing, non-object or empty pin');
+  assert(refusesPin({ ...realPin, inputs: [] }), 'refuses a pin with no inputs');
+  assert(refusesPin({ ...realPin, conditions: {} }), 'refuses a pin with no conditions');
+  const { ui: _droppedUi, ...outputsWithoutUi } = realPin.outputs;
+  assert(refusesPin({ ...realPin, outputs: outputsWithoutUi }), 'refuses a pin that pins no `ui` output');
+  assert(inScratchTree(realSource, (root) => { rmSync(join(root, UI_PIN_FILE)); return quietly(() => main(root, undefined, realUiReads)); }) === 1, 'main() returns 1 when the pin file is absent from the tree');
+
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
   // Evaluated after every battery has had its chance and BEFORE the verdict, so
@@ -2590,7 +2774,15 @@ export async function selfTest() {
       `and Test UI's root ADR reads: a ui test's ADR read found through the shared walker and observed red by path, ` +
       `covered verbatim, by its subtree and by \`ui_consumers\`, a directory read needing its subtree, a bound-then-listed directory classified as one, a path not on disk read as nothing, a wildcard row ` +
       `covering nothing, a reader-less row reported as a leftover, five refusals, and the checked-in tree green with ` +
-      `the #37935 row dropped observed red through the report path.`,
+      `the #37935 row dropped observed red through the report path, generalised to every read outside ui/ (a root ` +
+      `document and an extensionless server import found, covered by a row or by \`ui_consumers\`, a declared trade-off ` +
+      `green, a stale or redundant trade-off red, a malformed one and a missing heading refused, a row above the heading ` +
+      `never a leftover, and each #38133 row and the trade-off rolled back off the real tree observed red); ` +
+      `and the ui scheduling pin: the real tree green against it, the condition clauses and their at-least-as-wide ` +
+      `relation, and on the real ci.yml a paths-filter input added, the \`ui\` output rewritten, a \`ui\` and a ` +
+      `\`ui_consumers\` row dropped, a \`test-ui\` conjunct added, a disjunct dropped and an atom rewritten each observed ` +
+      `red, a row added and a conjunct dropped observed green, a new unpinned ui job and a renamed pinned one red, ` +
+      `five pin refusals, and main() red over a missing pin file.`,
   );
   selfTestReachedVerdict = true;
   return 0;

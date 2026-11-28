@@ -1,5 +1,5 @@
 {
-  "about": "The ui scheduling pin of scripts/check-ci-filter-parity.mjs (objectstack#38132): the least that .github/workflows/ci.yml may schedule the ui jobs. An edit to ci.yml that schedules less than this reds the gate; one that schedules more is free, and raising a pin here is how it is held. See the gate header, sixth subject.",
+  "about": "The ui scheduling pin of scripts/check-ci-filter-parity.mjs (objectstack#38132, its sixth subject): the least .github/workflows/ci.yml may schedule the ui jobs. `inputs` (the paths-filter step with: keys) and `outputs` (the filter job outputs the ui jobs read) are held exactly; `rows` (per filter) and `conditions` (per ui job if:) are floors -- an edit that schedules less reds, one that schedules more is free, and raising the pin here is how a wider schedule is then held.",
   "inputs": [
     "filters"
   ],
