@@ -40,6 +40,7 @@ import { useMetadata } from '../providers/MetadataProvider.js';
 import { metadataText } from '../hooks/useNavTargetLabel.js';
 import { PageHeader } from '../layout/PageHeader.js';
 import { usePreviewListDataSource } from '../preview/unpublishedObjectReads.js';
+import { recordPaneWidth, recordPreviewWidthKey } from './recordDrawerContext.js';
 import { useTenancyPosture } from '../hooks/useTenancyPosture.js';
 import { useNavigationContext } from '../context/NavigationContext.js';
 import { matchAppBySegment } from '../utils/index.js';
@@ -730,6 +731,13 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
       {navOverlay.isOverlay && (
         <NavigationOverlay
           {...navOverlay}
+          // The drawer's width is the source view's to author, as on the
+          // object list (objectstack#36149): its `navigation.size` bucket or
+          // pixel `width`, else the `auto` default, the side preview's 460. A
+          // dragged width is kept under the preview's shared key unless the
+          // view authors one.
+          width={recordPaneWidth(viewDef?.navigation, objectDef)}
+          storageKey={recordPreviewWidthKey(cfg.source, viewDef?.navigation)}
           setIsOpen={(o: boolean) => { if (!o) closeRecordDrawer(); }}
           title={pageLabel ?? (cfg.source || 'Record')}
         >

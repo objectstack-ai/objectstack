@@ -429,6 +429,171 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
   });
 }
 
+/** A build's context: the walk's calls carry `reason: 'reindex'`. */
+const buildCtx = (s: KnowledgeSource, index = FP_A): AdapterContext => ({ source: s, reason: 'reindex', index });
+
+/** What the store holds for a source: its generation rows (`n:fingerprint:state`) and its passage tables. */
+async function heldFor(client: Client, s: KnowledgeSource): Promise<{ generations: string[]; tables: string[] }> {
+  const rows = await client.execute({
+    sql: 'SELECT generation, fingerprint, state FROM knowledge_generation WHERE source_id = ? ORDER BY generation',
+    args: [s.name],
+  });
+  return {
+    generations: rows.rows.map((r) => `${Number(r.generation)}:${String(r.fingerprint)}:${String(r.state)}`),
+    tables: await tables(client, `knowledge_${s.name}_g%`),
+  };
+}
+
+const NOTHING = { generations: [], tables: [] };
+
+for (const kind of ['memory', 'file'] as StoreKind[]) {
+  describe(`knowledge-turso: a build whose source is dropped while it runs, on ${kind === 'memory' ? ':memory:' : 'a file: URL'}`, () => {
+    const store = storeOf(kind);
+    afterAll(() => store.closeAll());
+
+    /**
+     * Two adapters over one store, standing for two processes: each keeps its
+     * own builds; on a file, each has its own connection to the database.
+     */
+    function twoProcesses(embedder: IEmbedder = new FakeEmbedder()) {
+      const at = store.url();
+      const first = store.client(at);
+      const second = kind === 'file' ? store.client(at) : first;
+      return {
+        client: first,
+        a: new TursoKnowledgeAdapter({ id: 'under_test', client: first, embedder }),
+        b: new TursoKnowledgeAdapter({ id: 'under_test', client: second, embedder: new FakeEmbedder() }),
+      };
+    }
+
+    const FP_B = { fingerprint: 'fp-test:b', recipeHash: 'rh-test:1' };
+    const FP_C = { fingerprint: 'fp-test:c', recipeHash: 'rh-test:1' };
+
+    const begins = [
+      ['beside the active generation', FP_B, true],
+      ['inside the active generation', FP_A, true],
+      ['of a source that held nothing', FP_A, false],
+    ] as const;
+    const calls = {
+      write: (a: TursoKnowledgeAdapter, c: AdapterContext) => a.upsert([doc(c.source as KnowledgeSource, '2', 'granite quarry')], c),
+      list: (a: TursoKnowledgeAdapter, c: AdapterContext) => a.listDocuments(c, { limit: 10 }),
+      complete: (a: TursoKnowledgeAdapter, c: AdapterContext) => a.completeBuild(c),
+    } as const;
+
+    for (const [shape, index, seeded] of begins) {
+      for (const [call, run] of Object.entries(calls)) {
+        it(`a build ${shape}, then a drop in another process: the build's ${call} is refused LOCK_CONFLICT, nothing is held, and the source builds again from nothing`, async () => {
+          const { client, a, b } = twoProcesses();
+          const s = source(`drop_${seeded ? (index === FP_A ? 'inside' : 'beside') : 'empty'}_${call}`);
+          if (seeded) await a.upsert([doc(s, '1', 'granite quarry')], ctx(s));
+          await a.beginBuild(buildCtx(s, index));
+          await b.dropSource(ctx(s));
+
+          expect(await refusal(run(a, buildCtx(s, index)))).toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+          expect(await heldFor(client, s)).toEqual(NOTHING);
+          expect(await b.indexStatus(ctx(s))).toEqual({});
+
+          // The build ended: one that begins after the drop builds the source from nothing.
+          await a.beginBuild(buildCtx(s, index));
+          await a.upsert([doc(s, '3', 'basalt columns')], buildCtx(s, index));
+          await a.completeBuild(buildCtx(s, index));
+          expect(await heldFor(client, s)).toEqual({ generations: [`1:${index.fingerprint}:active`], tables: [`knowledge_${s.name}_g1`] });
+          const hits = await b.search('basalt', { source: s, topK: 5, index: { fingerprint: index.fingerprint } });
+          expect(hits.map((h) => h.documentId)).toEqual([`${s.name}:3`]);
+        });
+      }
+    }
+
+    it("a drop in the build's own process ends the build the same way", async () => {
+      const { client, a } = twoProcesses();
+      const s = source('drop_same_process');
+      await a.upsert([doc(s, '1', 'granite quarry')], ctx(s));
+      await a.beginBuild(buildCtx(s, FP_B));
+      await a.dropSource(ctx(s));
+      expect(await refusal(a.upsert([doc(s, '2', 'marble')], buildCtx(s, FP_B)))).toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+      expect(await heldFor(client, s)).toEqual(NOTHING);
+    });
+
+    it('a page whose embedding was under way when the drop committed is written nowhere', async () => {
+      let drop: (() => Promise<void>) | undefined;
+      const embedder = new (class extends FakeEmbedder {
+        override async embed(texts: string[]): Promise<number[][]> {
+          const now = drop;
+          drop = undefined;
+          if (now) await now();
+          return super.embed(texts);
+        }
+      })();
+      const { client, a, b } = twoProcesses(embedder);
+      const s = source('drop_while_embedding');
+      await a.upsert([doc(s, '1', 'granite quarry')], ctx(s));
+      await a.beginBuild(buildCtx(s, FP_B));
+      drop = () => b.dropSource(ctx(s));
+      expect(await refusal(a.upsert([doc(s, '2', 'marble')], buildCtx(s, FP_B)))).toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+      expect(drop).toBeUndefined();
+      expect(await heldFor(client, s)).toEqual(NOTHING);
+    });
+
+    it('a build another process replaced under another fingerprint is ended the same way; the replacing build goes on', async () => {
+      const { client, a, b } = twoProcesses();
+      const s = source('replaced_build');
+      await a.upsert([doc(s, '1', 'granite quarry')], ctx(s));
+      await a.beginBuild(buildCtx(s, FP_B));
+      await b.beginBuild(buildCtx(s, FP_C));
+      // The replacing build's generation took the number of the one it replaced.
+      expect((await heldFor(client, s)).generations).toEqual([`1:${FP_A.fingerprint}:active`, `2:${FP_C.fingerprint}:building`]);
+      expect(await refusal(a.upsert([doc(s, '2', 'marble')], buildCtx(s, FP_B)))).toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+      await b.upsert([doc(s, '3', 'basalt columns')], buildCtx(s, FP_C));
+      await b.completeBuild(buildCtx(s, FP_C));
+      expect(await b.indexStatus(ctx(s))).toEqual({ fingerprint: FP_C.fingerprint, recipeHash: FP_C.recipeHash });
+      expect((await b.search('basalt marble', { source: s, topK: 5, index: FP_C })).map((h) => h.documentId)).toEqual([`${s.name}:3`]);
+    });
+
+    for (const [label, next, pause] of [
+      ['under another fingerprint', FP_C, 0],
+      ['under the same fingerprint, made later', FP_A, 10],
+    ] as const) {
+      it(`a generation that takes a dropped build's number ${label} is never that build's`, async () => {
+        const { client, a, b } = twoProcesses();
+        const s = source(`reused_${next === FP_A ? 'same' : 'other'}`);
+        await a.beginBuild(buildCtx(s, FP_A));
+        await b.dropSource(ctx(s));
+        if (pause > 0) await new Promise((resolve) => setTimeout(resolve, pause));
+        await b.beginBuild(buildCtx(s, next));
+        expect((await heldFor(client, s)).generations).toEqual([`1:${next.fingerprint}:active`]);
+        expect(await refusal(a.upsert([doc(s, '1', 'marble')], buildCtx(s, FP_A)))).toMatchObject({ code: 'LOCK_CONFLICT', status: 409 });
+        expect(await b.listDocuments(buildCtx(s, next), { limit: 10 })).toEqual({ documents: [] });
+      });
+    }
+
+    it('through KnowledgeService: a walk whose source another process drops after its first page stops, and leaves nothing', async () => {
+      const { client, a, b } = twoProcesses();
+      const s = source('drop_mid_walk');
+      const rows = Array.from({ length: 250 }, (_, i) => ({ id: `r${String(i + 1).padStart(4, '0')}`, body: `granite ${i + 1}`, status: 'published' }));
+      const svc = new KnowledgeService({ dataEngine: rowsEngine(rows) });
+      const upsert = a.upsert.bind(a);
+      let pages = 0;
+      a.upsert = async (batch, c) => {
+        await upsert(batch, c);
+        pages += 1;
+        if (pages === 1) await b.dropSource(ctx(s));
+      };
+      svc.registerAdapter('under_test', a);
+      svc.registerSource(s);
+
+      expect(await svc.reindexSource(s.name)).toMatchObject({ ok: false, indexed: 100 });
+      expect(pages).toBe(1);
+      expect(await heldFor(client, s)).toEqual(NOTHING);
+      expect(await b.indexStatus(ctx(s))).toEqual({});
+
+      // Drop-then-build: the next walk builds the source from nothing.
+      a.upsert = upsert;
+      expect(await svc.reindexSource(s.name)).toMatchObject({ ok: true, indexed: 250 });
+      expect((await heldFor(client, s)).tables).toEqual([`knowledge_${s.name}_g1`]);
+    });
+  });
+}
+
 describe('knowledge-turso without a database or an embedder', () => {
   it('answers every call SERVICE_UNAVAILABLE in one sentence; the reason is operator text in remedy and healthCheck', async () => {
     const adapter = new TursoKnowledgeAdapter({ embedder: new FakeEmbedder(), unavailable: 'no native build for win32-arm64' });
