@@ -9516,6 +9516,7 @@ export class SqlDriver implements IDataDriver {
       get insertReturnsStoredRows() { return driver.insertReturnsStoredRows; },
       get isMssql() { return driver.isMssql; },
       get isOracle() { return driver.isOracle; },
+      get isSqlite() { return driver.isSqlite; },
       keepSuppliedUpdatedAt: (...a) => driver.keepSuppliedUpdatedAt(...a),
       get knex() { return driver.knex; },
       oracleUuidBinding: (...a) => driver.oracleUuidBinding(...a),

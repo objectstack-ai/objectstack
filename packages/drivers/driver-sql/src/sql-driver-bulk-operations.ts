@@ -61,6 +61,7 @@ export interface BulkOperationsHost {
   readonly insertReturnsStoredRows: SqlDriver['insertReturnsStoredRows'];
   readonly isMssql: SqlDriver['isMssql'];
   readonly isOracle: SqlDriver['isOracle'];
+  readonly isSqlite: SqlDriver['isSqlite'];
   keepSuppliedUpdatedAt: SqlDriver['keepSuppliedUpdatedAt'];
   readonly knex: SqlDriver['knex'];
   oracleUuidBinding: SqlDriver['oracleUuidBinding'];
@@ -80,10 +81,58 @@ export interface BulkOperationsHost {
   updatedAtStampIsPresumed: SqlDriver['updatedAtStampIsPresumed'];
 }
 
+/**
+ * [#38236] The most terms SQLite compiles into one compound SELECT
+ * (`SQLITE_MAX_COMPOUND_SELECT`, default 500). knex compiles a multi-row
+ * INSERT on SQLite as `insert … select … union all select …`, one term per
+ * row, so this is the most rows one SQLite INSERT can carry. Measured, not
+ * assumed: better-sqlite3 (SQLite 3.53.4) and sql.js (SQLite 3.49.1) both
+ * compile with 500, and both refuse row 501 with `too many terms in compound
+ * SELECT`.
+ */
+export const SQLITE_MAX_INSERT_ROWS = 500;
+
+/**
+ * [#38236] The most `?` parameters SQLite binds to one statement
+ * (`SQLITE_MAX_VARIABLE_NUMBER`, 32766 since SQLite 3.32.0). A multi-row
+ * INSERT binds one per row per column, so on a wide object this binds before
+ * {@link SQLITE_MAX_INSERT_ROWS} does: 70 columns refuse row 469 with `too many
+ * SQL variables` (same two builds as above).
+ */
+export const SQLITE_MAX_INSERT_VARIABLES = 32766;
+
+/**
+ * [#38236] Split `rows` into the SQLite INSERT statements they need: as many
+ * rows per statement as both SQLite bounds allow, in order. One element (the
+ * array itself) when the batch fits one statement, which is every batch the
+ * driver sent before this split existed.
+ *
+ * The column count is the union of the rows' keys, because knex binds every
+ * column of that union for every row; a key a row omits still costs one
+ * parameter there. Counting it is the conservative reading: an overcount only
+ * makes a statement smaller.
+ */
+export function sqliteInsertStatements<T>(rows: T[]): T[][] {
+  const columns = new Set<string>();
+  for (const row of rows) {
+    if (row && typeof row === 'object') for (const key of Object.keys(row)) columns.add(key);
+  }
+  const perStatement = Math.max(
+    1,
+    Math.min(SQLITE_MAX_INSERT_ROWS, Math.floor(SQLITE_MAX_INSERT_VARIABLES / Math.max(1, columns.size))),
+  );
+  if (rows.length <= perStatement) return [rows];
+  const statements: T[][] = [];
+  for (let start = 0; start < rows.length; start += perStatement) {
+    statements.push(rows.slice(start, start + perStatement));
+  }
+  return statements;
+}
+
 /** The bodies of the "Bulk & Batch Operations" section of `SqlDriver`: a stateless facet, called by the class's stubs. */
 export class BulkOperationsFacet {
   /** The body of `SqlDriver#bulkCreate`; the method's docblock there is its contract. */
-  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
+  static async bulkCreate(this: Pick<BulkOperationsHost, 'applyWriteColumnMap' | 'auditMissingTenant' | 'autoNumberCounterKey' | 'collidingAutoNumberReservations' | 'fillAutoNumberFields' | 'formatInput' | 'formatOutput' | 'getBuilder' | 'injectTenantOnInsert' | 'insertReturnsStoredRows' | 'isMssql' | 'isOracle' | 'isSqlite' | 'knex' | 'primeOracleRawUuidColumns' | 'readBackInsertedRows' | 'resyncSequenceToDataMax' | 'rotationWriteTarget' | 'stampInsertTimestamps'>, object: string, data: any[], options?: DriverOptions): Promise<Record<string, unknown>[]> {
     // [#31390] On Oracle a federated object's RAW(16) uuid columns are read from
     // the remote catalog before a comparand or a written value is bound.
     if (this.isOracle) await this.primeOracleRawUuidColumns(object);
@@ -151,6 +200,31 @@ export class BulkOperationsFacet {
     //     instead of an error it has to retry itself.
     //   - **Blanket retry on any unique violation.** Rejected for #5495's
     //     reason: it silently eats the caller's own 409.
+    //
+    // ## [#38236] The one exception: a SQLite batch past one statement's bounds
+    //
+    // SQLite cannot carry every batch as one statement: one INSERT holds at
+    // most {@link SQLITE_MAX_INSERT_ROWS} rows and binds at most
+    // {@link SQLITE_MAX_INSERT_VARIABLES} parameters, and past either it
+    // refuses the whole statement (`too many terms in compound SELECT`, `too
+    // many SQL variables`). Such a batch goes as several INSERTs, in row order,
+    // inside ONE transaction — so the guarantees above hold for it unchanged:
+    //   - **All-or-nothing.** A failing statement rolls back the statements
+    //     before it; no partial batch is ever left stored.
+    //   - **The reservation is taken once, before the transaction, and dealt
+    //     in order.** Every row's number is reserved by the loop below, for the
+    //     whole batch, before the transaction opens; the statements carry those
+    //     values in row order. The transaction holds only the INSERTs, so it
+    //     never waits on a reservation's own connection, which is the deadlock
+    //     the driver-opened-transaction bullet above names for SQLite's pool of
+    //     one. A failed batch burns its reserved numbers exactly as a failed
+    //     single statement does (the reservations committed on purpose), and
+    //     the collision retry re-issues the whole batch, as before.
+    //   - **A caller's transaction is kept.** Under `options.transaction` the
+    //     statements run in a savepoint of it, the runner idiom `bulkUpdate`
+    //     uses, so a failed batch is undone and the caller's transaction is not.
+    // A batch that fits one statement is sent exactly as before: one INSERT, no
+    // transaction. Other dialects are not split.
     const mayRetry = options?.transaction === undefined;
     // What each row currently holds, ACROSS attempts. A retry regenerates only
     // the fields it cleared, so `fillAutoNumberFields` reports only those; a
@@ -182,22 +256,44 @@ export class BulkOperationsFacet {
         this.stampInsertTimestamps(object, formatted);
         return formatted;
       });
-      const builder = this.getBuilder(this.rotationWriteTarget(object) ?? object, options);
+      const target = this.rotationWriteTarget(object) ?? object;
+      // One INSERT of `statementRows`. Answers the stored rows where the
+      // dialect's RETURNING answers them, nothing otherwise.
+      const insertStatement = (statementRows: any[], statementOptions?: DriverOptions): Promise<unknown> => {
+        const builder = this.getBuilder(target, statementOptions);
+        if (!this.insertReturnsStoredRows) return builder.insert(statementRows) as unknown as Promise<unknown>;
+        // [#31327] Through a temp table on SQL Server — see `create`.
+        return (this.isMssql
+          ? builder.insert(statementRows).returning('*', { includeTriggerModifications: true })
+          : builder.insert(statementRows).returning('*')) as unknown as Promise<unknown>;
+      };
+      // [#38236] The statements this batch needs: one, except a SQLite batch
+      // past one statement's bounds (see the section above).
+      const statements = this.isSqlite ? sqliteInsertStatements(formattedRows) : [formattedRows];
 
       try {
+        let result: unknown;
+        if (statements.length === 1) {
+          result = await insertStatement(formattedRows, options);
+        } else {
+          const runner: Knex | Knex.Transaction = (options?.transaction as Knex.Transaction | undefined) ?? this.knex;
+          result = await runner.transaction(async (trx) => {
+            const stored: unknown[] = [];
+            for (const statementRows of statements) {
+              const answered = await insertStatement(statementRows, { ...options, transaction: trx });
+              if (Array.isArray(answered)) stored.push(...answered);
+            }
+            return stored;
+          });
+        }
         if (this.insertReturnsStoredRows) {
-          // [#31327] Through a temp table on SQL Server — see `create`.
-          const result = await (this.isMssql
-            ? builder.insert(formattedRows).returning('*', { includeTriggerModifications: true })
-            : builder.insert(formattedRows).returning('*'));
           // Read-back parity with create(): JSON columns come back as their stored
           // strings from `returning('*')` — decode them so batch callers see the
           // same shapes single-insert callers do.
           return Array.isArray(result)
             ? result.map((r) => this.formatOutput(object, r))
-            : result;
+            : (result as Record<string, unknown>[]);
         }
-        await builder.insert(formattedRows);
       } catch (error) {
         if (!mayRetry || attempt >= AUTONUMBER_COLLISION_RETRIES) throw error;
         const colliding = await this.collidingAutoNumberReservations(error, reservationsPerRow.flat(), options);
