@@ -329,3 +329,263 @@ describe('ObjectKernel — a boot that fails after every plugin started rolls th
         });
     });
 });
+
+/**
+ * A failed boot destroys every plugin whose `init()` ran — not only the ones
+ * whose `start()` succeeded — in reverse init order, as a shutdown would.
+ *
+ * The rollback above used to walk the STARTED set. A plugin that opened a
+ * resource in `init()` and then never started — its own `start()` threw, an
+ * earlier `start()` failed first, or a later plugin's `init()` refused the boot
+ * — kept that resource for good: the kernel is `stopped` after a failed boot,
+ * so `shutdown()` on it is a no-op and nothing else ever calls its `destroy()`.
+ * A normal shutdown (the CONTROL below) does call it.
+ */
+describe('ObjectKernel — a failed boot destroys every plugin whose init() ran (#37462)', () => {
+    /** A resource opened in `init()` and released in `destroy()`. */
+    interface FakeResource {
+        open: boolean;
+    }
+
+    interface InitHolderOptions {
+        readonly dependsOn?: readonly string[];
+        readonly start?: () => Promise<void>;
+        readonly destroy?: (() => Promise<void>) | null;
+    }
+
+    /** Opens `resource` in `init()`; `destroy: null` declares no `destroy()` at all. */
+    function initHolder(
+        name: string,
+        log: string[],
+        resource: FakeResource,
+        options: InitHolderOptions = {},
+    ): Plugin {
+        const plugin: Plugin = {
+            name,
+            version: '1.0.0',
+            dependencies: options.dependsOn ? [...options.dependsOn] : undefined,
+            init: async () => {
+                log.push(`${name}:init`);
+                resource.open = true;
+            },
+            start: async () => {
+                log.push(`${name}:start`);
+                await options.start?.();
+            },
+        };
+        if (options.destroy !== null) {
+            plugin.destroy = async () => {
+                log.push(`${name}:destroy`);
+                resource.open = false;
+                await options.destroy?.();
+            };
+        }
+        return plugin;
+    }
+
+    async function bootRejection(kernel: ObjectKernel): Promise<unknown> {
+        return kernel.bootstrap().then(
+            () => undefined,
+            (e: unknown) => e,
+        );
+    }
+
+    it('CONTROL: a normal shutdown destroys a plugin that opened a resource in init()', async () => {
+        const log: string[] = [];
+        const resource: FakeResource = { open: false };
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.holder', log, resource));
+
+        await kernel.bootstrap();
+        expect(resource.open).toBe(true);
+        await kernel.shutdown();
+
+        expect(resource.open).toBe(false);
+        expect(log).toEqual(['test.holder:init', 'test.holder:start', 'test.holder:destroy']);
+    });
+
+    it("a plugin whose own start() throws is destroyed, and its init() resource released", async () => {
+        const log: string[] = [];
+        const resource: FakeResource = { open: false };
+        const boom = new Error('holder start exploded');
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.holder', log, resource, { start: async () => { throw boom; } }));
+
+        const rejection = await bootRejection(kernel);
+
+        expect(resource.open).toBe(false);
+        expect(log).toEqual(['test.holder:init', 'test.holder:start', 'test.holder:destroy']);
+        // The boot error is still the one thrown: the named wrapper, its cause the original.
+        expect((rejection as Error).message).toContain('Plugin test.holder failed to start - rollback complete: holder start exploded');
+        expect((rejection as Error).cause).toBe(boom);
+        expect(kernel.getState()).toBe('stopped');
+    });
+
+    it('a plugin whose start() never ran — an earlier start() failed — is destroyed, in reverse init order', async () => {
+        const log: string[] = [];
+        const first: FakeResource = { open: false };
+        const later: FakeResource = { open: false };
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.first', log, first, { start: async () => { throw new Error('first start exploded'); } }));
+        await kernel.use(initHolder('test.later', log, later, { dependsOn: ['test.first'] }));
+
+        await expect(kernel.bootstrap()).rejects.toThrow('first start exploded');
+
+        expect(later.open).toBe(false);
+        expect(first.open).toBe(false);
+        // test.later's start() never ran; it is destroyed first because it initialised last.
+        expect(log).toEqual(['test.first:init', 'test.later:init', 'test.first:start', 'test.later:destroy', 'test.first:destroy']);
+    });
+
+    it("a later plugin's start() failure destroys the earlier plugins, the ones that started and the one that did not", async () => {
+        const log: string[] = [];
+        const holder: FakeResource = { open: false };
+        const other: FakeResource = { open: false };
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.holder', log, holder));
+        await kernel.use(initHolder('test.thrower', log, other, {
+            dependsOn: ['test.holder'],
+            start: async () => { throw new Error('thrower start exploded'); },
+        }));
+
+        await expect(kernel.bootstrap()).rejects.toThrow('thrower start exploded');
+
+        expect(holder.open).toBe(false);
+        expect(other.open).toBe(false);
+        expect(log).toEqual([
+            'test.holder:init', 'test.thrower:init',
+            'test.holder:start', 'test.thrower:start',
+            'test.thrower:destroy', 'test.holder:destroy',
+        ]);
+    });
+
+    it("a later plugin's init() failure destroys the plugins that initialised; neither the plugin whose init() threw nor one whose init() never ran is destroyed", async () => {
+        const log: string[] = [];
+        const holder: FakeResource = { open: false };
+        const thrower: FakeResource = { open: false };
+        const neverInit: FakeResource = { open: false };
+        const boom = new Error('init refused');
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.holder', log, holder));
+        await kernel.use({
+            name: 'test.init-thrower',
+            version: '1.0.0',
+            dependencies: ['test.holder'],
+            init: async () => {
+                log.push('test.init-thrower:init');
+                throw boom;
+            },
+            destroy: async () => { log.push('test.init-thrower:destroy'); thrower.open = false; },
+        });
+        await kernel.use(initHolder('test.never-init', log, neverInit, { dependsOn: ['test.init-thrower'] }));
+
+        const rejection = await bootRejection(kernel);
+
+        // The original boot error, by identity: the rollback neither wraps nor replaces it.
+        expect(rejection).toBe(boom);
+        expect(holder.open).toBe(false);
+        expect(log).toEqual(['test.holder:init', 'test.init-thrower:init', 'test.holder:destroy']);
+        expect(kernel.getState()).toBe('stopped');
+    });
+
+    it('a plugin with no destroy() is skipped, and the plugins around it are still destroyed', async () => {
+        const log: string[] = [];
+        const first: FakeResource = { open: false };
+        const bare: FakeResource = { open: false };
+        const last: FakeResource = { open: false };
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.first', log, first));
+        await kernel.use(initHolder('test.bare', log, bare, { dependsOn: ['test.first'], destroy: null }));
+        await kernel.use(initHolder('test.last', log, last, {
+            dependsOn: ['test.bare'],
+            start: async () => { throw new Error('last start exploded'); },
+        }));
+
+        await expect(kernel.bootstrap()).rejects.toThrow('last start exploded');
+
+        expect(first.open).toBe(false);
+        expect(last.open).toBe(false);
+        expect(log.filter((entry) => entry.endsWith(':destroy'))).toEqual(['test.last:destroy', 'test.first:destroy']);
+    });
+
+    it('a destroy() that throws is logged, the rest still run, and the boot error is still the one thrown', async () => {
+        const log: string[] = [];
+        const first: FakeResource = { open: false };
+        const middle: FakeResource = { open: false };
+        const boom = new Error('init refused');
+        const kernel = newKernel();
+        const errors: string[] = [];
+        const logger = (kernel as unknown as { logger: { error: (msg: string, ...rest: unknown[]) => void } }).logger;
+        const originalError = logger.error.bind(logger);
+        logger.error = (msg: string, ...rest: unknown[]) => {
+            errors.push(msg);
+            originalError(msg, ...rest);
+        };
+        await kernel.use(initHolder('test.first', log, first));
+        await kernel.use(initHolder('test.middle', log, middle, {
+            dependsOn: ['test.first'],
+            destroy: async () => { throw new Error('middle destroy failed'); },
+        }));
+        await kernel.use({
+            name: 'test.init-thrower',
+            version: '1.0.0',
+            dependencies: ['test.middle'],
+            init: async () => { throw boom; },
+        });
+
+        const rejection = await bootRejection(kernel);
+
+        expect(rejection).toBe(boom);
+        expect(log.filter((entry) => entry.endsWith(':destroy'))).toEqual(['test.middle:destroy', 'test.first:destroy']);
+        expect(first.open).toBe(false);
+        expect(errors).toContain('Rollback failed for test.middle');
+    });
+
+    it.each([
+        { phase: 'a start() failure', failAt: 'start' as const },
+        { phase: 'an init() failure', failAt: 'init' as const },
+    ])('no plugin is destroyed twice after $phase: shutdown() afterwards, and one issued from inside a destroy(), add nothing', async ({ failAt }) => {
+        const log: string[] = [];
+        const holder: FakeResource = { open: false };
+        const kernel = newKernel();
+        await kernel.use(initHolder('test.holder', log, holder, {
+            destroy: async () => { await kernel.shutdown(); },
+        }));
+        await kernel.use({
+            name: 'test.refuser',
+            version: '1.0.0',
+            dependencies: ['test.holder'],
+            init: async () => {
+                if (failAt === 'init') throw new Error('init refused');
+            },
+            start: async () => {
+                if (failAt === 'start') throw new Error('start refused');
+            },
+        });
+
+        await expect(kernel.bootstrap()).rejects.toThrow('refused');
+        await kernel.shutdown();
+
+        expect(log.filter((entry) => entry === 'test.holder:destroy')).toHaveLength(1);
+        expect(holder.open).toBe(false);
+        expect(kernel.getState()).toBe('stopped');
+    });
+
+    it('rollbackOnFailure: false leaves an initialised plugin alone when a later init() refuses the boot', async () => {
+        const log: string[] = [];
+        const holder: FakeResource = { open: false };
+        const kernel = newKernel({ rollbackOnFailure: false });
+        await kernel.use(initHolder('test.holder', log, holder));
+        await kernel.use({
+            name: 'test.init-thrower',
+            version: '1.0.0',
+            dependencies: ['test.holder'],
+            init: async () => { throw new Error('init refused'); },
+        });
+
+        await expect(kernel.bootstrap()).rejects.toThrow('init refused');
+
+        expect(log).toEqual(['test.holder:init']);
+        expect(holder.open).toBe(true);
+    });
+});
