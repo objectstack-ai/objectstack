@@ -26,6 +26,9 @@ const manifest = (namespace: string): SettingsManifest => ({
   specifiers: [
     { type: 'toggle', key: 'feature_on', label: 'Feature', default: true },
     { type: 'number', key: 'limit', label: 'Limit', default: 5 },
+    // No manifest default: its OS_* type comes from the declaration alone.
+    { type: 'toggle', key: 'bare', label: 'Bare' },
+    { type: 'text', key: 'extra', label: 'Extra', required: true, visible: '${data.feature_on !== false}' },
   ],
 } as unknown as SettingsManifest);
 
@@ -105,6 +108,35 @@ describe('SettingsService declared default', () => {
     const said = logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes("'demo.feature_on'"));
     expect(said).toHaveLength(1);
     expect(said[0]).toContain('manager gone');
+  });
+
+  it('a provider that answers a promise is a fault: the manifest default answers, said once', async () => {
+    const { svc, logger } = rig();
+    svc.registerDeclaredDefault('demo', 'feature_on', () => Promise.resolve(false));
+    expect(await svc.get('demo', 'feature_on')).toMatchObject({ value: true, source: 'default' });
+    expect(logger.warn.mock.calls.map((c) => String(c[0])).filter((m) => m.includes('promise'))).toHaveLength(1);
+  });
+
+  it('a clear in a patch takes the declaration for the patch\'s visibility map', async () => {
+    // Declared off: clearing feature_on hides `extra`, so its `required` is not judged.
+    const { svc } = rig();
+    svc.registerDeclaredDefault('demo', 'feature_on', () => false);
+    await svc.setMany('demo', { feature_on: true, extra: 'x' });
+    await expect(svc.setMany('demo', { feature_on: null, extra: '' })).resolves.toBeDefined();
+    // CONTROL: no provider, the clear falls back to the manifest default (on), so `extra` is required.
+    const { svc: plain } = rig();
+    await plain.setMany('demo', { feature_on: false });
+    await expect(plain.setMany('demo', { feature_on: null, extra: '' })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'extra', code: 'required' })],
+    });
+  });
+
+  it('an OS_* value is read as the type of the declaration where the manifest declares no default', async () => {
+    const { svc } = rig({ OS_DEMO_BARE: 'yes' });
+    expect(await svc.get('demo', 'bare')).toMatchObject({ value: 'yes', source: 'env' });
+    svc.registerDeclaredDefault('demo', 'bare', () => false);
+    expect(await svc.get('demo', 'bare')).toMatchObject({ value: true, source: 'env' });
   });
 
   it('registration refuses an unknown namespace or key', () => {

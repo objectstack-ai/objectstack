@@ -42,7 +42,7 @@ import { AUTH_LIVE_STATUS_COPY, describeEmailPasswordLiveStatus } from './auth-s
 
 const SECRET = 'test-secret-at-least-32-chars-long';
 const ADMIN = { enforced: true, permissions: ['manage_platform_settings'], userId: 'usr_admin' };
-const ENV_KEYS = ['OS_CLOUD_MANAGED', 'OS_AUTH_EMAIL_PASSWORD_ENABLED', 'OS_AUTH_SSO_ONLY'] as const;
+const ENV_KEYS = ['OS_CLOUD_MANAGED', 'OS_AUTH_EMAIL_PASSWORD_ENABLED', 'OS_AUTH_SSO_ONLY', 'OS_DISABLE_SIGNUP'] as const;
 
 describe('Setup → Authentication shows the auth switches as they run', () => {
   const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
@@ -236,6 +236,40 @@ describe('Setup → Authentication shows the auth switches as they run', () => {
     const ssoOnly = await boot();
     expect(ssoOnly.manager.getPublicConfig().emailPassword.disableSignUp).toBe(true);
     expect(await ssoOnly.settings.get('auth', 'signup_enabled')).toMatchObject({ value: false, source: 'default' });
+  });
+
+  it('signup_enabled reads off where a cloud-managed runtime or OS_DISABLE_SIGNUP turns sign-up off', async () => {
+    process.env.OS_DISABLE_SIGNUP = 'true';
+    const envOff = await boot();
+    expect(envOff.manager.getPublicConfig().emailPassword.disableSignUp).toBe(true);
+    expect(await envOff.settings.get('auth', 'signup_enabled')).toMatchObject({ value: false, source: 'default' });
+    delete process.env.OS_DISABLE_SIGNUP;
+
+    setManaged(true);
+    const managed = await boot();
+    expect(managed.manager.getPublicConfig().emailPassword.disableSignUp).toBe(true);
+    expect(await managed.settings.get('auth', 'signup_enabled')).toMatchObject({ value: false, source: 'default' });
+  });
+
+  it('declared off, nothing stored: the keys shown only while email and password is on are hidden, so a save of one is not judged', async () => {
+    // The same as under a stored `false`: password_min_length (min 6) is visible only while
+    // email_password_enabled !== false, and a hidden specifier is not validated.
+    const off = await boot({ emailPassword: false });
+    await expect(off.settings.setMany('auth', { password_min_length: 2 })).resolves.toBeDefined();
+    expect(await off.settings.get('auth', 'password_min_length')).toMatchObject({ value: 2, source: 'global' });
+    // Turning email and password on re-judges it (it is the gated key's visibility dependency).
+    await expect(off.settings.setMany('auth', { email_password_enabled: true })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'password_min_length' })],
+    });
+
+    // CONTROL: declared on, the same save is refused at the key's bound.
+    const on = await boot();
+    await expect(on.settings.setMany('auth', { password_min_length: 2 })).rejects.toMatchObject({
+      code: 'SETTINGS_VALIDATION',
+      fields: [expect.objectContaining({ field: 'password_min_length' })],
+    });
+    expect(await on.settings.get('auth', 'password_min_length')).toMatchObject({ source: 'default' });
   });
 
   it('require_email_verification reads the declaration under the posture in force; CONTROL off', async () => {

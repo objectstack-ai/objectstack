@@ -2233,6 +2233,11 @@ export class SettingsService {
     if (provider) {
       try {
         const declared = provider();
+        // A provider is synchronous by contract (the cascade reads it inline);
+        // a promise would be served as the value, so it is a fault like a throw.
+        if (declared !== null && typeof declared === 'object' && typeof (declared as { then?: unknown }).then === 'function') {
+          throw new Error('the provider answered a promise; a declared default is answered synchronously');
+        }
         if (declared !== null && declared !== undefined) return declared;
       } catch (err: any) {
         const id = `${namespace}.${key}`;

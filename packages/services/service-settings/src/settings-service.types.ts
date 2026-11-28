@@ -565,8 +565,10 @@ export type SettingsLiveStatusProvider = (input: {
  * moment it is used, never recorded: on every read that reaches the bottom
  * rung (`get`, `getMany`, `getNamespace`, and through them a write's change
  * test), when a patch clears the key, and as the type an `OS_*` value is read
- * as. A provider that throws is reported once and the manifest `default`
- * answers in its place.
+ * as. Answered synchronously: a provider that throws, or that answers a
+ * promise, is reported once and the manifest `default` answers in its place.
+ * The answer is not judged against the specifier's type or options: it is the
+ * running system's own value, and the provider owns its shape.
  *
  * The answer still reports `source: 'default'`: the value is the deployment's
  * default, nothing is stored, and a clear returns to it.
