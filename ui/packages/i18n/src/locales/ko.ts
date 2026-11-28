@@ -4487,6 +4487,8 @@ const ko = {
     statusExecuted: "실행됨",
     statusFailed: "실패",
     statusRejected: "거부됨",
+    statusExpired: "만료됨",
+    expiredDetail: "기한 내에 처리되지 않았거나 요청한 사람이 접근 권한을 잃었습니다.",
     colTool: "도구",
     colAction: "작업",
     colObject: "객체",
