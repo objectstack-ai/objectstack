@@ -56,6 +56,26 @@ export const ReportChartSchema = lazySchema(() => ChartConfigSchema.extend({
     + '(bound-dataset dimension, not a raw field); with it set, `series[].name` names a value of this dimension. '
     + 'Refused on a single-series type (' + SINGLE_SERIES_CHART_TYPES.join('/') + ') and when it names the xAxis dimension',
   ),
+  /**
+   * Show the groups that hold no records. A grouped query answers one row per
+   * value that HOLDS rows, so a stage with no deals is absent from a
+   * "deals by stage" chart rather than reading as zero. With this on, the
+   * report renderer adds every DECLARED option of the `xAxis` dimension's
+   * field that the answer left out, valued the way the analytics
+   * executor values any empty group (`emptyGroupValueFor`: `0` for count and
+   * sum, empty for avg/min/max).
+   *
+   * Only a dimension whose field declares its options is filled (a select or
+   * similar); a free-text or lookup dimension has no known set of values. Not
+   * filled when the answer is truncated or ordered by a measure, where an added
+   * group would compete for a place it did not earn. A date axis needs no
+   * switch: the executor already fills every bucket of the report's period.
+   * Omitted = off, and the chart draws exactly the groups the query returned.
+   */
+  showEmptyGroups: z.boolean().optional().describe(
+    'Show the declared options of the xAxis dimension field that have no records, valued 0 for a count or sum '
+    + '(left empty for avg/min/max). Only a field that declares its options is filled; omitted = off',
+  ),
 }));
 
 /**
