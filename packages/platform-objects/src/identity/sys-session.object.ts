@@ -80,7 +80,7 @@ export const SysSession = ObjectSchema.create({
       label: 'Sign out other devices',
       icon: 'log-out',
       variant: 'danger',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/revoke-other-sessions',
       confirmText: 'Sign out of every other device where you\'re currently logged in? Your current session will remain active.',
@@ -101,7 +101,7 @@ export const SysSession = ObjectSchema.create({
       icon: 'log-out',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       // Keyed on the row's `id` — every list row carries it — and resolved to
       // the session SERVER-side by plugin-auth's `sys-session/revoke` door, so

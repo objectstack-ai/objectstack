@@ -101,7 +101,7 @@ const obj = (name: string, fields: Bag = { title: { name: 'title', type: 'text',
 const recordPage = (name: string, object: string) => ({ name, label: name, type: 'record', object, isDefault: true, regions: [] });
 /** A top-level action bound by `objectName` to `objectName`. */
 const boundAction = (objectName: string) => ({
-    name: 'routing_ping', label: 'Ping', objectName, type: 'url', target: 'https://example.com/ping', locations: ['record_header'],
+    name: 'routing_ping', label: 'Ping', objectName, type: 'url', target: 'https://example.com/ping', locations: ['record_page'],
 });
 
 /** A package version whose namespace is its id's last segment. */

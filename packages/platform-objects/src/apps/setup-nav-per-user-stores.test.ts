@@ -16,7 +16,7 @@
 //       view (the grid the menu entry opened) did not show, and authors no
 //       `add` picker and no `actions` — so it exposes nothing new;
 //   (4) the Linked Accounts list already served "Identity links", and the one
-//       row action that grid offered, `unlink_account`, is a `list_item`
+//       row action that grid offered, `unlink_account`, is a `record_row`
 //       action, which a related list's host offers on its rows.
 //
 // Reach, stated so a green run is not read wider than it is: (1) reads
@@ -147,6 +147,6 @@ describe('(4) Linked Accounts already serves "Identity links" (#23803)', () => {
   it('the grid\'s one row action, unlink_account, is offered on list rows', () => {
     const unlink = (SysAccount.actions ?? []).find((a) => a.name === 'unlink_account');
     expect(unlink, 'sys_account lost unlink_account').toBeDefined();
-    expect(unlink?.locations).toContain('list_item');
+    expect(unlink?.locations).toContain('record');
   });
 });

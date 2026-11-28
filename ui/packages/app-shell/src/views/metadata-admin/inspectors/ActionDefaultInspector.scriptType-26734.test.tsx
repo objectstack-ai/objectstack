@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
@@ -78,7 +80,7 @@ const NEW_UPDATE_ACTION: Draft = {
   name: 'invoice_action_2',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };
@@ -106,7 +108,7 @@ describe('scriptTypePin — a script authored here is stored with its type (obje
       name: 'run_script',
       label: 'Run',
       objectName: 'invoice',
-      locations: ['record_more'],
+      locations: ['record_page'], component: 'action:menu',
       body: { language: 'expression', source: 'true' },
     });
     expect(typeControl()).not.toHaveTextContent(SCRIPT);
@@ -138,7 +140,7 @@ describe('scriptTypePin — a script authored here is stored with its type (obje
       name: 'invoice_sync',
       label: 'Sync',
       objectName: 'invoice',
-      locations: ['record_more'],
+      locations: ['record_page'], component: 'action:menu',
       type: 'script',
       body: { language: 'expression', source: 'true' },
     });

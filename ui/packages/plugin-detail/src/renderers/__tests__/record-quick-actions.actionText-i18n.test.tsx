@@ -33,7 +33,7 @@ const CONVERT_LEAD = {
   label: 'Convert Lead',
   confirmText: 'Are you sure you want to convert this lead?',
   successMessage: 'Lead converted.',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 
 const ZH_BUNDLE = {

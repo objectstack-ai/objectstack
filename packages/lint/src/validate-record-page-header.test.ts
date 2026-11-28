@@ -36,9 +36,9 @@ const LEAD = {
 
 /** The lead's actions in source order, none declaring `order` or a variant. */
 const leadActions = (): AnyRec[] => [
-  { name: 'convert_lead', objectName: 'crm_lead', type: 'script', locations: ['record_header'] },
-  { name: 'qualify_lead', objectName: 'crm_lead', type: 'script', locations: ['record_header'] },
-  { name: 'schedule_followup', objectName: 'crm_lead', type: 'script', locations: ['record_header'] },
+  { name: 'convert_lead', objectName: 'crm_lead', type: 'script', locations: ['record_page'] },
+  { name: 'qualify_lead', objectName: 'crm_lead', type: 'script', locations: ['record_page'] },
+  { name: 'schedule_followup', objectName: 'crm_lead', type: 'script', locations: ['record_page'] },
 ];
 
 const header = (properties: AnyRec): AnyRec => ({ type: 'page:header', properties });
@@ -153,13 +153,13 @@ describe('validateRecordPageHeader · the actions', () => {
 
   it('compares the row of buttons and the overflow menu apart, as they are drawn', () => {
     // `archive_lead` is overflow-only: wherever the list names it, it is drawn after every button.
-    const actions = [...leadActions(), { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_more'] }];
+    const actions = [...leadActions(), { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_page'], component: 'action:menu' }];
     const list = ['archive_lead', 'convert_lead', 'qualify_lead', 'schedule_followup'];
     expect(validateRecordPageHeader(stackOf(leadPage({ actions: list }), actions))).toEqual([]);
   });
 
   it('counts an unlisted placed action that leads the standard page', () => {
-    const actions = [{ name: 'log_call', objectName: 'crm_lead', locations: ['record_header'], order: -5 }, ...leadActions()];
+    const actions = [{ name: 'log_call', objectName: 'crm_lead', locations: ['record_page'], order: -5 }, ...leadActions()];
     const list = ['convert_lead', 'qualify_lead', 'schedule_followup'];
     const findings = validateRecordPageHeader(stackOf(leadPage({ actions: list }), actions));
     expect(findings.map((f) => f.rule)).toEqual([RECORD_PAGE_HEADER_ACTIONS_DIFFER]);
@@ -167,7 +167,7 @@ describe('validateRecordPageHeader · the actions', () => {
   });
 
   it('reads the object\'s own actions ahead of the stack\'s bound ones', () => {
-    const lead = { ...LEAD, actions: [{ name: 'qualify_lead', locations: ['record_header'] }] };
+    const lead = { ...LEAD, actions: [{ name: 'qualify_lead', locations: ['record_page'] }] };
     const stack = stackOf(leadPage({ actions: LISTED }), leadActions().slice(0, 1).concat(leadActions().slice(2)), [lead]);
     expect(validateRecordPageHeader(stack)).toEqual([]);
   });
@@ -175,9 +175,9 @@ describe('validateRecordPageHeader · the actions', () => {
   it('skips a destructive or menu-only action when picking the primary, as the renderer does', () => {
     // Unlisted, so only the standard page draws them, and first by order: neither is its primary.
     const actions = [
-      { name: 'delete_lead', objectName: 'crm_lead', locations: ['record_header'], order: -9, variant: 'danger' },
-      { name: 'more_menu', objectName: 'crm_lead', locations: ['record_header'], order: -8, component: 'action:menu' },
-      { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_more'], order: -7 },
+      { name: 'delete_lead', objectName: 'crm_lead', locations: ['record_page'], order: -9, variant: 'danger' },
+      { name: 'more_menu', objectName: 'crm_lead', locations: ['record_page'], order: -8, component: 'action:menu' },
+      { name: 'archive_lead', objectName: 'crm_lead', locations: ['record_page'], component: 'action:menu', order: -7 },
       ...leadActions(),
     ];
     const list = ['convert_lead', 'qualify_lead', 'schedule_followup'];

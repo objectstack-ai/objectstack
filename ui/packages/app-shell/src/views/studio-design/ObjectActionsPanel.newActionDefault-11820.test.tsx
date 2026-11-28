@@ -31,7 +31,7 @@ const existing = {
   label: 'Send Email',
   type: 'script',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   body: { language: 'expression', source: 'true' },
 };
 
@@ -66,7 +66,7 @@ describe('newActionPin — a new action is a declarative field update (objectui#
       objectName: 'invoice',
       operation: 'update',
       patch: {},
-      locations: ['record_header'],
+      locations: ['record_page'],
     });
     expect(added).not.toHaveProperty('body');
     expect(added).not.toHaveProperty('target');

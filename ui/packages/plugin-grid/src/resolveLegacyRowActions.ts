@@ -13,7 +13,7 @@
  * Two vocabularies reach the row menu:
  *
  *  1. `rowActionDefs` — full `ActionDef` records the view already derived from
- *     `objectDef.actions` filtered by `locations.includes('list_item')`. These
+ *     `objectDef.actions` filtered by `actionRendersAt(action, 'record_row')`. These
  *     dispatch through the action runner with their own type/target/params, so
  *     they actually run.
  *
@@ -23,7 +23,7 @@
  *     registered under that name) fell through to the runner's schema fallback
  *     — zero requests, then a green "Action completed successfully" toast
  *     (objectui#2960). Worse, when the same action ALSO declared
- *     `locations: ['list_item']`, the menu showed a working entry and a dead
+ *     `locations: ['record_row']`, the menu showed a working entry and a dead
  *     duplicate of it side by side.
  *
  * Resolving each legacy name against the object's declared actions collapses
@@ -56,7 +56,7 @@ export function resolveLegacyRowActions(opts: {
    * `'delete'` entries (those route to `onEdit` / `onDelete`, not the runner).
    */
   rowActions?: readonly string[] | null;
-  /** Row-context defs the view resolved from `locations: ['list_item']`. */
+  /** Row-context defs the view resolved from `locations: ['record_row']`. */
   rowActionDefs?: readonly NamedActionDef[] | null;
   /** Every action declared on the object (`objectDef.actions`). */
   objectActions?: readonly NamedActionDef[] | null;
@@ -88,7 +88,7 @@ export function resolveLegacyRowActions(opts: {
 
   for (const name of names) {
     if (typeof name !== 'string' || name === '') continue;
-    // Already rendered as a def (either a `list_item` action of the same name,
+    // Already rendered as a def (either a `record_row` action of the same name,
     // or an earlier promotion of a repeated legacy entry) — drop the duplicate.
     if (claimed.has(name)) continue;
     const match = objectActions.find(a => a?.name === name);

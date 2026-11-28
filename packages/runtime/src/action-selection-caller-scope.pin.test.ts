@@ -75,7 +75,7 @@ const SELECTION_ACTION = {
   label: 'Close selected',
   type: 'script',
   target: ACTION,
-  locations: ['list_toolbar'],
+  locations: ['list'],
   execution: 'aggregate',
   ai: { exposed: true, description: 'Close every selected ticket in one call.' },
 };

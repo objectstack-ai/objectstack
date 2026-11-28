@@ -35,7 +35,7 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  *
  * ## Calibration against the running app (Chromium, console dev server,
  * `type: 'detail'` and `<PageHeader actions={…}>`, three labelled
- * `record_header` actions, viewport 799px, objectui#7281):
+ * `record_page` actions, viewport 799px, objectui#7281):
  *
  *   DetailView  before: h1  6.17px of a 218px scrollWidth, tail 724.83px
  *               after:  h1 218.39px, tail wrapped to its own line
@@ -151,7 +151,7 @@ const ICON_BUTTON = 'h-10 w-10 shrink-0';
  * arbitrate at all.
  *
  * So these two match what the running app actually produced with three
- * labelled `record_header` actions at 799px (DetailView 724.83px,
+ * labelled `record_page` actions at 799px (DetailView 724.83px,
  * PageHeader 564.41px), not a width chosen to make a floor look needed:
  *   DetailView  4 x 176px + 3 x 6px (`gap-1.5`) = 722px
  *   PageHeader  3 x 192px + 2 x 8px (`gap-2`)   = 592px

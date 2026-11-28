@@ -18,7 +18,7 @@ import type { Page } from '@objectstack/spec/ui';
  * swapped in — node for node:
  *
  *  - `page:header` with `placedActions: true` (#29951): every action placed on
- *    `sys_organization` at `record_header` / `record_more`, read live (Set
+ *    `sys_organization` at `record` / `record_page`, read live (Set
  *    Active, Invite User, Leave Organization, Rename Organization — Edit and
  *    Delete are row actions only — and any an installed package places
  *    there), the set the synthesized header carried. A full page renders
@@ -59,7 +59,7 @@ export const SysOrganizationDetailPage: Page = {
       width: 'full',
       components: [
         // The synthesized header's action set, read live: every action placed
-        // on `sys_organization` at `record_header` or `record_more`, in
+        // on `sys_organization` at `record` or `record_page`, in
         // declaration order, including one another package places there (a
         // frozen id list dropped those, #29951). The host appends its own
         // system actions after these.

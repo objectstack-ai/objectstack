@@ -316,7 +316,7 @@ describe('en-US labels are unchanged by the key migration (#3913)', () => {
     // options, incl. the shared `format` list and the shared ALIGN_OPTS
     'engine.inspector.pageBlock.option.format.currency': 'Currency',
     'engine.inspector.pageBlock.option.align.center': 'Center',
-    'engine.inspector.pageBlock.option.location.record_more': 'Record more menu',
+    'engine.inspector.pageBlock.option.location.record': 'Record · page and rows',
     'engine.inspector.pageBlock.option.severity.warning': 'Warning',
     // ── the placeholder family (#3979) ───────────────────────────────────────
     // ALL SIX, not a sample: this column was migrated by hand rather than

@@ -21,7 +21,7 @@
  * the declaration the platform object carried — is mounted beside the
  * showcase. Then:
  *  - `GET /meta/object/sys_organization` serves `change_slug` once, with the
- *    orchestrator's target, method, `record_header` location and one `slug`
+ *    orchestrator's target, method, `record_page` location and one `slug`
  *    param, and the `multiOrgEnabled` gate lowered exactly as the platform's
  *    own `requiresFeature` actions are;
  *  - the gate admits it with multi-org on and hides it with multi-org off,
@@ -57,7 +57,7 @@ const cloudShaped = defineStack({
       icon: 'edit-3',
       variant: 'secondary',
       mode: 'custom',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       target: TARGET,
       method: 'POST',
@@ -113,7 +113,7 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
   it('serves change_slug once, with the orchestrator target, its location and its one slug param', () => {
     const served = actions.filter((a) => a.name === 'change_slug');
     expect(served).toHaveLength(1);
-    expect(served[0]).toMatchObject({ type: 'api', target: TARGET, method: 'POST', locations: ['record_header'] });
+    expect(served[0]).toMatchObject({ type: 'api', target: TARGET, method: 'POST', locations: ['record_page'] });
     expect(served[0].params).toEqual([{ field: 'slug', required: true, defaultFromRow: true }]);
   });
 
@@ -143,7 +143,8 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
 
   it('sorts after the rename and before leave in the record header, so it sits in the overflow', () => {
     const header = actions
-      .filter((a) => (a.locations ?? []).includes('record_header'))
+      // `record` covers the record page too (objectstack#36495).
+      .filter((a) => (a.locations ?? []).some((l: string) => l === 'record_page' || l === 'record'))
       .map((a, i) => ({ a, i }))
       .sort((x, y) => (x.a.order ?? 0) - (y.a.order ?? 0) || x.i - y.i)
       .map(({ a }) => a.name);

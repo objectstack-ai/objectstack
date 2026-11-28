@@ -142,7 +142,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
       target: '/api/v1/approvals/requests/{id}/approve',
       params: [{ name: 'comment', label: 'Comment', type: 'textarea', required: false }],
       visible: 'record.viewer.can_act || record.viewer.can_override',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Approved.', refreshAfter: true,
     },
     {
@@ -151,7 +151,7 @@ const SYS_APPROVAL_REQUEST_DEF = {
       params: [{ name: 'comment', label: 'Comment', type: 'textarea', required: false }],
       visible: 'record.viewer.can_act || record.viewer.can_override',
       confirmText: 'Reject this request?',
-      locations: ['record_section', 'list_item'],
+      locations: ['record_section', 'record_row'],
       successMessage: 'Rejected.', refreshAfter: true,
     },
   ],

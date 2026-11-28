@@ -4,7 +4,7 @@
  * #8990 — the showcase's authored predicates survive the SPARSE action face.
  *
  * `predicate-matrix.action.ts` is a LIVE browser specimen: every gate in it is
- * declared on `list_item` / `record_more`, so its `visible` binds a LIST ROW
+ * declared on `record` (the row and the record page), so its `visible` binds a LIST ROW
  * carrying only the view's `$select` projection — not a total record. Unguarded,
  * a predicate reading a column the list does not show aborts at key resolution,
  * and CEL's fault is fail-closed: the button silently is not offered, which

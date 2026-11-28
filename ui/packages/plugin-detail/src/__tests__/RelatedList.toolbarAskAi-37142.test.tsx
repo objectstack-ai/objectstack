@@ -33,7 +33,7 @@ afterEach(() => {
 const ASK = { name: 'ask_about_contact', label: 'Ask AI', type: 'ask_ai' };
 const EXPORT = { name: 'export', label: 'Export' };
 
-describe('RelatedList list_toolbar — no ask_ai', () => {
+describe('RelatedList list — no ask_ai', () => {
   it('leaves ask_ai out with an in-app assistant installed, and keeps the rest', async () => {
     render(
       <ActionProvider context={{ objectName: 'account', record: { id: 'acc_1' } }} onAskAi={vi.fn()}>

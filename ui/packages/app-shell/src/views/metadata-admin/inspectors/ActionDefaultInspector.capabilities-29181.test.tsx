@@ -36,6 +36,8 @@ import { t } from '../i18n';
 import { ActionDefaultInspector } from './ActionDefaultInspector';
 // `engine.inspector.*` rows live in the lazy `studio` namespace (objectstack#25922).
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 afterEach(cleanup);
@@ -52,7 +54,7 @@ const NEW_ACTION: Draft = {
   name: 'invoice_action_1',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };
@@ -62,7 +64,7 @@ const STORED_JS: Draft = {
   name: 'invoice_stamp',
   label: 'Stamp',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'js', source: 'return { ok: true };' },
 };

@@ -62,8 +62,8 @@ beforeAll(() => {
 });
 
 const CHILD_ACTIONS = [
-  { name: 'invite', label: 'Invite', type: 'api', locations: ['list_toolbar'] },
-  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list_toolbar'] },
+  { name: 'invite', label: 'Invite', type: 'api', locations: ['list'] },
+  { name: 'export_csv', label: 'Export CSV', type: 'api', locations: ['list'] },
 ];
 const CHILD = { name: 'contact', label: 'Contact', actions: CHILD_ACTIONS };
 

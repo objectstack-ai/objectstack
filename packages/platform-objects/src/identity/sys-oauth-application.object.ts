@@ -63,7 +63,7 @@ export const SysOauthApplication = ObjectSchema.create({
   //
   // The two toggle predicates are guarded for the SPARSE action face (#8990),
   // and this pair is where the guard actually changes what a user sees. Both
-  // reach `list_item`, and `disabled` is nullable upstream (better-auth writes
+  // reach `record_row`, and `disabled` is nullable upstream (better-auth writes
   // the column only when it is set), so a list row can carry it PROJECTED AND
   // NULL. Measured against the `@objectstack/formula` CEL engine, the old
   // spellings both broke on exactly that row: `!record.disabled` FAULTED
@@ -96,7 +96,7 @@ export const SysOauthApplication = ObjectSchema.create({
       icon: 'pause-circle',
       variant: 'secondary',
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
@@ -131,7 +131,7 @@ export const SysOauthApplication = ObjectSchema.create({
       icon: 'play-circle',
       variant: 'primary',
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/admin/oauth2/toggle-disabled',
@@ -160,7 +160,7 @@ export const SysOauthApplication = ObjectSchema.create({
       icon: 'plus-circle',
       variant: 'primary',
       mode: 'create',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/sys-oauth-application/register',
@@ -216,7 +216,7 @@ export const SysOauthApplication = ObjectSchema.create({
       icon: 'refresh-cw',
       variant: 'secondary',
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/oauth2/client/rotate-secret',
@@ -253,7 +253,7 @@ export const SysOauthApplication = ObjectSchema.create({
       icon: 'trash',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       method: 'POST',
       target: '/api/v1/auth/oauth2/delete-client',

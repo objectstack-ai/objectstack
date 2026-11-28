@@ -12,9 +12,9 @@
  *
  * The record page's api handler used to gate `{field}` interpolation on
  * `params._rowRecord` alone — a stash only related-list row dispatches
- * carried. A `record_header` action targeting `/api/v1/data/:object/{id}`
+ * carried. A `record_page` action targeting `/api/v1/data/:object/{id}`
  * therefore went out with the literal `{id}` (`%7Bid%7D` on the wire → 400),
- * while the SAME declaration on `list_item` interpolated fine.
+ * while the SAME declaration on `record_row` interpolated fine.
  *
  * These tests exercise the handler set the view REALLY hands to its
  * ActionProvider (captured via a pass-through wrapper, same harness as

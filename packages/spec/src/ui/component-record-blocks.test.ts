@@ -218,7 +218,7 @@ describe('ComponentPropsMap["record:quick_actions"]', () => {
   });
 
   it('vets `location` against the spec\'s own ActionLocationSchema — one vocabulary, not a restatement', () => {
-    expect(RecordQuickActionsProps.parse({ location: 'record_more' }).location).toBe('record_more');
+    expect(RecordQuickActionsProps.parse({ location: 'record_related' }).location).toBe('record_related');
     expect(RecordQuickActionsProps.safeParse({ location: 'toolbar' }).success).toBe(false);
     // The retired location keeps its retirement prescription — proof the row
     // rides the shared enum rather than a copy of its values.
@@ -236,7 +236,7 @@ describe('ComponentPropsMap["record:quick_actions"]', () => {
   });
 
   it('materializes nothing for the silent author — no schema defaults', () => {
-    // `record_header` / `end` / `default` / `sm` are the renderer's fallbacks.
+    // `record_page` / `end` / `default` / `sm` are the renderer's fallbacks.
     // NOTE the measured empty-bar truth: with no `actionNames` (and no host
     // actions) the renderer resolves NOTHING and renders its placeholder — it
     // does NOT fall back to "every action at this location", whatever the

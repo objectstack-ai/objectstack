@@ -147,8 +147,9 @@ export type SidebarGroupContributionParsed = z.infer<typeof SidebarGroupContribu
  * [#4737] This was exported as `ActionLocationSchema` until v17 — the same
  * name `@objectstack/spec/ui` exports for a DIFFERENT concept: the
  * platform-canonical vocabulary for where an action renders in a running
- * application's UI (`list_toolbar`, `record_header`, …, `record_section`;
- * 7 values at the time of the rename, 6 since #6888 retired `global_nav`), whose
+ * application's UI (`list`, `record`, …, `record_section`;
+ * 7 values at the time of the rename, 6 since #6888 retired `global_nav`, renamed
+ * to what an action acts on in protocol 19), whose
  * docblock declares it "single source of truth for the whole platform". This
  * one is the 3-value Studio IDE surface enum consumed only by
  * `ActionContributionSchema.location` below. Same name, disjoint
