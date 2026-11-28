@@ -57,7 +57,7 @@ after an operation — see [Before vs After](#before-vs-after-hooks).
 | **Purpose** | Validation, enrichment, transformation | Side effects, notifications, logging |
 | **Can modify** | `ctx.input` (mutable) | `ctx.result` (mutable) |
 | **Can abort** | Yes (throw error → rollback) | A sync after-hook's throw still rolls back the transaction (see error handling) |
-| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes; no per-hook opt-out. Exits: a caller's open transaction decides; a hooked object off the default datasource, or a default driver with no transactions (Turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code (`registerHook`) opens none. MongoDB needs a replica set (read in code, not measured) | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
+| **Transaction** | One transaction with the outer write: a refusal anywhere in it (a validation, a later hook, a driver constraint) rolls back the hook's `ctx.api` writes; no per-hook opt-out. Exits: a caller's open transaction decides; a hooked object off the default datasource, or a default driver with no transactions (Turso's remote transport), opens none, so those writes stay stored after a refusal; a hook registered in code (`registerHook`) opens none. A standalone MongoDB refuses every write of such a transaction (501 `NOT_IMPLEMENTED`); a single-node replica set is enough. On PostgreSQL and a MongoDB replica set a failed `ctx.api` statement refuses the outer write even when caught, logged (`onError: 'log'`) or retried (`25P02` / `251`); SQLite lets it through | **Within the transaction**. `async: true` on `afterInsert` / `afterUpdate` / `afterDelete`: starts once the outermost transaction commits, never if it rolls back (a failed commit included); on `afterFind`: starts as the read is dispatched; outside a transaction: starts at once |
 | **Error handling** | Aborts by default (`onError: 'abort'`) | **Also aborts by default** — `onError` defaults to `'abort'` unconditionally; set `onError: 'log'` on side-effect hooks |
 
 ---
@@ -79,13 +79,13 @@ const myHook = defineHook({
   // Required: Unique identifier (snake_case)
   name: 'crm_validation_hook',
 
-  // Required: Target object(s)
+  // Required
   object: 'account',  // string | string[] | '*'
 
-  // Required: Events to subscribe to
+  // Required
   events: ['beforeInsert', 'beforeUpdate'],
 
-  // The logic: a sandboxed body (the inline `handler` is deprecated)
+  // The logic: a sandboxed body
   body: {
     language: 'js',
     source: `/* statements against ctx */`,
@@ -101,16 +101,16 @@ const myHook = defineHook({
   // Optional: Conditional execution (CEL predicate over `record`)
   condition: P`record.status == 'active' && record.amount != null && record.amount > 1000`,
 
-  // Optional: Human-readable description
+  // Optional
   description: 'Validates account data before save',
 
-  // Optional: Error handling strategy
+  // Optional
   onError: 'abort',  // 'abort' | 'log'
 
-  // Optional: Execution timeout (ms)
+  // Optional, ms
   timeoutMs: 5000,
 
-  // Optional: Retry policy
+  // Optional
   retryPolicy: {
     maxRetries: 3,
     backoffMs: 1000,
@@ -206,11 +206,9 @@ body: {
 ```
 
 - `source` is the **function body**, which the runtime wraps as
-  `(async (ctx) => { <source> })(ctx)`. Write **statements** against `ctx`;
-  `await` is allowed.
+  `(async (ctx) => { <source> })(ctx)`. Write **statements** against `ctx`.
 - In a `before*` hook, change the write by assigning `ctx.input.x = …` **or**
-  `return { x: … }` (a returned object is shallow-merged onto `ctx.input`). In an
-  `after*` hook the body is for side effects (cross-object writes, logging).
+  `return { x: … }` (a returned object is shallow-merged onto `ctx.input`).
 - `language: 'expression'` is a pure CEL formula for a computed value or
   predicate — no IO, no `ctx.api`.
 
@@ -300,7 +298,7 @@ tokens (`HookBodyCapability`) are exactly seven:
 |:--|:--|
 | `api.read` | `ctx.api.object(n).find` / `findOne` / `count` / `aggregate`; also `ctx.title('<lookup field>')`. |
 | `api.write` | `ctx.api.object(n).insert` / `update` / `delete` |
-| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on the default datasource**: commit on return, rollback on throw. A write in it to an object on any other datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`). Inside a unit already open (the one the hook's write runs in, or a caller's) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Pair it with `api.write`. |
+| `api.transaction` | `ctx.api.transaction(async () => { … })` — runs the callback's `ctx.api` ops in **one transaction on the default datasource**: commit on return, rollback on throw. A write in it to an object on another datasource is refused before it runs (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`), except an append-only ledger (`lifecycle.class` `audit` / `telemetry` / `event`), written outside the unit and surviving its rollback. Inside a unit already open (the hook's write's, a caller's, or one an action body opened with `ctx.api.transaction`) it **joins** that unit: its return is no commit and its throw no rollback; the outer unit commits or rolls back all of it, so a throw the body catches keeps the callback's writes. Hooks of a write made inside a body's transaction run in that unit, and their `ctx.api` writes and own `ctx.api.transaction` join it. One level per body: a nested call is refused ("nested ctx.api.transaction is not supported"). On PostgreSQL and a MongoDB replica set a failed statement aborts the whole unit, even when caught. A driver with no transactions runs the callback with none and no warning: each write is stored as made, and a throw undoes none. Pair it with `api.write`. |
 | `crypto.uuid` | `ctx.crypto.randomUUID()` |
 | `log` | `ctx.log.debug` / `info` / `warn` / `error(msg, data?)` |
 | `email.send` | `ctx.email.send({ to, subject, text })` — mail via the mail service; sender, user and organization are stamped (`BodyMailSendInputSchema`). **Not in a hook body** (refused at parse and at bind): a message cannot be taken back if the hook's write rolls back. Mail on a record change goes through an action, a job or a flow. |
@@ -312,7 +310,7 @@ There is **no `http.fetch` capability** by design — outbound calls go through
 
 ### Sandbox restrictions
 
-The body runs in an isolated QuickJS VM, **not** Node:
+The body's VM is **not** Node:
 
 - **Available:** standard JS built-ins — `Date`, `Math`, `JSON`, `Object`,
   `Array`, `String`, `Number`, `RegExp`, `Map`, `Set`, `Promise`, `parseInt`,
@@ -348,9 +346,7 @@ you want to branch on — is **absent**, not stale. To read the whole record,
 re-query it:
 
 ```js
-// afterUpdate on `candidate`
 const full = await ctx.api.object('candidate').findOne({ where: { id: ctx.result.id } });
-// full.position_id is present even though this PATCH only set `stage`.
 ```
 
 ### ⚠️ Gotcha 2 — cross-object writes obey the *target's* sharing model
@@ -365,7 +361,7 @@ FORBIDDEN: <a localized sentence; match on code, not prose>
 ```
 
 **An admin is not automatically exempt** — the gate is `canEdit`, driven by the
-sharing model, not a global admin bypass. If a hook must write a target, give the
+sharing model. If a hook must write a target, give the
 acting principal edit access to it (sharing rule / permission set), or drive the
 write from a system-context automation.
 
@@ -409,7 +405,7 @@ export default fillPositionOnHire;
   `FORBIDDEN` cross-object write (gotcha 2), or a `ReferenceError` from a free
   identifier or an unavailable global (e.g. `console`).
 - **`ctx.log.*` produced no output** — two independent causes: (1) without the
-  `log` capability the call **throws** (surfaces as a hook error); (2) **with** the
+  `log` capability the call **throws**; (2) **with** the
   capability it emits only when the runtime wired a logger into the hook context —
   otherwise it is a **silent no-op**. Treat `ctx.log` as best-effort diagnostics,
   never proof a hook ran; to observe an effect, assert on the data it writes.
@@ -425,17 +421,15 @@ export default fillPositionOnHire;
 
 ```typescript
 interface HookContext {
-  // Immutable identifiers
+  // Immutable
   id?: string;           // Unique execution ID for tracing
   object: string;        // Target object name (e.g., 'account')
   event: HookEventType;  // Current event (e.g., 'beforeInsert')
 
-  // Mutable data
   input: Record<string, unknown>;    // Operation parameters (MUTABLE)
   result?: unknown;                  // Operation result (MUTABLE, after* only)
   previous?: Record<string, unknown>; // Previous state (update/delete)
 
-  // Execution context
   session?: {
     userId?: string;
     organizationId?: string; // Active org — the single blessed name.
@@ -446,11 +440,10 @@ interface HookContext {
     isSystem?: boolean;      // Elevated system context (engine self-writes).
   };
 
-  transaction?: unknown;  // Database transaction handle
+  transaction?: unknown;
 
-  // Engine access
   ql: IDataEngine;       // ObjectQL engine instance
-  api?: ScopedContext;   // Cross-object CRUD API
+  api?: ScopedContext;
   notice?: (message: string) => void;
 
   // User info shortcut (undefined for system / unauthenticated writes)
@@ -491,7 +484,6 @@ const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 
 `ctx.input` varies by event:
 
-**Insert operations:**
 ```typescript
 // beforeInsert, afterInsert
 {
@@ -502,26 +494,22 @@ const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 }
 ```
 
-**Update operations:**
 ```typescript
 // beforeUpdate, afterUpdate
 {
-  id: '123',  // Record ID being updated
-  // Only fields being changed
+  id: '123',
   status: 'active',
   updated_at: '2026-04-13T10:00:00Z',
 }
 ```
 
-**Delete operations:**
 ```typescript
 // beforeDelete, afterDelete
 {
-  id: '123',  // Record ID being deleted
+  id: '123',
 }
 ```
 
-**Query operations:**
 ```typescript
 // beforeFind, afterFind
 {
@@ -536,8 +524,6 @@ const org = ctx.user?.organizationId ?? ctx.session?.organizationId;
 ```
 
 ### `result` — Operation Result
-
-Available in `after*` hooks:
 
 ```typescript
 // afterInsert
@@ -660,7 +646,6 @@ const maskSensitiveData = defineHook({
     const isElevated = ctx.session?.isSystem === true;
 
     if (!isElevated) {
-      // Mask sensitive fields
       const maskField = (record: any) => {
         if (record.ssn) {
           record.ssn = '***-**-' + record.ssn.slice(-4);
@@ -764,9 +749,8 @@ the layout both real hook modules in the repo use.
 
 ❌ **DON'T** — do expensive work in `before*` (it blocks the transaction); write
 business records to another datasource from a `before*` hook through `ctx.api`
-(its transaction refuses that write with `CrossDatasourceTransactionWriteError`;
-only an append-only ledger, `lifecycle.class` `audit` / `telemetry` / `event`, is
-written outside it and survives its rollback); let a hook re-trigger itself;
+(its transaction refuses that write with `CrossDatasourceTransactionWriteError`,
+except an append-only ledger, as under `api.transaction`); let a hook re-trigger itself;
 use `object: '*'` unless you mean every object; throw in
 `after*` unless the failure must abort the operation; react to a refused or
 rolled-back write from an `async: true` hook, which never runs then — use a sync

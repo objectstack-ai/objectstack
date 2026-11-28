@@ -518,3 +518,36 @@ describe('computeI18nCoverage — the users\' defaultLocale stays gated beside s
     expect(report).toEqual(run(undeclared, [ES], { defaultLocale: 'zh-CN' }));
   });
 });
+
+// [#37622] `os i18n check` reads its expected keys from `collectExpectedEntries`,
+// which folds the owner's tab list with the stack's `.custom` arrangement the
+// way `os validate` does: no key over a tab the arrangement hides, and one
+// over a tab it titles.
+describe('computeI18nCoverage — _relatedLists under a `.custom` arrangement (#37622)', () => {
+  const arranged: any = {
+    objects: [{
+      name: 'account',
+      label: 'Account',
+      fields: { name: { label: 'Name' } },
+      relatedLists: [{ list: 'contact', label: 'People' }, 'case'],
+    }],
+    objectExtensions: [{ extend: 'account', relatedLists: [{ list: 'contact', hidden: true }, { list: 'case', label: 'Tickets' }] }],
+    translations: [{ en: { objects: { account: { label: 'Account' } } }, 'zh-CN': { objects: { account: { label: '客户' } } } }],
+  };
+
+  it('expects the tab the arrangement titles and not the one it hides', () => {
+    const zhKeys = new Set(
+      computeI18nCoverage(arranged, { defaultLocale: 'en' }).issues
+        .filter((i) => i.locale === 'zh-CN' && i.key.includes('._relatedLists.'))
+        .map((i) => i.key),
+    );
+    expect([...zhKeys]).toEqual(['objects.account._relatedLists.case.label']);
+  });
+
+  it('control: with no arrangement, the owner\'s labelled tab is expected', () => {
+    const zhKeys = computeI18nCoverage({ ...arranged, objectExtensions: [] }, { defaultLocale: 'en' }).issues
+      .filter((i) => i.locale === 'zh-CN' && i.key.includes('._relatedLists.'))
+      .map((i) => i.key);
+    expect(zhKeys).toEqual(['objects.account._relatedLists.contact.label']);
+  });
+});

@@ -10,7 +10,7 @@
  * endpoint speaks a D5-SAFE shape — FRACTIONS of the pool's cap, never a raw
  * token count — so nothing here (or downstream) can leak a token number.
  *
- * Wire shape: `{ pool, breakdown }`. `pool` is the one reading that gates;
+ * Wire shape: `{ pool, breakdown, tiers }`. `pool` is the one reading that gates;
  * `breakdown` is an observation-only split of that same pool into app-building
  * vs data Q&A (cloud ADR-0015). The reader is strict: it reads this shape and no
  * other — the retired per-meter `{ meters: { build, dataChat } }` answer parses
@@ -18,6 +18,14 @@
  * dialect. `breakdown` is optional upstream (cloud#2133 lets the endpoint keep
  * it, it does not require it), so its ABSENCE is a normal reading and never a
  * parse failure.
+ *
+ * `tiers` (cloud#5159) is optional the same way: a paid plan with a known caller
+ * also reports the two tiers of its allowance — the caller's personal share and
+ * the team pool it overflows into — plus the notice to show once turns draw on
+ * the pool. Free, self-hosted and older backends omit it. A `tiers` that is not
+ * the declared shape is dropped on its own and the `{ pool, breakdown }` reading
+ * stands: the ring is drawn from `pool` alone, so a bad tier answer costs the
+ * two-tier detail, never the ring.
  *
  * Refetch triggers, cheap and event-driven (no busy polling):
  *   - on mount / apiBase change,
@@ -84,11 +92,45 @@ export interface AiUsageBreakdown {
   dataChat: number | null;
 }
 
+/** One tier of a paid plan's allowance: a fraction of THAT tier's cap. Never tokens. */
+export interface AiUsageTier {
+  /** 0..1 of this tier's cap. */
+  fraction: number;
+  /** Best-effort reset instant (ISO); null when unknown — never guessed client-side. */
+  resetsAt: string | null;
+}
+
+/** The server's notice, in the four languages the cloud endpoint writes. */
+export interface AiUsageTierNotice {
+  en: string;
+  zh: string;
+  ja: string;
+  es: string;
+}
+
+/**
+ * The two tiers of a paid plan's allowance (cloud#5159): the caller's personal
+ * share, and the team pool it overflows into once that share is used up.
+ * Observation only — `pool` stays the reading that blocks.
+ */
+export interface AiUsageTiers {
+  /** The caller's personal share; null for a pool-only caller (an AI service account). */
+  personal: AiUsageTier | null;
+  /** The team pool, credit packs included. */
+  teamPool: AiUsageTier;
+  /** The personal share is used up and turns draw on the team pool. */
+  usingTeamPool: boolean;
+  /** Non-null exactly when `usingTeamPool`: the notice to show the caller. */
+  notice: AiUsageTierNotice | null;
+}
+
 export interface AiUsageResponse {
   /** The one metered pool — this is what blocks. */
   pool: AiMeterUsage;
   /** Read-only split of the same pool. Absent when the runtime does not report it. */
   breakdown?: AiUsageBreakdown;
+  /** The paid plan's two allowance tiers. Absent on Free, self-hosted and older backends. */
+  tiers?: AiUsageTiers;
 }
 
 export interface UseAiUsageOptions {
@@ -135,20 +177,63 @@ function isBreakdown(v: unknown): v is AiUsageBreakdown {
   return isFractionOrNull(b.build) && isFractionOrNull(b.dataChat);
 }
 
+/** A tier, copied to exactly its declared fields; null when `v` is not one. */
+function readTier(v: unknown): AiUsageTier | null {
+  if (!v || typeof v !== 'object') return null;
+  const t = v as Record<string, unknown>;
+  if (typeof t.fraction !== 'number' || !Number.isFinite(t.fraction)) return null;
+  if (t.resetsAt !== null && typeof t.resetsAt !== 'string') return null;
+  return { fraction: t.fraction, resetsAt: t.resetsAt };
+}
+
+/** The notice, copied to exactly its four languages; null when `v` is not one. */
+function readNotice(v: unknown): AiUsageTierNotice | null {
+  if (!v || typeof v !== 'object') return null;
+  const n = v as Record<string, unknown>;
+  if (typeof n.en !== 'string' || typeof n.zh !== 'string' || typeof n.ja !== 'string' || typeof n.es !== 'string')
+    return null;
+  return { en: n.en, zh: n.zh, ja: n.ja, es: n.es };
+}
+
 /**
- * Read the wire payload as `{ pool, breakdown? }` — and only as that. `null`
- * means the answer is not this shape (see the file header for why no second
- * shape is read).
+ * `tiers` in exactly its declared shape, or `undefined` when it is anything else
+ * (see the file header: a bad `tiers` drops on its own).
+ */
+function readTiers(v: unknown): AiUsageTiers | undefined {
+  if (!v || typeof v !== 'object') return undefined;
+  const t = v as Record<string, unknown>;
+  const teamPool = readTier(t.teamPool);
+  if (!teamPool || typeof t.usingTeamPool !== 'boolean') return undefined;
+  const personal = t.personal === null ? null : readTier(t.personal);
+  if (personal === null && t.personal !== null) return undefined;
+  const notice = t.notice === null ? null : readNotice(t.notice);
+  if (notice === null && t.notice !== null) return undefined;
+  return { personal, teamPool, usingTeamPool: t.usingTeamPool, notice };
+}
+
+/**
+ * Read the wire payload as `{ pool, breakdown?, tiers? }` — and only as that.
+ * `null` means the answer is not this shape (see the file header for why no
+ * second shape is read).
  */
 function parseUsage(payload: unknown): AiUsageResponse | null {
   if (!payload || typeof payload !== 'object') return null;
-  const { pool, breakdown } = payload as { pool?: unknown; breakdown?: unknown };
+  const { pool, breakdown, tiers } = payload as { pool?: unknown; breakdown?: unknown; tiers?: unknown };
   if (!isPool(pool)) return null;
+  const out: AiUsageResponse = { pool };
   // Absent `breakdown` is a normal reading (optional upstream, cloud#2133), never
   // a parse failure: the pool alone is everything the ring needs.
-  if (breakdown === undefined) return { pool };
-  if (!isBreakdown(breakdown)) return null;
-  return { pool, breakdown: { build: breakdown.build, dataChat: breakdown.dataChat } };
+  if (breakdown !== undefined) {
+    if (!isBreakdown(breakdown)) return null;
+    out.breakdown = { build: breakdown.build, dataChat: breakdown.dataChat };
+  }
+  // Absent `tiers` is the Free / self-hosted / older-backend reading. A
+  // malformed one drops alone; the pool and its split still stand.
+  if (tiers !== undefined) {
+    const read = readTiers(tiers);
+    if (read) out.tiers = read;
+  }
+  return out;
 }
 
 /**

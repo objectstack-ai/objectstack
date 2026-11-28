@@ -2311,6 +2311,8 @@ const fr = {
         ctaUpgrade: "Passer à l'offre supérieure pour continuer",
         ctaTopUp: "Ajouter des crédits pour continuer",
         ariaLabel: "Utilisation de l'IA : {{status}}",
+        tierPersonal: "Quota personnel",
+        tierTeamPool: "Réserve de l'équipe",
       },
       openChats: "Ouvrir les discussions",
       chats: "Discussions",
