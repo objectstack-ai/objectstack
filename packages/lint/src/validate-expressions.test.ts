@@ -4288,7 +4288,8 @@ const READ_SURFACES: Array<{ receiver: string; expected: string[]; declaredBy: s
     // `listViews` joined with #24798: an object's own list views carry bulk
     // defs whose `confirmText` is judged.
     // `fieldGroups` joined with #26646: each group's section predicate.
-    expected: ['actions', 'attachedOnRead', 'fieldGroups', 'fields', 'listViews', 'name', 'validations'],
+    // `uiReadonlyWhen` joined with #37402: the whole-record hand lock's predicate.
+    expected: ['actions', 'attachedOnRead', 'fieldGroups', 'fields', 'listViews', 'name', 'uiReadonlyWhen', 'validations'],
     declaredBy: 'ObjectSchema',
     keys: () => Object.keys(ObjectSchema.shape),
   },
