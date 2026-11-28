@@ -492,7 +492,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The #13080 category: `type-surface-only`': 29,
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
-  'TSO-U: unit pins on predicate 4\'s readers': 42,
+  'TSO-U: unit pins on predicate 4\'s readers': 45,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
   'TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body': 25,
@@ -3702,10 +3702,11 @@ function braceOpensTypeBody(masked, open) {
 /**
  * The header of the `{` at `open` in the masked text, trimmed: everything since the
  * previous `;`, `{` or `}`, except that a balanced `{ … }` group whose `{` follows a
- * type-literal position -- `<`, `,`, `(`, `|`, `&`, `=` or the word `extends` -- is
- * stepped over and BLANKED. That group is a type literal inside the header (a
- * type-parameter constraint or default, a type argument in heritage), not the end of
- * the statement before it.
+ * type-literal position -- `<`, `,`, `(`, `|`, `&`, `=` or the word `extends` -- AND
+ * that sits inside an angle, paren or bracket still open after it
+ * (`closesAnOpenerBefore`) is stepped over and BLANKED. That group is a type literal
+ * inside the header (a type-parameter constraint or default, a type argument in
+ * heritage), not the end of the statement before it.
  *
  * ⚠️ Reading back only to the previous brace stops inside such a literal, so
  * `interface P<T extends { id: string }> {` reads as the header `>`: the body is not
@@ -3733,10 +3734,42 @@ function braceHeader(masked, open) {
     if (groupOpen < 0) break;
     const before = masked.slice(0, groupOpen).trimEnd();
     if (!/(?:[<,(|&]|(?<![=!<>])=|(?:^|[^\w$.])extends)$/.test(before)) break;
+    if (!closesAnOpenerBefore(masked, start + 1, open)) break;
     header = ' '.repeat(start - groupOpen + 1) + header;
     i = groupOpen - 1;
   }
   return header.trim();
+}
+
+/**
+ * Whether the masked text in `[from, to)` closes a `<`, `(` or `[` it never opened --
+ * that is, whether a brace group ending just before `from` sits INSIDE an angle,
+ * paren or bracket that is still open where the group ends. Brace groups in the span
+ * are skipped whole, and the `>` of an arrow is not a closer.
+ *
+ * ⚠️ This is what makes `braceHeader`'s step a header question and not a statement
+ * question. Every type literal a declaration header carries sits inside one: a
+ * constraint or default (`<T extends { id: string }>`, `<T = {}>`), a heritage type
+ * argument (`Base<{ a: 1 }>`), a mixin call (`extends mixin({ … })`). A `}` that
+ * closes a STATEMENT is followed by no such closer -- `type S = { … }` with no `;`,
+ * then `const initial: S = {` -- and stepping over it would hand the value literal
+ * the alias's `type S =` header, so its unannotated `f: () => null` would read as a
+ * function TYPE returning `null` (a value called concrete).
+ */
+function closesAnOpenerBefore(masked, from, to) {
+  let depth = 0;
+  let braces = 0;
+  for (let k = from; k < to; k++) {
+    const c = masked[k];
+    if (c === '{') braces++;
+    else if (c === '}') braces--;
+    else if (braces > 0) continue;
+    else if (c === '<' || c === '(' || c === '[') depth++;
+    else if (c === ')' || c === ']' || (c === '>' && masked[k - 1] !== '=')) {
+      if (--depth < 0) return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -7986,6 +8019,27 @@ function selfTest() {
   assert(memberReturnAnnotation('export class A { m() { return 1; } }\nexport const o = {\n  f: (x: number) => x + 1,\n};\n', 'f')?.annotation === null &&
     memberReturnAnnotation('const k = { class: 1 }\nexport const o = {\n  f: (x: number) => x + 1,\n};\n', 'f')?.annotation === null, 'TSO-U41: LIT CONTROL -- a class BODY before an object literal still ends its header (its `{` follows a name, not a type-literal position), and a stepped-over `{ class: 1 }` is blanked, so neither leaks a `class` keyword into the literal\'s header: the arrow stays an unannotated VALUE');
   assert(memberReturnAnnotation('export const o = call<{ a: 1 }>({\n  f: (x: number) => x + 1,\n});\n', 'f')?.annotation === null, 'TSO-U42: LIT CONTROL -- an object literal whose own header carries a stepped-over type argument is still a VALUE, not a type body');
+
+  // U43-U45: a `}` that closes a STATEMENT is never stepped over, however the `{`
+  // before it was preceded. The shape is `ui/packages/app-shell/src/chrome/ThemeProvider.tsx`
+  // (and the theme-provider file `ui/packages/cli/src/utils/app-generator.ts` emits):
+  // a type alias with no `;`, then a typed `const` literal. Stepping over the alias
+  // body because its `{` follows `=` handed the literal the header `type S = … const
+  // initialState: S =`, so the VALUE `setTheme: () => null` read as a function TYPE
+  // returning `null`, and the alias's own members lost their header to the import
+  // before them. `closesAnOpenerBefore` is the rule: a header's type literal always
+  // sits inside a `<`, `(` or `[` still open after it.
+  {
+    const THEME_HEAD = 'import { createContext, useContext, useEffect, useState } from "react"\n\n' +
+      'type Theme = "dark" | "light" | "auto" | "system"\n\n' +
+      'type ThemeProviderProps = {\n  children: React.ReactNode\n  defaultTheme?: Theme\n  storageKey?: string\n}\n\n';
+    const ALIAS = 'type ThemeProviderState = {\n  theme: Theme\n  setTheme: (theme: Theme) => void\n}\n\n';
+    const VALUE = 'const initialState: ThemeProviderState = {\n  theme: "system",\n  setTheme: () => null,\n}\n';
+    assert(memberReturnAnnotation(THEME_HEAD + ALIAS.replace('setTheme: (theme: Theme) => void', 'other: string') + VALUE, 'setTheme')?.annotation === null, 'TSO-U43: LIT CONTROL, THE ThemeProvider SHAPE -- an alias closed by a bare `}` (no `;`), then a typed `const` object literal: the literal\'s arrow stays an unannotated VALUE, never a function type returning `null`');
+    assert(memberReturnAnnotation(THEME_HEAD + ALIAS + VALUE, 'setTheme')?.annotation === 'void', 'TSO-U44: ...and in the same file the ALIAS member reads its annotation (`void`) -- the alias body before it is a statement, not a header literal, so the import before it never becomes part of its header');
+  }
+  assert(memberReturnAnnotation('type C<T> = T extends { a: 1 } ? A : B\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null &&
+    memberReturnAnnotation('type U = A | { a: 1 }\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null, 'TSO-U45: the same statement boundary behind an `extends` (a conditional type) and a `|` (a union) with no `;` -- neither leaks its `type X =` header into the value literal after it');
 
   // ---- TSO-D (#15627): a DOTTED member path, resolved through the nesting ---
   //
