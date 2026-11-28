@@ -3746,12 +3746,24 @@ function objectLiteralBodiesFor(structural, name, from, to) {
   for (const m of structural.matchAll(key)) {
     const identStart = m.index + m[0].length - m[1].length;
     if (identStart < from || identStart >= to) continue;
+    // `type X = {` is a type-literal ALIAS, read by `typeAliasBodiesFor` under its
+    // own kind: claiming it here too would count one body twice and refuse every
+    // alias segment as AMBIGUOUS against itself.
+    if (followsTypeKeyword(structural, identStart)) continue;
     const open = m.index + m[0].length - 1;
     const close = matchBracket(structural, open);
     if (close === -1) continue;
     out.push({ open, close, kind: 'object literal' });
   }
   return out;
+}
+
+/** Whether the identifier at `identStart` is the name a `type` keyword declares. */
+function followsTypeKeyword(structural, identStart) {
+  let i = identStart - 1;
+  while (i >= 0 && /\s/.test(structural[i])) i--;
+  if (i < 3 || structural.slice(i - 3, i + 1) !== 'type') return false;
+  return i - 4 < 0 || !/[\w$.]/.test(structural[i - 4]);
 }
 
 /**
@@ -3810,15 +3822,95 @@ function containerBodiesFor(structural, name, from, to) {
   return [
     ...objectLiteralBodiesFor(structural, name, from, to),
     ...classBodiesFor(structural, name, from, to),
+    ...interfaceBodiesFor(structural, name, from, to),
+    ...typeAliasBodiesFor(structural, name, from, to),
   ].sort((a, b) => a.open - b.open);
 }
 
+/**
+ * Every `{ … }` an INTERFACE DECLARATION named `name` opens inside `[from, to)`.
+ *
+ * The third container a published member sits in (#37445). Without it a narrowing
+ * of an interface member -- `ui/packages/auth/src/types.ts#AuthClient.updateUser`
+ * -- had no dotted spelling: the walk answered "no `AuthClient` object literal or
+ * class", though `AuthClient` is an exported `interface`, and the bare spelling is
+ * the FIRST same-named definition in the file -- #15627's defect on the container
+ * kind neither of its fixes covered.
+ *
+ * Declaration forms only -- `export`, `export default` and `declare` prefixes, with
+ * or without type parameters and an `extends` list; the body is located with
+ * `declarationBodyStart`, so `interface I extends Base<{ a: 1 }>` opens on the body
+ * and not inside a type argument.
+ *
+ * ⚠️ DECLARATION MERGING is counted, never merged: two `interface X` blocks are two
+ * bodies, and a segment naming them is AMBIGUOUS like two classes are. The compiler
+ * sees one merged type, but which BLOCK a member's bytes sit in is what predicate 4
+ * reads at both revs, and picking one would be a silent pick.
+ *
+ * @returns {{ open: number, close: number, kind: 'interface' }[]}
+ */
+function interfaceBodiesFor(structural, name, from, to) {
+  const out = [];
+  const key = new RegExp(
+    `(?:^|[^\\w$.])(?:export\\s+(?:default\\s+)?)?(?:declare\\s+)?interface\\s+(${name})\\b`,
+    'g',
+  );
+  for (const m of structural.matchAll(key)) {
+    const identStart = m.index + m[0].length - m[1].length;
+    if (identStart < from || identStart >= to) continue;
+    const open = declarationBodyStart(structural, identStart + m[1].length);
+    if (open === -1) continue;
+    const close = matchBracket(structural, open);
+    if (close === -1) continue;
+    out.push({ open, close, kind: 'interface' });
+  }
+  return out;
+}
+
+/**
+ * Every `{ … }` a TYPE-LITERAL ALIAS named `name` opens inside `[from, to)`: a
+ * `type X = { … }` (optionally `export` / `declare`, generic or not) whose
+ * right-hand side BEGINS with an object type literal (#37445). That literal is the
+ * body walked; a member declared only in a later operand (`{ … } & Base`) is not
+ * inside it and is refused by name, never resolved into `Base`.
+ *
+ * An alias of anything else (`type X = Base`, `type X = A | B`) opens no body and
+ * the segment is refused as absent -- the same rule as a class expression.
+ *
+ * @returns {{ open: number, close: number, kind: 'type alias' }[]}
+ */
+function typeAliasBodiesFor(structural, name, from, to) {
+  const out = [];
+  const key = new RegExp(`(?:^|[^\\w$.])(?:export\\s+)?(?:declare\\s+)?type\\s+(${name})\\b`, 'g');
+  for (const m of structural.matchAll(key)) {
+    const identStart = m.index + m[0].length - m[1].length;
+    if (identStart < from || identStart >= to) continue;
+    const eq = aliasEqualsIndex(structural, identStart + m[1].length);
+    if (eq === -1) continue;
+    let open = eq + 1;
+    while (open < structural.length && /\s/.test(structural[open])) open++;
+    if (structural[open] !== '{') continue;
+    const close = matchBracket(structural, open);
+    if (close === -1) continue;
+    out.push({ open, close, kind: 'type alias' });
+  }
+  return out;
+}
+
 /** How a refusal names a set of container bodies: by kind when they agree. */
-const BODY_PLURALS = Object.freeze({ 'object literal': 'object literals', class: 'classes' });
+const BODY_PLURALS = Object.freeze({
+  'object literal': 'object literals', class: 'classes', interface: 'interfaces', 'type alias': 'type aliases',
+});
+// ...and when they do not, each kind named once, in this order.
+const MIXED_BODY_NAMES = Object.freeze([
+  ['object literal', 'object literals'], ['class', 'class bodies'],
+  ['interface', 'interface bodies'], ['type alias', 'type-literal aliases'],
+]);
 function describeBodies(bodies) {
   const kinds = new Set(bodies.map((b) => b.kind));
   if (kinds.size === 1) return BODY_PLURALS[[...kinds][0]];
-  return 'object literals and class bodies';
+  const names = MIXED_BODY_NAMES.filter(([k]) => kinds.has(k)).map(([, n]) => n);
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 /**
@@ -3886,8 +3978,9 @@ export function resolveMemberPath(text, segments) {
     if (bodies.length === 0) {
       return {
         ok: false,
-        reason: `no \`${seg}\` object literal or class (\`${seg}: {\`, \`${seg} = {\` or ` +
-          `\`class ${seg} {\`) is declared ${where}`,
+        reason: `no \`${seg}\` object literal or class, nor interface or type-literal alias ` +
+          `(\`${seg}: {\`, \`${seg} = {\`, \`class ${seg} {\`, \`interface ${seg} {\` or ` +
+          `\`type ${seg} = {\`), is declared ${where}`,
       };
     }
     if (bodies.length > 1) {
