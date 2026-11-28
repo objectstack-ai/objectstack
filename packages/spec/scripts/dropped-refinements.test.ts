@@ -224,6 +224,35 @@ describe('the differential isolates the refinement, not the node', () => {
   });
 });
 
+describe('the walk is bounded by identity, never by depth', () => {
+  // Nest a refined leaf `levels` object hops below the export: a.a.a…a.leaf.
+  const nested = (levels: number): z.ZodType => {
+    let node: z.ZodType = z.object({ leaf: z.string().refine((v) => v !== 'x', 'not x') });
+    for (let i = 0; i < levels; i += 1) node = z.object({ a: node });
+    return node;
+  };
+
+  it('reports a refinement nested FAR past the old 14-hop cap', () => {
+    // 40 objects deep, each `shape` + key = two def hops, so the leaf sits ~80
+    // hops down. The capped walk stopped at 14 and reported nothing here.
+    const entry = collectDroppedRefinements('t/Deep', nested(40));
+    expect(entry.dropped.map((s) => s.path)).toEqual([`${'a.'.repeat(40)}leaf`]);
+  });
+
+  it('LIT CONTROL — the same leaf at a shallow depth is the same single site', () => {
+    const entry = collectDroppedRefinements('t/Shallow', nested(1));
+    expect(entry.dropped.map((s) => s.path)).toEqual(['a.leaf']);
+  });
+
+  it('REFUSES a walk its identity guard cannot close, instead of truncating it', () => {
+    // A `lazy` getter that builds a FRESH node per call: every hop is a new
+    // identity, so nothing terminates the walk. The census must throw and name
+    // the export, never return a short list that reads as complete.
+    const fresh = (): z.ZodType => z.lazy(() => z.object({ next: fresh() }));
+    expect(() => collectDroppedRefinements('t/Runaway', fresh())).toThrow(/t\/Runaway/);
+  });
+});
+
 describe('the ratchet adjudicates against the ledger', () => {
   const site = (path: string) => ({
     path,

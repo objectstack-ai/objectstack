@@ -8,11 +8,11 @@
 - ②:`git grep -c <pat> | wc -l` 数的是文件数不是命中数。
 - ③:裸名 grep 被幸存家族当子串命中 —— 退役核验带引号精确名。
 - 更硬判据是查声明式 `^(export )?(const|type|interface) <Name>\b` 而非查提及。
-- ④:浅检出上的历史读数不可信 —— `merge-base --is-ancestor` 假非祖先、`rev-list --count` 截断。
+- ④:浅检出的历史读数不可信 —— 假非祖先、`rev-list --count` 截断;现读 `git-history.mjs ancestor`。
 - ④ 里最静默的是窗口式 `git log --grep`:回 0 结果、exit 0、无警告,读作该提交从不存在。
 - 同族 `branch -r --contains` 零输出;先 `--deepen` 再判,或走 REST `compare`。
 - ⑤:命令可能不存在,于是 `gh … || echo "none"` 是不可证伪的否定。
-- 127 命令不存在与 grep 没命中输出同值 ⇒ 回退分支照打印安心结论而一次都没检查。
+- 127 命令不存在与 grep 没命中输出同值 ⇒ 回退分支照打印安心结论而从未检查。
 - 安全拼写:先 `command -v <cmd>` 确认存在,或在 `||` 之前捕获状态。
 - ⛔ 通则:可能不存在的命令上挂回退即不可证伪的否定;PR 与查重核验改走 MCP 工具或 git。
 - ⑥:只存在于拼接后的短语,单行 grep 对主体与控制词双零:先合并再搜,两个方向都要读。

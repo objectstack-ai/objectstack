@@ -4608,6 +4608,25 @@ const ja = {
     recordCitations: {
       title: 'レコードからの引用',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'このターンで保存された下書き',
+      hint: 'まだ何も公開されていません。Studio で下書きを確認して公開してください。',
+      package: 'パッケージ {{name}}',
+      reviewAndPublish: '確認して公開',
+      reviewAndPublishAria: 'Studio でパッケージ {{name}} の下書きを確認して公開',
+      review: '確認',
+      reviewAria: 'Studio で下書き {{name}} を確認',
+      willPublish: '公開できます',
+      verdictWithheld: '判定は表示できません',
+      checkedAtSave: '保存時の判定',
+      problems: '{{count}} 件の問題',
+      problems_one: '{{count}} 件の問題',
+      problems_other: '{{count}} 件の問題',
+      more: 'ほか {{count}} 件',
+      more_one: 'ほか {{count}} 件',
+      more_other: 'ほか {{count}} 件',
+    },
     questionCard: {
       aiAsks: 'AI からの質問：',
       progress: '質問 {{current}}/{{total}}',

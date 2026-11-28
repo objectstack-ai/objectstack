@@ -42,6 +42,9 @@ import { describe, it, expect, vi } from 'vitest';
 import '@objectstack/metadata';
 
 import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+// Paid at collection, not inside a case's clocked window: the dispatcher's reach
+// loads it lazily (check:test-source-alias).
+import '@objectstack/metadata';
 
 import { HttpDispatcher } from './http-dispatcher.js';
 import {
@@ -777,5 +780,125 @@ describe('#15079 reverse pin — a handler-less `type: script` action WITHOUT `o
         expect(rig.ql.executeAction).toHaveBeenCalled();
         expect(rig.updates).toHaveLength(0);
         expect(rig.row.status).toBe('open');
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// [#37867] The write's advisory `warnings` ride the action's answer
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * A warning rule lets the write through and answers `warnings`
+ * (`protocol.updateData`, #22726). The button that performs the same write
+ * answers the same warnings, at both doors, or the rule warns only the people
+ * who edit the form.
+ *
+ * The rig above reaches the ObjectQL fallback of `callData`, which answers no
+ * warnings by construction, so this block puts a `protocol` slot in front of it:
+ * a double whose `updateData` writes through the rig's caller-honouring
+ * `ql.update` and answers the protocol's shape, `warnings` set only when the
+ * write tripped the stand-in rule (`status` set to `closed` while
+ * `priority` is `low`).
+ */
+describe('#37867 — a declarative update answers the `warnings` its data-plane write raised', () => {
+    const EARLY_CLOSE_WARNING = {
+        field: 'status',
+        code: 'rule_violation',
+        message: 'A low-priority case closed this early skips the review queue.',
+        rule: 'early_close_review',
+        severity: 'warning',
+    };
+
+    function protocolRig() {
+        const rig = makeRig();
+        const protocol: any = {
+            updateData: vi.fn(async (req: any) => {
+                await rig.ql.update(req.object, { ...req.data, id: req.id }, { where: { id: req.id }, context: req.context });
+                const trips = rig.row.status === 'closed' && rig.row.priority === 'low';
+                return {
+                    object: req.object,
+                    id: req.id,
+                    record: { ...rig.row },
+                    ...(trips ? { warnings: [{ ...EARLY_CLOSE_WARNING }] } : {}),
+                };
+            }),
+        };
+        return { rig, protocol };
+    }
+
+    async function restVia(userId: string, rig: Rig, protocol: any, path: string, body: any = {}) {
+        const metadata: any = {
+            load: vi.fn(async () => null),
+            loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+            listObjects: vi.fn(async () => [OBJECT_DEF]),
+            getObject: vi.fn(async (n: string) => (n === OBJECT_DEF.name ? OBJECT_DEF : undefined)),
+        };
+        const kernel: any = {
+            context: {
+                getService: (n: string) =>
+                    n === 'objectql' || n === 'data' ? rig.ql
+                        : n === 'metadata' ? metadata
+                            : n === 'protocol' ? protocol
+                                : null,
+            },
+        };
+        const context: any = { request: {}, environmentId: 'platform', executionContext: ec(userId) };
+        const res: any = await (new HttpDispatcher(kernel) as any).handleActions(path, 'POST', body, context);
+        return res.response;
+    }
+
+    async function mcpVia(userId: string, rig: Rig, protocol: any, name: string, input: Record<string, unknown>) {
+        const deps: any = {
+            resolveService: async (_ctx: unknown, n: string) => (n === 'protocol' ? protocol : undefined),
+            getObjectQL: async () => rig.ql,
+        };
+        const requestContext: any = { request: {}, environmentId: 'platform' };
+        return await invokeBusinessAction(deps, requestContext, name, input as any, {
+            driver: undefined,
+            envId: 'platform',
+            ec: ec(userId),
+            getMeta: () => ({ listObjects: async () => [OBJECT_DEF] }),
+            callData: (action, params, dataDriver, scopeId, execCtx) =>
+                callData(deps, requestContext, action, params, dataDriver, scopeId, execCtx),
+        });
+    }
+
+    it('REST: the 200 answer carries the write\'s warnings, element for element, beside the written record', async () => {
+        const { rig, protocol } = protocolRig();
+        const res = await restVia(OWNER, rig, protocol, `/${OBJECT}/close_case/${RECORD_ID}`);
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        // The write went through the protocol, once, as the caller.
+        expect(protocol.updateData).toHaveBeenCalledTimes(1);
+        expect(protocol.updateData.mock.calls[0][0].context?.userId).toBe(OWNER);
+        expect(rig.row.status).toBe('closed');
+        expect(res.body.data.warnings).toEqual([EARLY_CLOSE_WARNING]);
+        expect(res.body.data).toMatchObject({ operation: DECLARATIVE_UPDATE_OPERATION, object: OBJECT, id: RECORD_ID });
+        expect(res.body.data.record).toMatchObject({ id: RECORD_ID, status: 'closed' });
+        // The undo anchor still rides beside them.
+        expect(res.body.data.undo).toMatchObject({ undoData: { status: 'open' }, redoData: { status: 'closed' } });
+    });
+
+    it('MCP `run_action`: the same write answers the same warnings', async () => {
+        const { rig, protocol } = protocolRig();
+        const out: any = await mcpVia(OWNER, rig, protocol, 'close_case', { recordId: RECORD_ID });
+
+        expect(out.ok).toBe(true);
+        expect(protocol.updateData).toHaveBeenCalledTimes(1);
+        expect(out.result.warnings).toEqual([EARLY_CLOSE_WARNING]);
+    });
+
+    it('a write that trips no rule carries no `warnings` key at all', async () => {
+        // The same action through the same protocol, on a row the rule does not
+        // fire for. ABSENT, never `[]` — the data door's own shape; the firing
+        // positive control is the REST case above, same rig.
+        const { rig, protocol } = protocolRig();
+        rig.row.priority = 'high';
+        const res = await restVia(OWNER, rig, protocol, `/${OBJECT}/close_case/${RECORD_ID}`);
+
+        expect(res.status).toBe(200);
+        expect(protocol.updateData).toHaveBeenCalledTimes(1);
+        expect('warnings' in res.body.data).toBe(false);
     });
 });

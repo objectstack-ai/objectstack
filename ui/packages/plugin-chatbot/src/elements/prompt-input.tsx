@@ -791,10 +791,19 @@ export const PromptInput = ({
           return (formData.get("message") as string) || "";
         })();
 
-    // Reset form immediately after capturing text to avoid race condition
-    // where user input during async blob conversion would be lost
+    // Clear the message field immediately after capturing text to avoid race
+    // condition where user input during async blob conversion would be lost.
+    // objectstack#37831 — only the composer's OWN field, never `form.reset()`:
+    // a reset resets every control in the form, and a Radix `Select` there
+    // (the composer's model picker) answers the form's `reset` event by
+    // writing its first-render value back through `onValueChange`, so every
+    // send silently put the picked model back to the default. The field goes
+    // back to exactly what a reset gave it: its default value.
     if (!usingProvider) {
-      form.reset();
+      const field = form.elements.namedItem("message");
+      if (field instanceof HTMLTextAreaElement) {
+        field.value = field.defaultValue;
+      }
     }
 
     // Convert blob URLs to data URLs asynchronously

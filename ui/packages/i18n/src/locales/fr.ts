@@ -4696,6 +4696,27 @@ const fr = {
     recordCitations: {
       title: 'Cité depuis les enregistrements',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: 'Brouillons enregistrés pendant ce tour',
+      hint: 'Rien n\'est encore publié. Vérifiez les brouillons et publiez-les dans Studio.',
+      package: 'Paquet {{name}}',
+      reviewAndPublish: 'Vérifier et publier',
+      reviewAndPublishAria: 'Vérifier et publier les brouillons du paquet {{name}} dans Studio',
+      review: 'Vérifier',
+      reviewAria: 'Vérifier le brouillon {{name}} dans Studio',
+      willPublish: 'Sera publié',
+      verdictWithheld: 'Verdict non disponible',
+      checkedAtSave: 'vérifié à l\'enregistrement',
+      problems: '{{count}} problèmes',
+      problems_one: '{{count}} problème',
+      problems_many: '{{count}} problèmes',
+      problems_other: '{{count}} problèmes',
+      more: '+{{count}} autres',
+      more_one: '+{{count}} autre',
+      more_many: '+{{count}} autres',
+      more_other: '+{{count}} autres',
+    },
     questionCard: {
       aiAsks: 'L’IA demande :',
       progress: 'Question {{current}} sur {{total}}',

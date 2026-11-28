@@ -18,6 +18,7 @@ import { ObjectSchema } from './object.zod';
 import { FormSelectOptionSchema } from '../ui/view.zod';
 import { SnakeCaseIdentifierSchema, SystemIdentifierSchema } from '../shared/identifiers.zod';
 import { MULTI_CAPABLE_TYPES, MULTI_OPTION_TYPES, isMultiValueField } from './field-value.zod';
+import { fieldSchemaAliases } from './field-key-aliases';
 
 describe('FieldType', () => {
   it('should accept valid field types', () => {
@@ -208,6 +209,22 @@ describe('FieldSchema — field-level `tracked` key guidance, naming `fieldHisto
     const m = unrecognizedKeyMessage({ ...FIELD, totallyBogusKey: true });
     expect(m).not.toContain('fieldHistory');
   });
+
+  // `trackChanges` / `feedTracked` used to rename onto `trackHistory`, whose
+  // `false` turns nothing off; they now take `tracked`'s answer.
+  for (const key of ['trackChanges', 'feedTracked'] as const) {
+    it(`\`${key}\` stays rejected with the \`fieldHistory\` answer, not a rename to \`trackHistory\``, () => {
+      const m = unrecognizedKeyMessage({ ...FIELD, [key]: false });
+      expect(m).toContain(`\`${key}\` is not a field key`);
+      expect(m).toContain('Write `fieldHistory: false` to turn them off for this field');
+      expect(m).toContain('`enable.fieldHistory: false` on the object');
+      expect(m).not.toContain('trackHistory');
+    });
+
+    it(`\`${key}\` is no longer a rename row onto \`trackHistory\``, () => {
+      expect(fieldSchemaAliases()).not.toHaveProperty(key);
+    });
+  }
 });
 
 describe('FieldSchema', () => {

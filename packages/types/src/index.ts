@@ -41,6 +41,9 @@ export * from './representation-validator.js';
 // direct-mount REST registrar, which used to answer 500 INTERNAL_ERROR for a
 // coded 4xx the dispatcher mapped correctly.
 export * from './thrown-http-error.js';
+// [#37828] An error answer carrying a `userMessage` varies by `Accept-Language`:
+// the one predicate every exit that renders a refusal body asks.
+export * from './localized-answer-vary.js';
 // [#14310] The sibling rule to the one above, for the same two doors: "is this
 // answer worth an operator's attention?". `resolveThrownHttpError` decides what
 // the CLIENT is told; this decides what the LOG says — 5xx always, 4xx never.

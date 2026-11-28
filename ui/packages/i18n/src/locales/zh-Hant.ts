@@ -4860,6 +4860,25 @@ const zhHant = {
     recordCitations: {
       title: '引自記錄',
     },
+    // The drafts an ask turn saved, with their verdicts and Studio review links.
+    draftReview: {
+      title: '本輪儲存的草稿',
+      hint: '還沒有釋出。請在 Studio 中審閱並發布這些草稿。',
+      package: '包 {{name}}',
+      reviewAndPublish: '審閱並發布',
+      reviewAndPublishAria: '在 Studio 中審閱並發布包 {{name}} 的草稿',
+      review: '審閱',
+      reviewAria: '在 Studio 中審閱草稿 {{name}}',
+      willPublish: '可以釋出',
+      verdictWithheld: '未給出判定',
+      checkedAtSave: '儲存時的判定',
+      problems: '{{count}} 個問題',
+      problems_one: '{{count}} 個問題',
+      problems_other: '{{count}} 個問題',
+      more: '還有 {{count}} 個',
+      more_one: '還有 {{count}} 個',
+      more_other: '還有 {{count}} 個',
+    },
     questionCard: {
       aiAsks: 'AI 問：',
       progress: '第 {{current}}/{{total}} 題',

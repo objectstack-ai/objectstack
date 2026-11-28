@@ -65,6 +65,9 @@ function storeAndProtocol() {
     return { store, protocol, calls };
 }
 
+/** [ADR-0161 K4] Both transports run on a deployment that mounts a knowledge service admitting every source. */
+const KNOWLEDGE_ADMITS = { admitAuthoredSource: async () => ({ admitted: true }) };
+
 const security = { resolvePermissionSetNames: async () => [], getMetadataReadableFields: async () => [] };
 
 interface Answer { status: number; code?: string }
@@ -72,7 +75,9 @@ interface Answer { status: number; code?: string }
 function bootDispatcher(callerName: CallerName) {
     const { store, protocol, calls } = storeAndProtocol();
     const list = vi.fn(async (type: string) => Object.values(store[singular(type)] ?? {}).map(clone));
-    const services: Record<string, unknown> = { protocol, security, metadata: { getPublished: async () => undefined, list } };
+    // [ADR-0161 K4] The deployment mounts a knowledge service that admits every source: on one with
+    // none, an author's `knowledge_source` save is refused (ruled D), and this suite is about something else.
+    const services: Record<string, unknown> = { protocol, security, metadata: { getPublished: async () => undefined, list }, knowledge: KNOWLEDGE_ADMITS };
     const get = (n: string) => services[n] ?? null;
     const kernel: any = { context: { getService: get }, getService: get, getServiceAsync: async (n: string) => get(n) };
     const dispatcher = new HttpDispatcher(kernel);
@@ -106,6 +111,12 @@ function bootRest(callerName: CallerName) {
     const { store, protocol, calls } = storeAndProtocol();
     const rest: any = new RestServer(createMockServer() as any, protocol as any, {} as any);
     rest.resolveExecCtx = async () => clone(CALLERS[callerName]);
+    rest.kernelServiceProvider = async (name: string) => {
+        if (name === 'knowledge') return KNOWLEDGE_ADMITS;
+        throw Object.assign(new Error(`Service '${name}' not found`), {
+            __objectstackServiceNotRegistered: true, code: 'SERVICE_NOT_REGISTERED', serviceName: name,
+        });
+    };
     rest.registerRoutes();
     /** `path` is the dispatcher's spelling (`/meta/:type/:name`), mapped onto the REST item route. */
     const send = async (method: string, path: string, body?: unknown): Promise<Answer> => {

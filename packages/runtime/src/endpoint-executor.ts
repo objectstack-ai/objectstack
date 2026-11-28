@@ -48,9 +48,9 @@ import type { ApiEndpoint } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IAutomationService } from '@objectstack/spec/contracts';
 import type { AutomationContext } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { serviceUnavailableMessage } from '@objectstack/spec/system';
 import { INTERNAL_ERROR_MESSAGE, looksLikeInternalErrorLeak, resolveThrownHttpError, demotedDeclaredCode } from '@objectstack/types';
 import { apiErrorResponse } from './error-envelope.js';
+import { capabilityUnavailableMessageFor } from './domains/unavailable.js';
 import { isServiceServeable } from './service-serveable.js';
 import { validationFailure } from './validation-failure.js';
 import { buildAutomationContext, flowStartRecordKeys } from './domains/automation.js';
@@ -467,6 +467,23 @@ async function executeObjectOperation(
 }
 
 /**
+ * The flow target's `501` when no automation service can run it: the sentence
+ * `/automation` answers (`capabilityUnavailable`), in the request's top
+ * `Accept-Language` tag, with the `Vary: Accept-Language` a localized body
+ * owes (a `501` is cacheable by default).
+ */
+function automationUnavailableAnswer(ctx: EndpointExecutionContext): EndpointExecutionAnswer {
+    return {
+        ...apiErrorResponse({
+            code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
+            httpStatus: 501,
+            message: capabilityUnavailableMessageFor(ctx.protocolContext, 'automation'),
+        }),
+        headers: { Vary: 'Accept-Language' },
+    };
+}
+
+/**
  * `flow` → `IAutomationService.execute`, with the context the trigger route
  * builds.
  *
@@ -527,15 +544,12 @@ async function executeFlow(
     // Empty slot, or a slot filled by a self-declared non-handler — the same
     // amount of automation capability, and the same answer `/automation` gives:
     // 501 carrying the remedy sentence discovery reports for the slot
-    // (`domains/unavailable.ts`, `serviceUnavailableMessage`). NOT a 404: the
+    // (`domains/unavailable.ts`), in the request's language with the
+    // `Vary: Accept-Language` that owes (#37864). NOT a 404: the
     // endpoint IS declared and IS matched; what is missing is the implementation
     // behind it.
     if (!isServiceServeable(slot)) {
-        return apiErrorResponse({
-            code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
-            httpStatus: 501,
-            message: serviceUnavailableMessage('automation'),
-        });
+        return automationUnavailableAnswer(ctx);
     }
 
     // [ADR-0150 D3, #31696] The `target` is a reference the endpoint's own
@@ -552,11 +566,7 @@ async function executeFlow(
         // A serveable occupant that cannot execute is the same wall from the
         // caller's side, and saying so is more use than letting a TypeError
         // become an opaque 500.
-        return apiErrorResponse({
-            code: DispatcherErrorCode.enum.NOT_IMPLEMENTED,
-            httpStatus: 501,
-            message: serviceUnavailableMessage('automation'),
-        });
+        return automationUnavailableAnswer(ctx);
     }
 
     // [#9462] Row 1 of the table, answered by the SAME optional `getFlow`
