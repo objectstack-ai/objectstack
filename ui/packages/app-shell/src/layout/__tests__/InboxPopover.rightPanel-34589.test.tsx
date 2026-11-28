@@ -9,7 +9,7 @@
  *    in the page beside it neither closes it nor is swallowed by it;
  *  - "Needs your action" heads the Notifications tab, one item per pending
  *    request, and each item's levers are the request's OWN declared actions
- *    (`DeclaredActionsBar` over `sys_approval_request` at `list_item`, with
+ *    (`DeclaredActionsBar` over `sys_approval_request` at `record_row`, with
  *    the served row as the dispatch record), not a third approvals client;
  *  - a decision taken there drops the row and the badge at once and asks the
  *    feed to re-read;
@@ -183,12 +183,12 @@ describe('InboxPopover — pending approvals pinned on top, decided in place (ob
     expect(within(section).getByText('Purchase approval · PO-001')).toBeTruthy();
   });
 
-  it("runs each request's own declared actions at list_item, with the served row as the dispatch record", () => {
+  it("runs each request's own declared actions at record_row, with the served row as the dispatch record", () => {
     render(bell());
     openInbox();
     expect(barProps).toHaveLength(2);
     expect(barProps.map((p) => p.objectName)).toEqual(['sys_approval_request', 'sys_approval_request']);
-    expect(barProps.map((p) => p.location)).toEqual(['list_item', 'list_item']);
+    expect(barProps.map((p) => p.location)).toEqual(['record_row', 'record_row']);
     // the row carrying the server-computed `viewer` block the actions gate on
     expect(barProps[0].record).toBe(approvals[0].row);
     expect(barProps[1].record).toBe(approvals[1].row);

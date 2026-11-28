@@ -41,7 +41,7 @@ const CLOSE_ORDER = {
   objectName: 'sales_order',
   confirmText: 'Close this order? This cannot be undone.',
   successMessage: 'Order closed.',
-  locations: ['record_header'],
+  locations: ['record_page'],
 };
 
 function setup(bundle: Record<string, unknown>) {

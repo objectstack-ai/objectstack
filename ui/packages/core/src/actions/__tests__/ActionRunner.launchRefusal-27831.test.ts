@@ -32,7 +32,7 @@ const REASSIGN: ActionDef = {
   type: 'script',
   name: 'reassign',
   objectName: 'task',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
 };
 
 /** An object-level action: the toolbar alone. */
@@ -40,7 +40,7 @@ const EXPORT_ALL: ActionDef = {
   type: 'script',
   name: 'export_all',
   objectName: 'task',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 function runnerWith(rows?: Record<string, unknown>[]) {

@@ -87,7 +87,7 @@ const REMOVE_TEAM_MEMBER = {
   name: 'remove_team_member',
   label: 'Remove from Team',
   type: 'api',
-  locations: ['list_item'],
+  locations: ['record_row'],
   target: '/api/v1/teams/{team_id}/members/{user_id}',
   params: [
     { name: 'teamId', field: 'team_id', required: true, defaultFromRow: true },

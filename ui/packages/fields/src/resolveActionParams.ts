@@ -494,7 +494,7 @@ export interface ResolveActionParamsContext {
   ) => string;
   /**
    * Row record providing default values for params with `defaultFromRow` set.
-   * Used by list_item actions (edit/delete dialogs) so the dialog opens with
+   * Used by record_row actions (edit/delete dialogs) so the dialog opens with
    * the row's current values pre-filled.
    */
   row?: Record<string, unknown>;

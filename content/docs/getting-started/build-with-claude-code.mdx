@@ -175,7 +175,7 @@ export const ResolveTicketAction = defineAction({
   // to write or register; the platform performs the update.
   operation: 'update',
   patch: { status: 'resolved' },
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   // Only offer "Resolve" on tickets that aren't already resolved or closed.
   // Predicates are CEL, record-scoped — `record.status`, never bare `status`.
   // `has()` guards the sparse list row; the rule and its guard table live in

@@ -80,7 +80,7 @@ const clone = (onSuccess: unknown, extra: Record<string, unknown> = {}) => ({
   label: 'Clone',
   type: 'api',
   target: '/api/v1/records/clone',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   onSuccess,
   ...extra,
 });

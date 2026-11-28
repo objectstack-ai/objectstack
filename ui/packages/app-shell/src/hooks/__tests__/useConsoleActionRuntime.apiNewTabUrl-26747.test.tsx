@@ -79,7 +79,7 @@ const NEW_TAB_ACTION = {
   target: TARGET,
   opensInNewTab: true,
   newTabUrl: '/export/{recordId}',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 function stubWindowOpen() {

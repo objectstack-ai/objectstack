@@ -11,7 +11,7 @@
  * bulk mode, condition evaluation, and the execution pipeline (api / navigate
  * / onClick / toast / reload / redirect, etc.).
  *
- * Default location is `record_header` — drop this component into a page:header
+ * Default location is `record_page` — drop this component into a page:header
  * region (or page:tabs/toolbar) to surface the per-record action set.
  */
 
@@ -32,7 +32,7 @@ import {
 import { useSafeTranslate } from '@object-ui/i18n';
 import { Loader2 } from 'lucide-react';
 import type { ActionDef, ActionLocation } from '@object-ui/core';
-import { resolveDeclaredActionIds } from '@object-ui/types';
+import { actionFoldedIntoMenu, resolveDeclaredActionIds } from '@object-ui/types';
 import type { DeclaredActionsRefusal } from '@object-ui/types';
 import { useRecordAriaProps, type AuthoredRecordAria } from './recordComponentAria';
 import { recordBindingBlock } from './recordBinding';
@@ -263,7 +263,7 @@ const RecordQuickActionsBody: React.FC<RecordQuickActionsRendererProps> = ({
     ? schema.requiredPermissions
     : [];
 
-  const location: ActionLocation = (schema.location as ActionLocation) || 'record_header';
+  const location: ActionLocation = (schema.location as ActionLocation) || 'record_page';
 
   // useActionEngine now shares the surrounding ActionProvider's runner
   // (see packages/react/src/hooks/useActionEngine.ts) so executeAction
@@ -330,7 +330,15 @@ const RecordQuickActionsBody: React.FC<RecordQuickActionsRendererProps> = ({
     );
   }
 
-  const visibleActions = actions.length > 0 && !noRecord ? getActionsForLocation(location) : [];
+  // objectstack#36495 — an action folded into the record header's ⋯
+  // (`component: 'action:menu'`, the former `record_more`) is the header's
+  // overflow, not a quick action: the bar at `record_page` leaves it out, as
+  // it left out a `record_more`-only action before.
+  const visibleActions = actions.length > 0 && !noRecord
+    ? getActionsForLocation(location).filter(
+        (a) => !(location === 'record_page' && actionFoldedIntoMenu(a)),
+      )
+    : [];
 
   /**
    * The empty bar (objectui#12995). Three different facts reach an empty
@@ -370,12 +378,12 @@ const RecordQuickActionsBody: React.FC<RecordQuickActionsRendererProps> = ({
   const align = schema.align || 'end';
   const justify =
     align === 'start' ? 'justify-start' : align === 'center' ? 'justify-center' : 'justify-end';
-  // When sitting in the record_header region right below the page:header
+  // When sitting in the record_page region right below the page:header
   // (the canonical Salesforce Lightning placement), pull the toolbar up so
   // it visually pairs with the title instead of orphaning on its own row.
   // Disabled when rendered inline inside page:header's own action slot
   // (the `inline` flag is set by PageHeader's first-class `actions` prop).
-  const inlineWithHeader = location === 'record_header' && !schema.inline;
+  const inlineWithHeader = location === 'record_page' && !schema.inline;
 
   return (
     <div

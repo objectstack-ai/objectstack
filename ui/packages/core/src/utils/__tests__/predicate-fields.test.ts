@@ -204,7 +204,7 @@ describe('listViewPredicates — `defaultFromRow` params and `target` tokens (ob
   const REMOVE_TEAM_MEMBER = {
     name: 'remove_team_member',
     type: 'api',
-    locations: ['list_item'],
+    locations: ['record_row'],
     target: '/api/v1/auth/organization/remove-team-member',
     params: [
       { name: 'teamId', field: 'team_id', required: true, defaultFromRow: true },
@@ -323,7 +323,7 @@ describe('listViewPredicates — the fields an `undoable` action writes (objectu
     name: 'close_task',
     operation: 'update',
     undoable: true,
-    locations: ['list_item'],
+    locations: ['record_row'],
     patch: { status: 'closed' },
   };
   const refs = (view: Parameters<typeof listViewPredicates>[0]) =>

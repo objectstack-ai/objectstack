@@ -13,7 +13,7 @@
  * full editor, where every type and operation is chosen — sits under
  * *Advanced*. Each preset is an action of a shape `ActionSchema` already has,
  * given as the keys it writes on top of the panel's seed (name, label, object,
- * `record_header` placement). Nothing here is a new action type, and nothing
+ * `record_page` placement). Nothing here is a new action type, and nothing
  * here is a published surface: the table is Studio-internal, like the panel
  * that reads it.
  *

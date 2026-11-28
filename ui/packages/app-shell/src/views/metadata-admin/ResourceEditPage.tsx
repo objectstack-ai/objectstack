@@ -3034,13 +3034,13 @@ function MetadataResourceEditPageImpl({
   const actionsNode = (
     <>
       {/* Declarative type-level actions (GAP-1) — e.g. datasource
-          "Test connection". Only on a saved item: record_header actions
+          "Test connection". Only on a saved item: record_page actions
           template `${ctx.recordId}` from the item name, which `(new)`
           drafts don't have yet. */}
       {!createMode && (
         <MetadataTypeActions
           entry={entry}
-          location="record_header"
+          location="record_page"
           recordId={name}
           onAfter={() => setReloadKey((k) => k + 1)}
         />
