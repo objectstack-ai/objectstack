@@ -1,8 +1,10 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * #35543 — a `where` key that names no field is refused `INVALID_FIELD` / 400
- * on all three analytics doors, as `/data` answers the same body.
+ * #35543 — an empty or blank (whitespace-only) `where` key is refused
+ * `INVALID_FIELD` / 400 on all three analytics doors, as `/data` answers the
+ * same body. Non-identifier text (`amount + 1`, `foo bar`) keeps the #21156
+ * member-shape gate's 403.
  *
  * Measured on the stock showcase at `7605e0c9c` before the fix:
  *
