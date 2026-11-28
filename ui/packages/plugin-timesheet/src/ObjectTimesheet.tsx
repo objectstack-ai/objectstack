@@ -329,6 +329,7 @@ function TimesheetGridView({ schema, objectName, binding, dataSource, className,
   );
   const valueLockedByHand = (record: Record<string, unknown>): boolean =>
     fieldReadOnlyByHand(lockDefs?.[binding.valueField], record, {
+      object: objectSchema,
       scope: predicateScope,
       fieldContext: `field '${binding.valueField}'`,
     });

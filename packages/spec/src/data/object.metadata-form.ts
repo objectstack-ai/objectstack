@@ -532,6 +532,11 @@ export const objectForm = defineMetadataForm({
         // `lifecycle.*.onlyWhen` rows — ⛔ not a reconciliation, and not this
         // row's price of admission.
         { field: 'validations', widget: 'json', helpText: 'Object-level validation rules — an array of rule objects, e.g. [{ "type": "script", "name": "amount_positive", "condition": "amount > 0", "message": "Amount must be positive" }]. State-machine transition tables are declared here too (ADR-0020)' },
+        // The whole-record hand lock (the object level of a field's
+        // `uiReadonlyWhen`, the two-tier field-lock model), beside the state
+        // machine it usually follows: the same CEL code row the field form
+        // gives the field key.
+        { field: 'uiReadonlyWhen', type: 'code', language: 'expression', colSpan: 2, helpText: "CEL predicate over the record (e.g. record.status in ['confirmed', 'done']) — while it is TRUE, people cannot edit any field of an existing record anywhere in the console (the edit dialog, the record page, grids, kanban, calendar and Gantt drag, the timesheet); a new record's create dialog is not judged. A field that sets its own hand lock (uiReadonly turned on, or uiReadonlyWhen) is judged by that instead, so uiReadonlyWhen: false on a field keeps it editable; uiReadonly turned off does not, and the field follows this lock. Actions, imports, the API and flows still write every field, judged by the object's validations. Reads the record's own columns. The in-app assistant acting for a person does not honour it yet." },
         // #19332 (flight G2b of ruling record 5861442317) — the object's
         // declarative timeline milestones (ADR-0052 §5b.2), beside `validations`:
         // a milestone fires on a field reaching a value, the same transition a

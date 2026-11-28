@@ -902,7 +902,15 @@ export const WizardForm: React.FC<WizardFormProps> = ({
             {
               visibleWhen,
               readonlyWhen: (field as any).readonlyWhen,
-              uiReadonlyWhen: (field as any).uiReadonlyWhen,
+              // The hand lock is judged on an existing record only ("a create
+              // is not judged", `@objectstack/spec` `Field.uiReadonlyWhen` and
+              // `ObjectSchema.uiReadonlyWhen`): dropped on a CREATE wizard
+              // here, at the evaluating site, as the form renderer drops it
+              // (`form.tsx`). The carried predicate may be the object's
+              // whole-record lock (`fromObjectSchema` folds it in every mode),
+              // and judged here it would make every inheriting field read-only
+              // and skip this whole-form required re-check (objectstack#37402).
+              uiReadonlyWhen: isCreateWizard ? undefined : (field as any).uiReadonlyWhen,
               requiredWhen: (field as any).requiredWhen,
             },
             ruleRecord,

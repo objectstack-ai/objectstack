@@ -13,7 +13,7 @@
  * acts on a cell, never while it draws.
  */
 import { buildValidationRules, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
-import { fieldReadOnlyByHand, type FieldHandLockDef } from '@object-ui/core';
+import { fieldReadOnlyByHand, type FieldHandLockDef, type ObjectHandLockDef } from '@object-ui/core';
 import { fieldInlineReadOnlyKind } from './inline-edit-options';
 
 /** Why a cell opens no editor, in the order a cell names them. */
@@ -53,6 +53,11 @@ export interface CellReadOnlyInputs {
    * half is read.
    */
   row?: Record<string, unknown> | null;
+  /**
+   * The object definition the row belongs to: its `uiReadonlyWhen` is the hand
+   * lock of every field that declares none of its own. `null` while unknown.
+   */
+  object: ObjectHandLockDef | null | undefined;
   /** The host's predicate scope (`current_user` and friends), as the edit dialog binds it. */
   scope?: Record<string, unknown>;
   /** May this reader write the field (`resolveFieldAffordance('listInlineEdit', …)`)? */
@@ -78,7 +83,7 @@ export function cellReadOnlyKind(inputs: CellReadOnlyInputs): CellReadOnlyKind |
   const fieldKind = fieldInlineReadOnlyKind(inputs.fieldDef);
   if (fieldKind) return fieldKind;
   // The conditional half of the one hand-lock verdict, over this row.
-  if (inputs.row != null && fieldReadOnlyByHand(inputs.fieldDef, inputs.row, { scope: inputs.scope })) return 'readonly';
+  if (inputs.row != null && fieldReadOnlyByHand(inputs.fieldDef, inputs.row, { object: inputs.object, scope: inputs.scope })) return 'readonly';
   if (!inputs.fieldWritable) return 'noFieldPermission';
   if (!inputs.canUpdate) return 'noPermission';
   if (!inputs.objectEditable) return 'objectReadOnly';

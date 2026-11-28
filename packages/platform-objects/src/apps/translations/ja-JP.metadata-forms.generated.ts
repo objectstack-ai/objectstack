@@ -425,6 +425,10 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "検証ルール",
         helpText: "オブジェクトレベルの検証ルール — ルールオブジェクトの配列。例: [{ \"type\": \"script\", \"name\": \"amount_positive\", \"condition\": \"amount > 0\", \"message\": \"Amount must be positive\" }]。ステートマシンの遷移テーブルもここで宣言します（ADR-0020）"
       },
+      uiReadonlyWhen: {
+        label: "レコード全体を画面上で読み取り専用にする条件",
+        helpText: "レコードに対する CEL 述語（例: record.status in ['confirmed', 'done']）。TRUE の間、コンソールのどこでも既存レコードのどのフィールドも人が編集できません（編集ダイアログ、レコードページ、グリッド、カンバン、カレンダーとガントのドラッグ、タイムシート）。新規レコードの作成ダイアログは判定されません。独自の手動ロック（uiReadonly をオン、または uiReadonlyWhen）を宣言したフィールドはその宣言で判定されるため、フィールドに uiReadonlyWhen: false を設定すると編集可能なままになります。uiReadonly をオフにしてもそうはならず、フィールドはこのロックに従います。アクション、インポート、API、フローは引き続きすべてのフィールドに書き込み、オブジェクトの検証ルールで判定されます。レコード自身の列を読み取ります。ユーザーの代わりに操作するアプリ内アシスタントはまだこの設定に従いません。"
+      },
       activityMilestones: {
         label: "アクティビティのマイルストーン",
         helpText: "フィールドが特定の値に達したときに書き込まれるタイムラインのエントリ（ADR-0052 §5b.2）。更新で監視対象のフィールドがその値に変わると、監査プラグインはフィールド変更のエントリの代わりに、マイルストーンの概要をレコードのアクティビティタイムラインに書き込みます。最初に一致したマイルストーンが使われます。"

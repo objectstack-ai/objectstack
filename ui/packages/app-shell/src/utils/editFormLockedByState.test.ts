@@ -92,3 +92,29 @@ describe('editFormLockedByState (objectstack#32756)', () => {
     expect(editFormLockedByState(locked, null)).toBe(false);
   });
 });
+
+/**
+ * #37402 — the object-level hand lock is the record's state too: an object
+ * whose `uiReadonlyWhen` holds greys Edit when it locks every drawn field, and
+ * a field that overrides it (`uiReadonlyWhen: 'false'`) keeps Edit live.
+ */
+describe('editFormLockedByState reads the object-level uiReadonlyWhen (#37402)', () => {
+  const CONFIRMED = { id: 'o1', status: 'confirmed', amount: 1, notes: 'n' };
+  const order = (notes: Record<string, unknown>) => ({
+    name: 'order',
+    uiReadonlyWhen: "record.status in ['confirmed', 'done']",
+    fields: { status: { type: 'text' }, amount: { type: 'number' }, notes: { type: 'text', ...notes } },
+  });
+
+  it('is true when the object lock holds and no field overrides it', () => {
+    expect(editFormLockedByState(order({}), CONFIRMED)).toBe(true);
+  });
+
+  it('is false when a field keeps itself editable with its own uiReadonlyWhen', () => {
+    expect(editFormLockedByState(order({ uiReadonlyWhen: 'false' }), CONFIRMED)).toBe(false);
+  });
+
+  it('is false while the object predicate does not hold', () => {
+    expect(editFormLockedByState(order({}), { ...CONFIRMED, status: 'draft' })).toBe(false);
+  });
+});

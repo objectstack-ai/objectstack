@@ -371,3 +371,30 @@ describe('[#36806] describeServedObject reports the hand lock as its own keys', 
     expect('uiReadonly' in field('subject') || 'uiReadonlyWhen' in field('subject')).toBe(false);
   });
 });
+
+// [#37402] The object level of the same model: the whole-record hand lock's
+// predicate text, on the answer's top level, where the object authors one.
+describe('[#37402] describeServedObject reports the object-level uiReadonlyWhen', () => {
+  const fields = { status: { type: 'text' }, notes: { type: 'text', uiReadonlyWhen: 'false' }, tag: { type: 'text', uiReadonly: false } };
+  it('the predicate text, from an envelope too, beside the fields that override it', () => {
+    const described = describeServedObject({
+      name: 'locked_order',
+      uiReadonlyWhen: { dialect: 'cel', source: "record.status in ['confirmed', 'done']" },
+      fields,
+    } as never) as { uiReadonlyWhen?: unknown; fields: Array<Record<string, unknown>> };
+    expect(described.uiReadonlyWhen).toBe("record.status in ['confirmed', 'done']");
+    expect(described.fields.find((f) => f.name === 'notes')).toMatchObject({ uiReadonlyWhen: 'false' });
+    // Never folded into any field's `readonly`: an agent's write still sets it.
+    expect(described.fields.find((f) => f.name === 'status')).toMatchObject({ readonly: false });
+    expect('uiReadonlyWhen' in described.fields.find((f) => f.name === 'status')!).toBe(false);
+    // A stored `uiReadonly: false` is not an opt-out (it follows the object
+    // lock), so it is never listed as a key a reader could take for one.
+    const tag = described.fields.find((f) => f.name === 'tag')!;
+    expect('uiReadonly' in tag || 'uiReadonlyWhen' in tag).toBe(false);
+  });
+
+  it('CONTROL — an object that authors none, or a blank one, carries no key', () => {
+    expect('uiReadonlyWhen' in describeServedObject({ name: 'plain', fields } as never)).toBe(false);
+    expect('uiReadonlyWhen' in describeServedObject({ name: 'blank', uiReadonlyWhen: '  ', fields } as never)).toBe(false);
+  });
+});

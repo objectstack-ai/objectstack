@@ -22,7 +22,7 @@ import {
   deriveInlineRowFormFields,
 } from '@objectstack/spec/data';
 import { summaryDeclaresCurrency, type BooleanValueLabel, type GridColumn } from '@object-ui/fields';
-import { isExpressionComputedField } from '@object-ui/core';
+import { effectiveUiReadonlyWhen, isExpressionComputedField } from '@object-ui/core';
 
 /**
  * Minimal shape of a MASTER-DETAIL CHILD object's schema, as returned by
@@ -47,6 +47,8 @@ import { isExpressionComputedField } from '@object-ui/core';
 export interface ChildObjectSchemaLike {
   name?: string;
   fields?: Record<string, any>;
+  /** The child object's whole-record hand lock (`ObjectSchema.uiReadonlyWhen`), folded onto its columns. */
+  uiReadonlyWhen?: unknown;
 }
 
 /** Map an ObjectQL field type to a LineItems grid column type. */
@@ -267,7 +269,7 @@ export function deriveColumns(
     maxColumns: opts.maxColumns ?? DEFAULT_MAX_INLINE_GRID_COLUMNS,
   });
   return derived.map(({ name, defaultHidden }) => {
-    const col = deriveColumn(name, fields[name], opts.booleanLabel);
+    const col = deriveColumn(name, fields[name], opts.booleanLabel, childSchema);
     return defaultHidden ? { ...col, defaultHidden } : col;
   });
 }
@@ -277,7 +279,12 @@ export function deriveColumns(
  * `d` (the field map holds `null` / `undefined` / `0` / `''` / `false` under
  * that name) still builds a plain text column headed by the field name.
  */
-function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): GridColumn {
+function deriveColumn(
+  name: string,
+  d: any,
+  booleanLabel: BooleanValueLabel,
+  childSchema: ChildObjectSchemaLike | undefined,
+): GridColumn {
   const col: GridColumn = {
     name,
     label: d?.label || name,
@@ -311,7 +318,10 @@ function deriveColumn(name: string, d: any, booleanLabel: BooleanValueLabel): Gr
   // The child FIELD's hand-lock predicate (`uiReadonlyWhen`), carried onto its
   // column in memory: the cell folds it into the same per-row read-only verdict
   // (`resolveFieldRuleState`). Not an `inlineColumns` key an author writes.
-  if (d?.uiReadonlyWhen) (col as { uiReadonlyWhen?: unknown }).uiReadonlyWhen = d.uiReadonlyWhen;
+  // The EFFECTIVE predicate (objectstack#37402): a child field that declares
+  // no hand lock of its own carries the child object's whole-record one.
+  const handLockWhen = effectiveUiReadonlyWhen(d, childSchema);
+  if (handLockWhen) (col as { uiReadonlyWhen?: unknown }).uiReadonlyWhen = handLockWhen;
   if (d?.requiredWhen) col.requiredWhen = d.requiredWhen;
   // A field carrying an arithmetic `expression` (e.g. amount = quantity *
   // unit_price) becomes a live read-only computed column. The expression may
@@ -417,7 +427,7 @@ export function hydrateColumns(
       if (col.type === 'currency') reportCurrencyColumnScale(col, childSchema?.name, false);
       // explicit type — respect the author's choice, save the child field's
       // hand lock, which no authored column may open (objectstack#36806)
-      return withHandLock(col, (fields as any)[col.name]);
+      return withHandLock(col, (fields as any)[col.name], childSchema);
     }
     const d = (fields as any)[col.name];
     if (!d) return col; // unknown field — leave as-is (grid falls back to text)
@@ -438,7 +448,7 @@ export function hydrateColumns(
     }
     if (type === 'file') applyFileColumnProps(next, d);
     if (next.readonlyWhen == null && d?.readonlyWhen) next.readonlyWhen = d.readonlyWhen;
-    Object.assign(next, withHandLock(next, d));
+    Object.assign(next, withHandLock(next, d, childSchema));
     if (next.requiredWhen == null && d?.requiredWhen) {
       next.requiredWhen = d.requiredWhen;
     }
@@ -459,11 +469,19 @@ export function hydrateColumns(
  * cell verdict. Derived columns never list a `uiReadonly` child field
  * (`deriveInlineGridColumns` skips it); an AUTHORED column may name one, typed
  * or not, and the lock must hold there too — no server strip stands behind it.
+ * A child field that declares no hand lock of its own carries the child
+ * object's `uiReadonlyWhen` instead (the object level of the same model).
  */
-function withHandLock(col: GridColumn, d: Record<string, unknown> | undefined): GridColumn {
+function withHandLock(
+  col: GridColumn,
+  d: Record<string, unknown> | undefined,
+  childSchema: ChildObjectSchemaLike | undefined,
+): GridColumn {
   if (!d) return col;
   const lockStatic = d.uiReadonly === true;
-  const lockWhen = d.uiReadonlyWhen;
+  // The EFFECTIVE predicate (objectstack#37402): the field's own, else the
+  // child object's whole-record `uiReadonlyWhen`.
+  const lockWhen = effectiveUiReadonlyWhen(d, childSchema);
   if (!lockStatic && lockWhen == null) return col;
   const next = { ...col } as GridColumn & { uiReadonly?: boolean; uiReadonlyWhen?: unknown };
   if (lockStatic) next.uiReadonly = true;

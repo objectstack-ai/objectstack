@@ -138,3 +138,29 @@ describe('ObjectGrid — a shown column\'s lock operands are projected (objectst
     expect(lastSelect(ds)).toEqual(['id', 'status']);
   });
 });
+
+describe('ObjectGrid — the object-level hand lock\'s operands are projected (objectstack#37402)', () => {
+  it('asks for the operand of the object\'s uiReadonlyWhen for a column that inherits it', async () => {
+    const ds = makeDataSource();
+    ds.getObjectSchema.mockImplementation(async () => ({
+      name: OBJECT,
+      uiReadonlyWhen: "record.stage == 'closed'",
+      fields: OBJECT_FIELDS,
+    }));
+    renderGrid(ds, ['status']);
+    await vi.waitFor(() => expect(ds.find).toHaveBeenCalled());
+    expect(lastSelect(ds)).toEqual(['id', 'stage', 'status']);
+  });
+
+  it('control: a column whose field declares its own hand lock does not inherit the object operand', async () => {
+    const ds = makeDataSource();
+    ds.getObjectSchema.mockImplementation(async () => ({
+      name: OBJECT,
+      uiReadonlyWhen: "record.stage == 'closed'",
+      fields: OBJECT_FIELDS,
+    }));
+    renderGrid(ds, ['subject']);
+    await vi.waitFor(() => expect(ds.find).toHaveBeenCalled());
+    expect(lastSelect(ds)).toEqual(['id', 'status', 'subject']);
+  });
+});

@@ -651,7 +651,7 @@ export const DetailSection: React.FC<DetailSectionProps> = ({
     // The object field's lock goes through the one hand-lock verdict — `readonly`,
     // `readonlyWhen`, `uiReadonly`, `uiReadonlyWhen` over this record
     // (`fieldReadOnlyByHand`, `@object-ui/core`) — never `readonly` alone.
-    const isReadonly = field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { scope: predicateScope });
+    const isReadonly = field.readonly === true || fieldReadOnlyByHand(objectDefField, data, { object: objectSchema, scope: predicateScope });
     const isSystemField = NON_EDITABLE_SYSTEM_FIELDS.has(field.name);
     // Types the fields package excludes from in-place editing — the SAME
     // alias-aware contract the grid consults, not a second list (objectui#4221).

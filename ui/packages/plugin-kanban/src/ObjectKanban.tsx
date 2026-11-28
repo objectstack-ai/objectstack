@@ -2592,7 +2592,7 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
       // hand lock `uiReadonlyWhen`): no write, and the card goes back — a fresh
       // array identity re-buckets the board from the unchanged rows.
       const laneDef = (objectDef?.fields as Record<string, Record<string, unknown> | undefined> | undefined)?.[groupBy];
-      if (fieldReadOnlyByHand(laneDef, record, { fieldContext: `field '${groupBy}'`, scope: predicateScope })) {
+      if (fieldReadOnlyByHand(laneDef, record, { object: objectDef, fieldContext: `field '${groupBy}'`, scope: predicateScope })) {
         setFetchedData((prev) => prev.map((r) => r));
         return { kind: 'refused', message: tt('grid.readOnlyReason.readonly', 'This field is read-only.') };
       }

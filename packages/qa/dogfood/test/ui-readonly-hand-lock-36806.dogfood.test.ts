@@ -17,10 +17,17 @@
 //    submits, since a hand-locked field is never in its payload) lands on the
 //    field's `defaultValue`, and an API create outside `initialStates` is
 //    refused by the machine, not by the lock.
+//
+// [#37402] The object level of the same model: an object whose
+// `uiReadonlyWhen` locks a whole confirmed record by hand, with one field
+// (`notes`) that overrides it with its own `uiReadonlyWhen: P\`false\``. The
+// engine reads neither key, so on a confirmed record a PATCH, an import update
+// and a declarative action still write, judged by the machine, and nothing is
+// dropped; the served definition carries the predicate the console folds.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
-import { defineStack } from '@objectstack/spec';
+import { defineStack, P } from '@objectstack/spec';
 import { ObjectSchema, Field } from '@objectstack/spec/data';
 
 const OBJ = 'hlk_order';
@@ -57,6 +64,38 @@ const order = ObjectSchema.create({
   ],
 } as never);
 
+const LOCKED = 'hlk_locked_order';
+const LOCKED_MESSAGE = 'An order moves draft, then confirmed, then done.';
+
+const lockedOrder = ObjectSchema.create({
+  name: LOCKED,
+  label: 'Locked order',
+  pluralLabel: 'Locked orders',
+  uiReadonlyWhen: P`record.status in ['confirmed', 'done']`,
+  fields: {
+    name: Field.text({ label: 'Name', required: true }),
+    status: {
+      ...Field.select(['draft', 'confirmed', 'done'], { label: 'Status' }),
+      defaultValue: 'draft',
+    },
+    amount: Field.number({ label: 'Amount' }),
+    notes: { ...Field.text({ label: 'Notes' }), uiReadonlyWhen: P`false` },
+  },
+  validations: [
+    {
+      type: 'state_machine',
+      name: 'hlk_locked_order_flow',
+      message: LOCKED_MESSAGE,
+      field: 'status',
+      initialStates: ['draft'],
+      transitions: { draft: ['confirmed'], confirmed: ['done'], done: [] },
+    },
+  ],
+  actions: [
+    { name: 'hlk_locked_finish', label: 'Finish', objectName: LOCKED, operation: 'update', patch: { status: 'done', amount: 99 } },
+  ],
+} as never);
+
 const stackConfig = defineStack({
   manifest: {
     id: 'com.dogfood.ui-readonly-hand-lock',
@@ -66,12 +105,23 @@ const stackConfig = defineStack({
     name: 'Hand Lock Fixture',
     description: 'One object whose status is locked by hand at the console and judged by a state machine on every write.',
   },
-  objects: [order],
+  objects: [order, lockedOrder],
 } as never);
 
+// One booted stack for both describes below (the field level and the object level).
+let stack: VerifyStack;
+let admin = '';
+
+beforeAll(async () => {
+  stack = await bootStack(stackConfig as never);
+  admin = await stack.signIn();
+}, 240_000);
+
+afterAll(async () => {
+  await stack?.stop?.();
+});
+
 describe('[#36806] a uiReadonly field keeps every write path, judged by the validations', () => {
-  let stack: VerifyStack;
-  let admin = '';
 
   const create = async (name: string): Promise<string> => {
     const res = await stack.apiAs(admin, 'POST', `/data/${OBJ}`, { name });
@@ -90,15 +140,6 @@ describe('[#36806] a uiReadonly field keeps every write path, judged by the vali
     expect(await statusOf(id)).toBe('approved');
     return id;
   };
-
-  beforeAll(async () => {
-    stack = await bootStack(stackConfig as never);
-    admin = await stack.signIn();
-  }, 240_000);
-
-  afterAll(async () => {
-    await stack?.stop?.();
-  });
 
   it('a create that leaves the hand-locked field out lands on its defaultValue', async () => {
     const id = await create('hlk default');
@@ -168,5 +209,67 @@ describe('[#36806] a uiReadonly field keeps every write path, judged by the vali
     const body: any = await res.json();
     const code = body?.error?.code ?? body?.code;
     expect({ status: res.status, code }, JSON.stringify(body)).toEqual({ status: 400, code: 'VALIDATION_FAILED' });
+  });
+});
+
+describe('[#37402] an object-level uiReadonlyWhen keeps every write path on a locked record', () => {
+  const create = async (name: string): Promise<string> => {
+    const res = await stack.apiAs(admin, 'POST', `/data/${LOCKED}`, { name, amount: 1, notes: 'n' });
+    expect(res.status, await res.clone().text()).toBe(201);
+    return idOf(await res.json());
+  };
+  const read = async (id: string) =>
+    recordOf(await (await stack.apiAs(admin, 'GET', `/data/${LOCKED}/${id}`)).json());
+  /** A fresh order moved to `confirmed` — the state the object's hand lock holds. */
+  const confirmed = async (name: string): Promise<string> => {
+    const id = await create(name);
+    const res = await stack.apiAs(admin, 'PATCH', `/data/${LOCKED}/${id}`, { status: 'confirmed' });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect((await read(id)).status).toBe('confirmed');
+    return id;
+  };
+
+  it('the served definition carries the object predicate and the field override the console folds', async () => {
+    const res = await stack.apiAs(admin, 'GET', `/meta/object/${LOCKED}`);
+    expect(res.status).toBe(200);
+    const item: any = ((await res.json()) as { item?: unknown }).item;
+    const source = (p: unknown) => (typeof p === 'string' ? p : (p as { source?: string } | undefined)?.source);
+    expect(source(item?.uiReadonlyWhen)).toBe("record.status in ['confirmed', 'done']");
+    expect(source(item?.fields?.notes?.uiReadonlyWhen)).toBe('false');
+  });
+
+  it('a PATCH to a confirmed record writes every field and drops none', async () => {
+    const id = await confirmed('hlo patch');
+    const res = await stack.apiAs(admin, 'PATCH', `/data/${LOCKED}/${id}`, { amount: 7, notes: 'changed', name: 'hlo patched' });
+    const body: any = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(res.headers.get('X-ObjectStack-Dropped-Fields')).toBeNull();
+    expect(body?.droppedFields, JSON.stringify(body?.droppedFields)).toBeUndefined();
+    expect(await read(id)).toMatchObject({ amount: 7, notes: 'changed', name: 'hlo patched', status: 'confirmed' });
+  });
+
+  it('an import update on a confirmed record writes, and the machine still judges the lifecycle field', async () => {
+    const id = await confirmed('hlo import');
+    const refused = await confirmed('hlo import refused');
+    const res = await stack.apiAs(admin, 'POST', `/data/${LOCKED}/import`, {
+      format: 'json',
+      writeMode: 'update',
+      matchFields: ['id'],
+      rows: [{ id, amount: 42 }, { id: refused, status: 'draft' }],
+    });
+    const report: any = await res.json();
+    expect(res.status, JSON.stringify(report)).toBe(200);
+    expect(report.results?.[0]?.ok, JSON.stringify(report.results)).toBe(true);
+    expect(report.results?.[1]?.ok, JSON.stringify(report.results)).toBe(false);
+    expect(JSON.stringify(report.results?.[1])).toContain(LOCKED_MESSAGE);
+    expect((await read(id)).amount).toBe(42);
+    expect((await read(refused)).status).toBe('confirmed');
+  });
+
+  it('a declarative action on a confirmed record writes the fields it patches', async () => {
+    const id = await confirmed('hlo action');
+    const res = await stack.apiAs(admin, 'POST', `/actions/${LOCKED}/hlk_locked_finish`, { recordId: id });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(await read(id)).toMatchObject({ status: 'done', amount: 99 });
   });
 });

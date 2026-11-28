@@ -41,7 +41,7 @@
  */
 
 import type { FormField } from '@object-ui/types';
-import { evalFieldPredicate, fieldStaticallyReadOnlyByHand, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
+import { effectiveUiReadonlyWhen, evalFieldPredicate, fieldStaticallyReadOnlyByHand, isBlankPredicateText, isExpressionComputedField, type FieldRulePredicate } from '@object-ui/core';
 import { mapFieldTypeToFormType, buildValidationRules, fieldHelpText, withFollowedParentObject, withFormObject } from '@object-ui/fields';
 import { withHomeAmountSource } from '@object-ui/i18n';
 import { isCreateFormMode, isRequiredInForm } from './schemaDefaults';
@@ -371,8 +371,10 @@ export function fromObjectSchema(fieldName: string, ctx: SectionFieldsContext): 
     visibleWhen: field.visibleWhen,
     readonlyWhen: field.readonlyWhen,
     // The hand lock's predicate (`Field.uiReadonlyWhen`): the form renderer
-    // folds it into the same read-only verdict as `readonlyWhen`.
-    uiReadonlyWhen: field.uiReadonlyWhen,
+    // folds it into the same read-only verdict as `readonlyWhen`. The
+    // EFFECTIVE one: a field that declares no hand lock of its own carries the
+    // object's whole-record `uiReadonlyWhen` (`effectiveUiReadonlyWhen`).
+    uiReadonlyWhen: effectiveUiReadonlyWhen(field, ctx.objectSchema),
     requiredWhen: field.requiredWhen,
     // A stored field carrying an `expression` is computed by the engine on
     // every write, so a typed value never stands (objectstack#31759): it draws

@@ -237,12 +237,17 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     // server rule-validator; a fault LOCKS the field (`fail-closed`), where
     // that row is `fail-soft-log`; and no server reads it at all. The server
     // lock is `readonlyWhen`, classified by `cel-field-rule`.
+    // #37402 — the object level of the same lock (`ObjectSchema.uiReadonlyWhen`)
+    // is a second cover, not a row of its own: it runs through the same verdict
+    // (`effectiveUiReadonlyWhen` folds it in as the default of every field that
+    // declares no hand lock of its own), with the same record binding, the same
+    // fail-closed answer and the same authoring check.
     id: 'cel-field-ui-readonly-when',
-    summary: "a field's console hand lock (Field.uiReadonlyWhen) — UI only, fails closed",
+    summary: "the console hand lock (Field.uiReadonlyWhen, and the object's whole-record ObjectSchema.uiReadonlyWhen) — UI only, fails closed",
     dialect: 'cel', mode: 'interpret', state: 'enforced', failPolicy: 'fail-closed',
     enforcement:
-      'console (ui/) resolveFieldRuleState → evalFieldPredicate (core/evaluator/fieldRules.ts) → @objectstack/formula celEngine (interpret) — called directly by the edit dialog and the grid cell, and through the one verdict fieldReadOnlyByHand (core/evaluator/handLock.ts) everywhere else — evaluated per existing record with the row bound as `record` (plus `previous` and the host predicate scope), by the hosts that let a person edit a stored record: the edit dialog (which also refuses submit while the predicate faults), the record page (inline edit, highlight chip, save bar, stage path), grid cells and the line-item grid\'s stored rows, kanban drag, calendar drag, the Gantt\'s writes and the timesheet cell. A create is not judged. A predicate that faults answers LOCKED (UI_READONLY_WHEN_FAULTED = true), because nothing behind it judges the write. UI only: no server evaluates it, and an API or automation write is not refused by it; the server lock is `readonlyWhen`. Judged at authoring by lint\'s field-rule pass (`validate-expressions.ts`) as `readonlyWhen` is',
-    covers: ['data/field.zod.ts:FieldSchema.uiReadonlyWhen'],
+      'console (ui/) resolveFieldRuleState → evalFieldPredicate (core/evaluator/fieldRules.ts) → @objectstack/formula celEngine (interpret) — called directly by the edit dialog and the grid cell, and through the one verdict fieldReadOnlyByHand (core/evaluator/handLock.ts) everywhere else — evaluated per existing record with the row bound as `record` (plus `previous` and the host predicate scope), by the hosts that let a person edit a stored record: the edit dialog (which also refuses submit while the predicate faults), the record page (inline edit, highlight chip, save bar, stage path), grid cells and the line-item grid\'s stored rows, kanban drag, calendar drag, the Gantt\'s writes and the timesheet cell. A create is not judged. A predicate that faults answers LOCKED (UI_READONLY_WHEN_FAULTED = true), because nothing behind it judges the write. UI only: no server evaluates it, and an API or automation write is not refused by it; the server lock is `readonlyWhen`. Judged at authoring by lint\'s field-rule pass (`validate-expressions.ts`) as `readonlyWhen` is. The object\'s `uiReadonlyWhen` is the default predicate of every field that declares no hand lock of its own (`uiReadonly: true` or a `uiReadonlyWhen`): folded in by effectiveUiReadonlyWhen (core/evaluator/handLock.ts) and judged by the same verdict on the same hosts, faulting LOCKED likewise; lint checks the object slot at `object \'NAME\' uiReadonlyWhen` the same way',
+    covers: ['data/field.zod.ts:FieldSchema.uiReadonlyWhen', 'data/object.zod.ts:ObjectSchemaBase.uiReadonlyWhen'],
     proof: 'ui/packages/core/src/evaluator/__tests__/handLock-36806.test.ts',
   },
   {
