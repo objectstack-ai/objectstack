@@ -4,9 +4,10 @@ import type { SemanticMigration } from '../../types.js';
 
 // #34562 — a `lookupFilters[].value` `{ $record: 'path' }` path must read ONE
 // value of the record being edited: a path whose head, or whose leaf behind a
-// single-valued hop, is a structured field (`STRUCTURED_JSON_TYPES`) names an
-// object, and is refused as `object-field-ref-unknown`, beside the
-// multi-valued refusal of #34378 (`lookup-filter-record-path-multi-valued-refused`).
+// single-valued hop, is a structured field (`STRUCTURED_JSON_TYPES`) names a
+// list or an object rather than one value, and is refused as
+// `object-field-ref-unknown`, beside the multi-valued refusal of #34378
+// (`lookup-filter-record-path-multi-valued-refused`).
 // Measured first-party exposure at this change: zero — no example app,
 // platform object, plugin or skill writes a `$record` path to such a field.
 // Not converted: which single value a structured path meant is the author's
@@ -27,16 +28,16 @@ export const entry: SemanticMigration = {
     + 'you mean onto a single-valued field and reference that. Refused at error as `object-field-ref-unknown` '
     + '(422 INVALID_METADATA at the doors).',
   reason:
-    'The { $record } comparand stands for one value and pairs only with the six scalar comparisons, but a structured '
-    + 'field holds an object (an address, a location, a JSON document, a list of rows), and the path check judged '
-    + 'existence and multi-valuedness only, so such a path parsed and linted clean. Read from code: the picker would '
-    + 'compare that object as one value under a scalar operator, which no declared reading answers, so the filter does '
-    + 'not do what it reads as. The set is STRUCTURED_JSON_TYPES from @objectstack/spec/data, which the cross-field '
-    + 'comparison classes already place in the list-or-object family with no comparison class. A hop THROUGH a '
-    + 'structured field was already refused as not a relationship. No first-party stack (example apps, platform '
-    + 'objects, plugins, skills) writes such a path today. A registry-injected column and a leaf on an object outside '
-    + 'the stack are not judged. There is no mechanical rewrite: which single value the author meant is a judgement '
-    + 'about the data.',
+    'The { $record } comparand stands for one value and pairs only with the six scalar comparisons, but a '
+    + 'structured field holds a list or an object rather than one value (an address, a location, a JSON document, a '
+    + 'list of rows), and the path check judged existence and multi-valuedness only, so such a path parsed and '
+    + 'linted clean. Read from code: the picker would compare that list or object as one value under a scalar '
+    + 'operator, which no declared reading answers, so the filter does not do what it reads as. The set is '
+    + 'STRUCTURED_JSON_TYPES from @objectstack/spec/data, which the cross-field comparison classes already place in '
+    + 'the list-or-object family with no comparison class. A hop THROUGH a structured field was already refused as '
+    + 'not a relationship. No first-party stack (example apps, platform objects, plugins, skills) writes such a '
+    + 'path today. A registry-injected column and a leaf on an object outside the stack are not judged. There is no '
+    + 'mechanical rewrite: which single value the author meant is a judgement about the data.',
   acceptanceCriteria:
     'Load every object (`os validate` or `os build`): no `object-field-ref-unknown` finding at '
     + 'fields.NAME.lookupFilters[N].value.$record that names a structured field. PUT '

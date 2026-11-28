@@ -122,7 +122,8 @@
  *    `FieldSchema` reads. A plain path to, or a leaf behind a hop at, a
  *    STRUCTURED field (#34562) — a member of `STRUCTURED_JSON_TYPES`
  *    (`@objectstack/spec/data`): json, address, location, … — is refused the
- *    same way, with the same hint: it holds an object, not one value. A
+ *    same way, with the same hint: it holds a list or an object rather than
+ *    one value. A
  *    registry-injected column, and a leaf on an object outside this stack,
  *    stay unjudged. A `{ $record }` nested
  *    deeper inside a literal (`value: { any: { $record: 'x' } }`) is an
@@ -739,7 +740,8 @@ export function validateObjectFieldRefs(stack: AnyRec): ObjectFieldRefFinding[] 
    * it, or a hop through it), else — behind a single-valued hop — its
    * authored leaf when that is. A STRUCTURED field (#34562: a member of
    * `STRUCTURED_JSON_TYPES`, `@objectstack/spec/data` — json, address,
-   * location, …) holds an object, so it has no scalar value either and is
+   * location, …) holds a list or an object rather than one value, so it has
+   * no scalar value either and is
    * named at the same two positions. `what` is the finding's noun for the
    * field. `undefined` = one scalar value, or not judgeable here (a
    * registry-injected column, an object outside the stack).
