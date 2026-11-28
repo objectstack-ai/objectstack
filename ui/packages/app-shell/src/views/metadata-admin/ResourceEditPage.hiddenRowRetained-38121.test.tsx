@@ -16,7 +16,12 @@
  *       notice; clear it and the save is accepted, with no `refusals` key;
  *   (b) CONTROL — the same, saved without clearing: the server's refusal is
  *       drawn on the `refusals` row, which the author can see;
- *   (c) CONTROL — a hidden row that never held a value stays hidden.
+ *   (c) CONTROL — a hidden row that never held a value stays hidden;
+ *   (d) CONTROL — a value equal to the row schema's `default` is not the
+ *       author's: a built object's `text` field carries the parse-filled
+ *       `multiple: false`, and the object form's `multiple` row (gated on a
+ *       lookup) stays hidden with no notice, while a non-default `true` on
+ *       the same type is re-shown.
  *
  * The REAL page with the served `hookForm` and the served derivation of
  * `HookSchema`. The client's `save` is the server's verdict: `HookSchema`
@@ -36,6 +41,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router-dom';
 import { z } from 'zod';
 import { HookSchema } from '@objectstack/spec/data';
+import { getMetadataTypeSchema } from '@objectstack/spec/kernel';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { MetadataClient, type MetadataError } from '@object-ui/data-objectstack';
 import { t } from './i18n';
@@ -125,6 +131,7 @@ vi.mock('./clientValidation', async (importOriginal) => {
 });
 
 import { MetadataResourceEditPage } from './ResourceEditPage';
+import { SchemaForm } from './SchemaForm';
 
 served.schema = HOOK_JSON_SCHEMA;
 served.form = METADATA_FORM_REGISTRY.hook;
@@ -230,4 +237,49 @@ describe('a row hidden by visibleWhen keeps showing a value it holds (objectstac
     expect(screen.queryByText('Texts', { selector: 'label' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('schema-form-inactive-retained')).toBeNull();
   }, 30000);
+});
+
+describe('a value equal to the row schema default is not retained (objectstack#38121)', () => {
+  const OBJECT_JSON_SCHEMA = z.toJSONSchema(getMetadataTypeSchema('object') as z.ZodType, {
+    io: 'input',
+    unrepresentable: 'any',
+  }) as Record<string, unknown>;
+  // A built object as stored: the parse filled `multiple: false` on its fields.
+  const BUILT_OBJECT = {
+    name: 'order',
+    label: 'Order',
+    fields: {
+      title: { type: 'text', label: 'Title', multiple: false },
+      tags: { type: 'text', label: 'Tags', multiple: true },
+    },
+  };
+
+  function renderObjectForm() {
+    render(
+      <SchemaForm
+        schema={OBJECT_JSON_SCHEMA}
+        form={METADATA_FORM_REGISTRY.object as never}
+        value={BUILT_OBJECT}
+        onChange={() => {}}
+      />,
+    );
+  }
+
+  it('(d) CONTROL — the served default is what the parse filled in', () => {
+    const fields = (OBJECT_JSON_SCHEMA.properties as Record<string, any>).fields;
+    expect(fields.additionalProperties.properties.multiple.default).toBe(false);
+  });
+
+  it('(d) a text field holding the parse-filled `multiple: false` draws no multiple row and no notice', () => {
+    renderObjectForm();
+    fireEvent.click(screen.getByText('title'));
+    expect(screen.getByDisplayValue('title')).toBeInTheDocument();
+    expect(screen.queryByTestId('schema-form-inactive-retained')).toBeNull();
+  });
+
+  it('(d) CONTROL — a non-default `multiple: true` on a text field is re-shown with the notice', () => {
+    renderObjectForm();
+    fireEvent.click(screen.getByText('tags'));
+    expect(screen.getByTestId('schema-form-inactive-retained')).toHaveTextContent(NOTICE);
+  });
 });

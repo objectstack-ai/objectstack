@@ -1082,7 +1082,8 @@ function readVisibility(
  * How a row's `visibleWhen` gates it under the draft.
  *
  *  - `shown` — no predicate, or the predicate is true;
- *  - `hidden` — the predicate is false and the row's key holds no value;
+ *  - `hidden` — the predicate is false and the row's key holds no value of
+ *    the author's: unset, or equal to the row schema's declared `default`;
  *  - `retained` — the predicate is false but the key holds a value. The row
  *    stays drawn, marked as not in effect, with a one-click clear.
  *
@@ -1093,8 +1094,12 @@ function readVisibility(
  * A hidden row that held a value is what made a save refused at a key the
  * form no longer drew (objectstack#38121).
  *
- * "Holds a value" is {@link isUnsetFieldValue}'s definition, shared with that
- * inspector, so the two editors call a key unset in the same words.
+ * "Unset" is {@link isUnsetFieldValue}'s definition, shared with that
+ * inspector, so the two editors call a key unset in the same words. A value
+ * equal to the declared `default` is the one the parse fills in on every
+ * stored item that omits the key (e.g. `FieldSchema.multiple` is `false` on
+ * every field of a built object), so it is not the author's and the row is
+ * hidden as it would be with the key absent.
  */
 type RowGate = 'shown' | 'retained' | 'hidden';
 
@@ -1103,9 +1108,27 @@ function rowGate(
   data: Record<string, unknown>,
   hostScope: ReturnType<typeof usePredicateScope>,
   stored: unknown,
+  rowSchema: JsonSchema | undefined,
 ): RowGate {
   if (!visibility || evaluatePredicate(visibility, buildPredicateCtx(data, hostScope))) return 'shown';
-  return isUnsetFieldValue(stored) ? 'hidden' : 'retained';
+  if (isUnsetFieldValue(stored)) return 'hidden';
+  if (rowSchema && 'default' in rowSchema && sameJsonValue(stored, rowSchema.default)) return 'hidden';
+  return 'retained';
+}
+
+/** Structural equality over JSON values (a stored value against a schema `default`). */
+function sameJsonValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const bs = b as unknown[];
+    return a.length === bs.length && a.every((v, i) => sameJsonValue(v, bs[i]));
+  }
+  const ao = a as Record<string, unknown>;
+  const bo = b as Record<string, unknown>;
+  const keys = Object.keys(ao);
+  return keys.length === Object.keys(bo).length && keys.every((k) => k in bo && sameJsonValue(ao[k], bo[k]));
 }
 
 export interface SchemaFormIssue {
@@ -1369,7 +1392,13 @@ function SchemaFormBody({
           fieldSpec={(props[key] as any)?.widget ? { field: key, widget: (props[key] as any).widget } : undefined}
           formData={v as Record<string, unknown>}
           inactiveRetained={
-            rowGate(readVisibility(props[key] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[key]) === 'retained'
+            rowGate(
+              readVisibility(props[key] as { visibleWhen?: VisibilityPredicate }),
+              predicateData,
+              hostScope,
+              predicateData[key],
+              props[key],
+            ) === 'retained'
           }
           onChange={(val) => setField(key, val)}
         />
@@ -1673,7 +1702,7 @@ function SectionedSchemaForm({
       .filter((f) => {
         if (f.hidden) return false;
         if (hiddenFields.includes(f.field)) return false;
-        return rowGate(readVisibility(f), value, hostScope, value[f.field]) !== 'hidden';
+        return rowGate(readVisibility(f), value, hostScope, value[f.field], props[f.field]) !== 'hidden';
       });
   const rowReadOnly = (f: FormFieldSpec): boolean =>
     Boolean(readOnly || f.readonly || (f.immutable && !createMode));
@@ -1755,7 +1784,7 @@ function SectionedSchemaForm({
                   fieldSpec={f}
                   widgetContext={widgetContext}
                   formData={value}
-                  inactiveRetained={rowGate(readVisibility(f), value, hostScope, value[f.field]) === 'retained'}
+                  inactiveRetained={rowGate(readVisibility(f), value, hostScope, value[f.field], propSchema) === 'retained'}
                   onChange={(val) => onChange(f.field, val)}
                 />
               </div>
@@ -3561,9 +3590,9 @@ function RecordField({
                   />
                 )}
                 {specs.map((s) => {
-                  const gate = rowGate(readVisibility(s), row, hostScope, row?.[s.field]);
-                  if (gate === 'hidden') return null;
                   const sub = pickSubSchema(schema, 'record', s.field);
+                  const gate = rowGate(readVisibility(s), row, hostScope, row?.[s.field], sub);
+                  if (gate === 'hidden') return null;
                   return (
                     <FieldRow
                       key={s.field}
@@ -3771,7 +3800,11 @@ function flatFormRowKeys(
 ): string[] {
   return orderKeys(Object.keys(props), fieldOrder)
     .filter((k) => !hiddenFields.includes(k))
-    .filter((k) => rowGate(readVisibility(props[k] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[k]) !== 'hidden');
+    .filter(
+      (k) =>
+        rowGate(readVisibility(props[k] as { visibleWhen?: VisibilityPredicate }), predicateData, hostScope, predicateData[k], props[k]) !==
+        'hidden',
+    );
 }
 
 /**
