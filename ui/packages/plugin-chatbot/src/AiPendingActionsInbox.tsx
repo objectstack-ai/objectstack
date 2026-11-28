@@ -79,6 +79,7 @@ import {
   type PendingActionStatus,
   type UsePendingActionsOptions,
 } from './usePendingActions';
+import { isLapsedPendingAction, isPendingActionLapsedConflict } from './pendingActionLapse';
 
 export interface AiPendingActionsInboxProps {
   /**
@@ -152,7 +153,17 @@ function statusLabel(status: string, t: InboxTranslate): string | null {
   }
 }
 
-function StatusBadge({ status, t }: { status: string; t: InboxTranslate }) {
+/**
+ * The badge for a ROW, not for a bare status: a lapsed row is stored
+ * `rejected` (there is no `expired` status on the wire) and reads "Expired",
+ * so the badge has to see the row's reason and decider too (objectstack#34255).
+ * A row a person rejected keeps "Rejected".
+ */
+function StatusBadge({ row, t }: { row: PendingActionRow; t: InboxTranslate }) {
+  if (isLapsedPendingAction(row)) {
+    return <Badge variant="outline">{t('aiApprovals.statusExpired')}</Badge>;
+  }
+  const { status } = row;
   const label = statusLabel(status, t);
   if (label === null) return <Badge variant="outline">{status}</Badge>;
   return <Badge variant={STATUS_VARIANT[status] ?? 'outline'}>{label}</Badge>;
@@ -206,6 +217,32 @@ function JsonBlock({ value, max = 320 }: { value: unknown; max?: number }) {
   );
 }
 
+/**
+ * True when a decision failed because the item lapsed first: `call()` in
+ * `usePendingActions` puts the HTTP status and the parsed body on the error.
+ * The hook re-reads the list after every decision, so the row itself turns
+ * "Expired" on the refresh that follows.
+ */
+function isLapsedConflict(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const { status, body } = err as Error & { status?: number; body?: unknown };
+  return isPendingActionLapsedConflict(status, body);
+}
+
+/**
+ * The outcome line for a decision that met a lapsed item: not an error to fix
+ * and not a rejection, so it reads "Expired" and why, in the neutral style.
+ */
+function expiredOutcome(id: string, kind: 'approve' | 'reject', t: InboxTranslate) {
+  return {
+    id,
+    kind,
+    ok: false,
+    expired: true,
+    message: `${t('aiApprovals.statusExpired')} · ${t('aiApprovals.expiredDetail')}`,
+  };
+}
+
 function statusesForTab(tab: TabKey): PendingActionStatus | 'all' {
   switch (tab) {
     case 'pending': return 'pending';
@@ -241,7 +278,7 @@ export function AiPendingActionsInbox({
   const [rejectReason, setRejectReason] = React.useState('');
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [mutationError, setMutationError] = React.useState<string | null>(null);
-  const [lastOutcome, setLastOutcome] = React.useState<{ id: string; kind: 'approve' | 'reject'; ok: boolean; held?: boolean; message?: string } | null>(null);
+  const [lastOutcome, setLastOutcome] = React.useState<{ id: string; kind: 'approve' | 'reject'; ok: boolean; held?: boolean; expired?: boolean; message?: string } | null>(null);
 
   const hookOptions: UsePendingActionsOptions = {
     apiBase,
@@ -262,6 +299,7 @@ export function AiPendingActionsInbox({
     () => (openId ? items.find(r => r.id === openId) ?? null : null),
     [openId, items],
   );
+  const selectedLapsed = selected ? isLapsedPendingAction(selected) : false;
 
   const handleApprove = React.useCallback(async (id: string) => {
     setBusyId(id);
@@ -286,6 +324,10 @@ export function AiPendingActionsInbox({
           : (out.error ?? t('aiApprovals.outcomeExecuteFailed')),
       });
     } catch (err) {
+      if (isLapsedConflict(err)) {
+        setLastOutcome(expiredOutcome(id, 'approve', t));
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       setMutationError(msg);
       setLastOutcome({ id, kind: 'approve', ok: false, message: msg });
@@ -303,6 +345,12 @@ export function AiPendingActionsInbox({
       setRejectFor(null);
       setRejectReason('');
     } catch (err) {
+      if (isLapsedConflict(err)) {
+        setLastOutcome(expiredOutcome(id, 'reject', t));
+        setRejectFor(null);
+        setRejectReason('');
+        return;
+      }
       const msg = err instanceof Error ? err.message : String(err);
       setMutationError(msg);
       setLastOutcome({ id, kind: 'reject', ok: false, message: msg });
@@ -348,8 +396,8 @@ export function AiPendingActionsInbox({
       ) : null}
 
       {lastOutcome && !mutationError ? (
-        <Alert variant={lastOutcome.ok ? 'default' : 'destructive'}>
-          {lastOutcome.held ? (
+        <Alert variant={lastOutcome.ok || lastOutcome.expired ? 'default' : 'destructive'}>
+          {lastOutcome.held || lastOutcome.expired ? (
             <Clock className="h-4 w-4" />
           ) : lastOutcome.ok ? (
             <CheckCircle2 className="h-4 w-4" />
@@ -438,7 +486,7 @@ export function AiPendingActionsInbox({
                     <TableCell className="font-mono text-xs">{row.tool_name}</TableCell>
                     <TableCell className="text-sm">{row.action_name}</TableCell>
                     <TableCell className="text-sm">{row.object_name}</TableCell>
-                    <TableCell><StatusBadge status={row.status} t={t} /></TableCell>
+                    <TableCell><StatusBadge row={row} t={t} /></TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       <span className="inline-flex items-center gap-1">
                         <Clock className="h-3 w-3" /> {formatRelative(row.proposed_at, t, displayLocale)}
@@ -495,7 +543,7 @@ export function AiPendingActionsInbox({
               <div key={row.id} className="rounded-md border p-3 space-y-2" data-testid={`ai-inbox-card-${row.id}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 text-sm font-medium [overflow-wrap:anywhere]">{row.action_name}</div>
-                  <div className="shrink-0"><StatusBadge status={row.status} t={t} /></div>
+                  <div className="shrink-0"><StatusBadge row={row} t={t} /></div>
                 </div>
                 <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-muted-foreground">
                   <span className="min-w-0 [overflow-wrap:anywhere]">{row.object_name}</span>
@@ -612,7 +660,7 @@ export function AiPendingActionsInbox({
               <div className="grid grid-cols-2 gap-3 text-sm">
                 <div>
                   <Label className="text-xs text-muted-foreground">{t('aiApprovals.colStatus')}</Label>
-                  <div className="mt-1"><StatusBadge status={selected.status} t={t} /></div>
+                  <div className="mt-1"><StatusBadge row={selected} t={t} /></div>
                 </div>
                 <div>
                   <Label className="text-xs text-muted-foreground">{t('aiApprovals.colProposed')}</Label>
@@ -622,10 +670,13 @@ export function AiPendingActionsInbox({
                   <Label className="text-xs text-muted-foreground">{t('aiApprovals.fieldProposedBy')}</Label>
                   <div className="mt-1 text-xs font-mono break-all">{selected.proposed_by ?? <EmptyValue />}</div>
                 </div>
-                <div>
-                  <Label className="text-xs text-muted-foreground">{t('aiApprovals.fieldDecidedBy')}</Label>
-                  <div className="mt-1 text-xs font-mono break-all">{selected.decided_by ?? <EmptyValue />}</div>
-                </div>
+                {/* A lapsed row has no decider to name: nobody rejected it. */}
+                {selectedLapsed ? null : (
+                  <div>
+                    <Label className="text-xs text-muted-foreground">{t('aiApprovals.fieldDecidedBy')}</Label>
+                    <div className="mt-1 text-xs font-mono break-all">{selected.decided_by ?? <EmptyValue />}</div>
+                  </div>
+                )}
                 {selected.conversation_id ? (
                   <div className="col-span-2">
                     <Label className="text-xs text-muted-foreground">{t('aiApprovals.fieldConversation')}</Label>
@@ -655,7 +706,12 @@ export function AiPendingActionsInbox({
                 </div>
               ) : null}
 
-              {selected.rejection_reason ? (
+              {selectedLapsed ? (
+                <div data-testid="ai-inbox-expired-detail">
+                  <Label className="text-xs">{t('aiApprovals.statusExpired')}</Label>
+                  <div className="mt-1.5 text-sm">{t('aiApprovals.expiredDetail')}</div>
+                </div>
+              ) : selected.rejection_reason ? (
                 <div>
                   <Label className="text-xs">{t('aiApprovals.fieldRejectionReason')}</Label>
                   <div className="mt-1.5 text-sm">{selected.rejection_reason}</div>
