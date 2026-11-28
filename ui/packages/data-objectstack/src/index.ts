@@ -3657,6 +3657,14 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
   /** One "analytics capability is missing" console line per adapter, not per widget. */
   private analyticsCapabilityWarned = false;
   private fetchImpl: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * The host's injected fetch as given, outside the connection-state observer:
+   * the transport of `uploadFile` / `uploadFiles` (objectstack#37506). It is the
+   * host's authenticated fetch, so an upload under a bearer-only session carries
+   * the bearer like every other request, while its outcome still does not move
+   * the connection state.
+   */
+  private uploadTransport: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   // In-flight find() requests keyed by resource + serialized params.
   // Coalesces concurrent identical reads (e.g. React StrictMode double-mount,
   // multiple sibling components requesting the same dataset on first paint)
@@ -3764,13 +3772,15 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     // objectui#12295 — ONE fetch carries every request this adapter makes: the
     // client's (data, metadata, analytics, and every caller of `getClient()`)
     // and the adapter's own raw reads alike. The exception is `uploadFile` /
-    // `uploadFiles`, which call the global `fetch`, so an upload's outcome does
-    // not move the connection state. This fetch is the single seam where "the
+    // `uploadFiles`, which call the same injected fetch WITHOUT this observer
+    // (`uploadTransport`), so an upload's outcome does not move the connection
+    // state. This fetch is the single seam where "the
     // server answered" (a Response, whatever its status) can be told apart
     // from "no HTTP answer at all" (the fetch rejected), so the connection
     // state follows the requests the host already makes; see
     // `observeServerAnswer`.
     const transport = config.fetch || globalThis.fetch.bind(globalThis);
+    this.uploadTransport = transport;
     this.fetchImpl = (input, init) =>
       this.observeServerAnswer(() => transport(input, init), init);
     // objectstack-ai/objectstack#27774 — one origin for the client and for every
@@ -8240,7 +8250,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
     const url = `${this.baseUrl}/api/data/${encodeURIComponent(resource)}/upload`;
 
-    const response = await fetch(url, {
+    const response = await this.uploadTransport(url, {
       method: 'POST',
       body: formData,
       headers: {
@@ -8302,7 +8312,7 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
 
     const url = `${this.baseUrl}/api/data/${encodeURIComponent(resource)}/upload`;
 
-    const response = await fetch(url, {
+    const response = await this.uploadTransport(url, {
       method: 'POST',
       body: formData,
       headers: {
