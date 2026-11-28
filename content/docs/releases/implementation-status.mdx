@@ -308,7 +308,7 @@ describe that separate runtime.
 |:---------|:-----------------:|:-------------:|:------:|
 | **Agent** | ✅ | ObjectOS runtime | ✅ Agent runtime |
 | **Model Registry** | ✅ | ObjectOS runtime | ✅ Model registry |
-| **RAG Pipeline** | ⚠️ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `knowledge-ragflow` / `embedder-openai` plugins; spec defines the retrieval binding (`ai/knowledge-source.zod.ts`, `ai/knowledge-document.zod.ts`), not a pipeline DSL |
+| **RAG Pipeline** | ⚠️ | @objectstack/service-knowledge | ⚠️ Knowledge service + `knowledge-memory` / `embedder-openai` plugins; spec defines the retrieval binding (`ai/knowledge-source.zod.ts`, `ai/knowledge-document.zod.ts`), not a pipeline DSL |
 | **NLQ** | ❌ | ObjectOS runtime | ⚠️ Data-query tools |
 | **Conversation** | ✅ | ObjectOS runtime | ✅ In-memory + ObjectQL conversation services |
 | **Agent Action** | ✅ | ObjectOS runtime | ⚠️ Action/data/knowledge tools (`tool.zod.ts` + `action_<name>` tools) |
@@ -326,7 +326,7 @@ describe that separate runtime.
   RAG-pipeline DSLs, budget enforcement) were **removed in v1** and have no schema
   today — see the scope note in `packages/spec/src/ai/index.ts`
 - The ObjectOS runtime ships agents, model registry, conversation, tools, skills, and an eval harness
-- RAG/embedding is provided by `@objectstack/service-knowledge` plus the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins (all open)
+- RAG/embedding is provided by `@objectstack/service-knowledge` plus the `knowledge-memory` and `embedder-openai` plugins (all open)
 - Token/cost accounting has a schema (`ai/usage.zod.ts`) but no shipping enforcement; the predictive and DevOps-agent protocols are not defined in spec at all
 
 ---
@@ -443,7 +443,7 @@ There is no MSW package in this repo — browser API mocking is a devDependency 
 - [ ] Audit UI / denied-access logging
 
 ### Phase 10: AI Integration 🟡 **IN PROGRESS**
-- [x] RAG Pipeline — `@objectstack/service-knowledge` plus the `knowledge-memory`, `knowledge-ragflow`, and `embedder-openai` plugins ship in this repo
+- [x] RAG Pipeline — `@objectstack/service-knowledge` plus the `knowledge-memory` and `embedder-openai` plugins ship in this repo
 - [x] MCP surface — `@objectstack/mcp` exposes the platform to any BYO-AI client
 - [ ] Agent Framework (ObjectOS runtime; not in the open-source framework)
 - [ ] NLQ Engine (ObjectOS runtime)
