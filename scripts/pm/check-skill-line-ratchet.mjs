@@ -99,7 +99,7 @@ export const CEILINGS = new Map([
   ['.claude/skills/pm-dispatch/references/rest-channel.md', 7698],
   ['.claude/skills/pm-dispatch/references/l1-review-checklist.md', 6875],
   ['.claude/skills/pm-dispatch/references/review-checklist.md', 79],
-  ['.claude/skills/pm-dispatch/references/landing-operations.md', 11021], // raised 10717 → 11021 (+304) by the ruled text (the human-review line is counted per card, summed over every PR the card produces): the maintainer's ruling of 2026-11-24 08:28Z, as relayed in comment 7126265251
+  ['.claude/skills/pm-dispatch/references/landing-operations.md', 10717],
   ['.claude/skills/pm-dispatch/references/release-aftercare.md', 3526],
   ['.claude/skills/pm-dispatch/references/seat-post-protocol.md', 7720],
   ['.claude/skills/pm-dispatch/references/true-green.md', 2068],
