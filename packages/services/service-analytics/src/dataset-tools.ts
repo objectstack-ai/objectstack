@@ -237,8 +237,8 @@ export interface DatasetToolsDeps {
   readonly diagnoseDelegation?: DatasetToolDelegationProbe;
   /**
    * [#35707] Where a failure the answer says in a fixed sentence is logged
-   * with its own text: the caller is told the catalogue could not be read,
-   * never why. {@link AnalyticsService.datasetTools} binds the service's
+   * with its own text: the caller is told the catalogue or the dataset could
+   * not be read, never why. {@link AnalyticsService.datasetTools} binds the service's
    * logger; absent, the text is not logged.
    */
   readonly logger?: { warn(message: string): void };
@@ -567,12 +567,18 @@ export function createDatasetTools(deps: DatasetToolsDeps): DatasetTools {
     try {
       loaded = await load(service, context);
     } catch (e) {
-      throw refusal(
+      // [#35707] The platform's client-facing failure text: a fixed sentence
+      // (the REST door's own for the same fault), the caught error on `cause`
+      // and in the server log alone.
+      deps.logger?.warn(`[Analytics] query_dataset: the dataset read failed for "${datasetName}": ${e instanceof Error ? e.message : String(e)}`);
+      const refused = refusal(
         'SERVICE_UNAVAILABLE',
         503,
-        `The dataset "${datasetName}" could not be resolved: the dataset read failed `
-          + `(${e instanceof Error ? e.message : String(e)}). This is a server-side fault, not a missing dataset.`,
+        `The dataset "${datasetName}" could not be resolved: the dataset read failed. `
+          + 'This is a server-side fault, not a missing dataset.',
       );
+      (refused as { cause?: unknown }).cause = e;
+      throw refused;
     }
     const notFound = () => refusal('NOT_FOUND', 404, `Dataset "${datasetName}" not found.`);
     // Admitted exactly as `list_datasets` lists it, holder by holder, BEFORE
