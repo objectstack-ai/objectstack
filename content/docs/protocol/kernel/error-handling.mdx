@@ -257,6 +257,13 @@ serves `/data`:
 | `VALIDATION_FAILED` | `fields` |
 | `FEEDS_DISABLED`, `FILES_DISABLED`, `ATTACHMENT_PARENT_ACCESS`, `ATTACHMENT_DELETE_DENIED`, `RECORD_NOT_ACCESSIBLE` | `object` |
 
+A sandboxed hook's refusal on a `/data/:object` route does not reach this renderer: the
+dispatcher answers it itself, with the flat `/data` door's classification of the same
+throw in the nested envelope. So its status, `code` (a hook's own code rides beside it as
+`declaredCode`), sentence and `userMessage` (cut at 500 characters) are the flat door's,
+and `error.details` carries `object` and, for a reasons list, `refusals` with every line
+whole.
+
 `UNIQUE_VIOLATION` is not the code the engine throws: its `DuplicateRecordError`, whose
 in-process `code` is `DUPLICATE_RECORD`, is answered as `UNIQUE_VIOLATION` here exactly
 as on the flat door. A refusal that only *speaks*
