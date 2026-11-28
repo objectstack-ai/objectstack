@@ -109,8 +109,9 @@ export const LIFECYCLE_PHRASES = Object.freeze([
   '`round-open.mjs`',
 ]);
 /** The round length as that line spells it; the self-test reads the NUMBER out of it, so a changed figure is red. */
-export const ROUND_RULE = /一轮 (\d+) 分钟/g;
-export const roundMinutesOfRule = (text) => [...text.matchAll(ROUND_RULE)].map((m) => Number(m[1]));
+export const ROUND_RULE = /一轮 (\d+) 分钟/u;
+/** Stateless: the export carries no `g`, so an importer's `.test()` keeps no `lastIndex`; the scan takes a local global copy. */
+export const roundMinutesOfRule = (text) => [...text.matchAll(new RegExp(ROUND_RULE.source, 'gu'))].map((m) => Number(m[1]));
 
 /** The legs this file cannot read, printed under every run. */
 export const UNREAD_LEGS = Object.freeze([
@@ -577,7 +578,8 @@ export function main(argv, deps = {}) {
 // ---------------------------------------------------------------------------
 
 const SELF_TEST_BATTERIES = Object.freeze({
-  'the rule text: every phrase this file is built from is in the file that writes it': 3,
+  // 3 → 4 (#35237 item 21c): the exported ROUND_RULE is stateless — no `g`, so repeated `.test()` answers the same.
+  'the rule text: every phrase this file is built from is in the file that writes it': 4,
   'readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it': 7,
   'reading 3: the newest claim of this seat by another session, and a push on a lane branch': 10,
   'reading 4: the first closed lane card with a claim of this seat, timed by its session': 4,
@@ -647,6 +649,7 @@ export function selfTest() {
     t('every reading this file takes is a phrase of seat-lifecycle.md 〈开轮互斥〉, the pointer included', LIFECYCLE_PHRASES.filter((p) => !lifecycle.includes(p)), []);
     t("⭐ one round's length is the number seat-lifecycle.md spells once, on its round rule line, and ROUND_MINUTES is that number", roundMinutesOfRule(lifecycle), [ROUND_MINUTES]);
     t('…and the reading follows the text: another figure on that line reads as that figure (so the pin above goes red), a line without the spelling reads none', [roundMinutesOfRule(lifecycle.replace(`一轮 ${ROUND_MINUTES} 分钟`, '一轮 45 分钟')), roundMinutesOfRule('未满一轮 ⇒ 自退(一轮约一小时)')], [[45], []]);
+    t('⛔ the exported ROUND_RULE carries no `g` or `y`: an importer\'s repeated `.test()` keeps no `lastIndex`, and the scan above still reads every figure', [ROUND_RULE.global || ROUND_RULE.sticky, [1, 2, 3].map(() => ROUND_RULE.test('一轮 60 分钟')), roundMinutesOfRule('一轮 60 分钟;一轮 45 分钟')], [false, [true, true, true], [60, 45]]);
   }
 
   battery('readings 1 and 2: the newest stand-down brief, the newest seat-signed comment after it');

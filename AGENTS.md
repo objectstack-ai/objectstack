@@ -391,10 +391,10 @@ after a checkout-from-ref. Better, stage nothing:
 `git restore --source=<ref> -- <path>` (no `--staged`) writes the tree only, a lone
 unstaged `M`.
 
-**A windowed history question ("how many commits on `<ref>` in `<window>`"), or a containment
+**A windowed history question ("how many commits on `<ref>` in `<window>`"), or an `is-ancestor` containment
 one (`git-history.mjs ancestor`), goes through `scripts/pm/git-history.mjs` — answer, or REFUSE**
-([why](docs/agents/multi-agent-discipline.md#windowed-history-on-a-shallow-clone)). `historyHorizon()` is the
-read-only predicate for tools that answer their own question.
+([why](docs/agents/multi-agent-discipline.md#shallow-clone-history)). `historyHorizon()` is the
+read-only predicate for tools answering their own question.
 
 **Claim the issue BEFORE you write any code.** Every agent here shares one GitHub identity, so
 the assignee field is only a presence bit; the identity record is the `Claim:` comment — first
