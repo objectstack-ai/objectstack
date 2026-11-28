@@ -21,7 +21,11 @@
  *   the permission-set owner, `__c`), each refused with the save door's own
  *   code.
  * - A `.custom` pair item and a served overlay are not loose, and are refused.
- * - `dryRun` writes nothing.
+ * - `dryRun` calls no door, and a refused move puts the process back: after
+ *   either, the flow still answers at `_env/NAME` and not at `NAMESPACE/NAME`,
+ *   and a loose permission set still grants what it grants.
+ * - Each selected item's type is judged as a write of it (403 with its code),
+ *   and the body's refusal answers 400 `VALIDATION_ERROR`.
  * - The `_env` address after a move, measured: 409 naming the new holder.
  *
  * The loose rows are a FIXTURE: inserted with the system context and read by
@@ -49,6 +53,10 @@ const GHOST = 'com.probe.ghost';
 const OWNER = 'com.probe.owner';
 const CRM = 'com.example.crm';
 const SHIPPED_FLOW = 'crm_convert_lead_wizard';
+/** A loose permission set granting `manage_metadata` and nothing else; the author persona holds it. */
+const AUTHOR_SET = 'probe_meta_author';
+const AUTHOR = 'move-in-author@dogfood.test';
+const PLAIN = 'move-in-plain@dogfood.test';
 
 const flowBody = (name: string) => ({
     name, label: name, type: 'autolaunched',
@@ -74,6 +82,9 @@ const FIXTURE: ReadonlyArray<readonly [string, string, string | null, Record<str
     ['dataset', 'probe_env_ds', null, datasetBody('probe_env_ds')],
     ['report', 'probe_env_report', null, reportBody('probe_env_report', 'probe_env_ds')],
     ['flow', 'probe_dry_flow', null, flowBody('probe_dry_flow')],
+    ['flow', 'probe_refused_flow', null, flowBody('probe_refused_flow')],
+    ['permission', AUTHOR_SET, null, { name: AUTHOR_SET, label: 'Move-in meta author', objects: {}, systemPermissions: ['manage_metadata'] }],
+    ['knowledge_source', 'probe_ks', null, { name: 'probe_ks', label: 'Probe knowledge source', type: 'object', object: 'zeta_deal' }],
     ['object', 'probe_widget', null, objectBody('probe_widget')],
     ['object', 'zeta_custom', null, objectBody('zeta_custom')],
     ['object', 'zeta_undo', null, objectBody('zeta_undo')],
@@ -96,6 +107,7 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
     let token: string;
     let dir: string;
     let ql: any;
+    const tok: Record<string, string> = {};
 
     const boot = (databaseFile: string) => bootStack(crmStack, { databaseFile });
 
@@ -121,6 +133,28 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
         return answer;
     };
     const get = async (path: string) => (await stack.apiAs(token, 'GET', path)).status;
+    const moveAs = async (as: string, packageId: string, body: unknown) => {
+        const res = await stack.apiAs(as, 'POST', `/packages/${encodeURIComponent(packageId)}/move-in`, body);
+        return { status: res.status, json: (await res.json()) as any };
+    };
+    /** The author persona's resolved system permissions. */
+    const authorPermissions = async () => {
+        const r = await stack.apiAs(tok[AUTHOR], 'GET', '/auth/me/permissions');
+        expect(r.status).toBe(200);
+        const body = (await r.json()) as any;
+        return ((body?.data ?? body)?.systemPermissions ?? []) as string[];
+    };
+    /** The flow answers at its environment address and not at the target's: the process serves it loose. */
+    const servedLoose = async (name: string) => {
+        await vi.waitFor(async () => {
+            expect(await get(`/automation/_env/${name}`)).toBe(200);
+            expect(await get(`/automation/${NAMESPACE}/${name}`)).not.toBe(200);
+        }, { timeout: 15_000, interval: 250 });
+        // And it stays so once the engine has followed every signal.
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        expect(await get(`/automation/_env/${name}`)).toBe(200);
+        expect(await get(`/automation/${NAMESPACE}/${name}`)).not.toBe(200);
+    };
 
     beforeAll(async () => {
         dir = mkdtempSync(join(tmpdir(), 'dogfood-38150-'));
@@ -146,6 +180,11 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
         stack = await boot(dbFile);
         ql = await stack.kernel.getServiceAsync<any>('objectql');
         token = await stack.signIn();
+        tok[PLAIN] = await stack.signUp(PLAIN);
+        tok[AUTHOR] = await stack.signUp(AUTHOR);
+        const authorId = (await ql.findOne('sys_user', { where: { email: AUTHOR }, context: SYSTEM_CTX }))?.id;
+        expect(authorId, 'the author persona is provisioned').toBeTruthy();
+        await ql.insert('sys_user_permission_set', { user_id: authorId, permission_set: AUTHOR_SET }, { context: SYSTEM_CTX });
     }, 360_000);
 
     afterAll(async () => {
@@ -187,7 +226,7 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
         ]);
     });
 
-    it('dryRun answers would_move with what would change, and writes nothing', async () => {
+    it('dryRun answers would_move with what would change, calls no door, and leaves the process serving the item loose', async () => {
         const r = await move(TARGET, { items: [{ type: 'flow', name: 'probe_dry_flow' }], dryRun: true });
         expect(r.status, JSON.stringify(r.json)).toBe(200);
         const answer = MoveIntoPackageResponseSchema.parse(r.json.data);
@@ -199,6 +238,61 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
         }]);
         expect(await stored('probe_dry_flow')).toEqual(['flow/probe_dry_flow@loose:active']);
         expect(await get('/automation/probe_dry_flow')).toBe(200);
+        await servedLoose('probe_dry_flow');
+    });
+
+    it('a refused move puts the process back: the flow moved before the refusal still answers loose', async () => {
+        // The flow moves inside the transaction; the permission set after it is
+        // refused by the save door, and the transaction rolls back.
+        const answer = refusedAnswer(await move(TARGET, {
+            items: [{ type: 'flow', name: 'probe_refused_flow' }, { type: 'permission', name: 'probe_perm_owner' }],
+        }));
+        expect(answer.refused.map((x) => `${x.name}:${x.code}`)).toEqual(['probe_perm_owner:VALIDATION_ERROR']);
+        expect(await stored('probe_refused_flow')).toEqual(['flow/probe_refused_flow@loose:active']);
+        await servedLoose('probe_refused_flow');
+    });
+
+    it('a refused move puts the process back: a loose permission set moved before the refusal still grants', async () => {
+        expect(await authorPermissions(), 'the loose set grants before any move').toContain('manage_metadata');
+        const answer = refusedAnswer(await move(TARGET, {
+            items: [{ type: 'permission', name: AUTHOR_SET }, { type: 'permission', name: 'probe_perm_owner' }],
+        }));
+        expect(answer.refused.map((x) => `${x.name}:${x.code}`)).toEqual(['probe_perm_owner:VALIDATION_ERROR']);
+        expect(await stored(AUTHOR_SET)).toEqual([`permission/${AUTHOR_SET}@loose:active`]);
+        expect(await authorPermissions(), 'the loose set still grants after the refusal').toContain('manage_metadata');
+    });
+
+    it('a caller without manage_metadata is refused 403 PERMISSION_DENIED, nothing stored', async () => {
+        const r = await moveAs(tok[PLAIN], TARGET, { items: [{ type: 'flow', name: 'probe_dry_flow' }] });
+        expect(r.status, JSON.stringify(r.json)).toBe(403);
+        expect(r.json.error.code).toBe('PERMISSION_DENIED');
+        expect(await stored('probe_dry_flow')).toEqual(['flow/probe_dry_flow@loose:active']);
+    });
+
+    it('each selected type is judged as a write of it: a datasource asks manage_platform_settings (403)', async () => {
+        expect(await authorPermissions()).not.toContain('manage_platform_settings');
+        const r = await moveAs(tok[AUTHOR], TARGET, { items: [{ type: 'flow', name: 'probe_dry_flow' }, { type: 'datasource', name: 'probe_any_ds' }] });
+        expect(r.status, JSON.stringify(r.json)).toBe(403);
+        expect(r.json.error.code).toBe('PERMISSION_DENIED');
+        expect(String(r.json.error.message)).toContain('`manage_platform_settings`');
+        expect(await stored('probe_dry_flow')).toEqual(['flow/probe_dry_flow@loose:active']);
+    });
+
+    it('each selected type is judged as a write of it: a knowledge source asks manage_knowledge_sources (403)', async () => {
+        expect(await authorPermissions()).not.toContain('manage_knowledge_sources');
+        const r = await moveAs(tok[AUTHOR], TARGET, { items: [{ type: 'knowledge_source', name: 'probe_ks' }] });
+        expect(r.status, JSON.stringify(r.json)).toBe(403);
+        expect(r.json.error.code).toBe('PERMISSION_DENIED');
+        expect(String(r.json.error.message)).toContain('`manage_knowledge_sources`');
+        expect(await stored('probe_ks')).toEqual(['knowledge_source/probe_ks@loose:active']);
+    });
+
+    it('a knowledge source is admitted for its new author as its save is: no knowledge service here, 503, nothing stored', async () => {
+        const r = await move(TARGET, { items: [{ type: 'knowledge_source', name: 'probe_ks' }] });
+        expect(r.status, JSON.stringify(r.json)).toBe(503);
+        expect(r.json.error.code).toBe('SERVICE_UNAVAILABLE');
+        expect(String(r.json.error.message)).toContain("knowledge_source 'probe_ks'");
+        expect(await stored('probe_ks')).toEqual(['knowledge_source/probe_ks@loose:active']);
     });
 
     it('A3 (#37468) and the set rule: flow, dataset and report move together and read at the package\'s address with no restart', async () => {
@@ -314,6 +408,7 @@ describe('dogfood: POST /packages/:id/move-in, the move door (#38150)', { timeou
     it('a body the schema refuses answers 400 and names the member', async () => {
         const r = await move(TARGET, { items: [] });
         expect(r.status).toBe(400);
+        expect(r.json.error.code).toBe('VALIDATION_ERROR');
         expect(String(r.json.error.message)).toContain('items');
     });
 });

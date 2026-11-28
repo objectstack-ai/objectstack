@@ -101,6 +101,25 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
         });
     });
 
+    it('moveIn rejects a refused move with the first item\'s code and the whole answer in details', async () => {
+        const answer = {
+            outcome: 'refused',
+            targetPackageId: 'p1',
+            moved: [],
+            refused: [{ type: 'flow', name: 'f', code: 'NOT_LOOSE', error: "flow 'f' is not loose." }],
+        };
+        const { client } = createMockClient({
+            success: false,
+            error: { code: 'NOT_LOOSE', message: "flow 'f' is not loose.", httpStatus: 422, details: answer },
+        }, 422);
+        const err: any = await client.packages
+            .moveIn('p1', { items: [{ type: 'flow', name: 'f' }] })
+            .then(() => { throw new Error('expected the refused move to reject'); }, (e) => e);
+        expect(err.code).toBe('NOT_LOOSE');
+        expect(err.httpStatus).toBe(422);
+        expect(err.details).toEqual(answer);
+    });
+
     it('ensureCustomization POSTs to the ensure door with no body, URL-encoding the base id, and returns the answer', async () => {
         const answer = {
             basePackageId: 'com.acme.crm',

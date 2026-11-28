@@ -50,6 +50,7 @@ import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 // [ADR-0161 K4, guard two] Source admission, asked for each knowledge source a
 // duplicate would copy (`refuseDuplicatedKnowledgeSources`).
 import { KNOWLEDGE_SOURCE_ADMISSION_SERVICE, authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
@@ -4106,9 +4107,74 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ),
                 };
             }
+            // [ADR-0161 K4] What the door writes is the selection, so each
+            // selected item's type is admitted as a `/meta` write of it is: a
+            // `knowledge_source` asks `manage_knowledge_sources` and a
+            // `datasource` asks `manage_platform_settings`
+            // (`metaTypeWriteRefusal`, the one decision), before anything is
+            // read or written. The engine's own call is answered without it.
+            const moveCaller: any = _context?.executionContext;
+            if (!moveCaller?.isSystem) {
+                for (const item of declared.data.items) {
+                    const typeRefusal = metaTypeWriteRefusal('POST', item.type, moveCaller);
+                    if (!typeRefusal) continue;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": moving ${item.type} '${item.name}' removes it from `
+                            + `its package-less address and saves it into the package. ${typeRefusal.message}`,
+                            typeRefusal.status,
+                            { code: typeRefusal.code },
+                        ),
+                    };
+                }
+            }
             const protocol = await resolveProtocol(deps, _context);
             if (!protocol || typeof protocol.moveIntoPackage !== 'function') {
                 return catalogNotImplemented(deps, _context, 'packages_move_in_unsupported');
+            }
+            // [ADR-0161 K4, guard two] A knowledge source is saved again under
+            // the package with the caller as its author, so the author is
+            // admitted as the `/meta` save admits one: may they search what it
+            // indexes (`authoredKnowledgeSourceRefusal`, read off the stored body).
+            for (const item of declared.data.items) {
+                if (canonicalMetaUrlType(item.type) !== KNOWLEDGE_SOURCE_PACKAGE_TYPE || moveCaller?.isSystem || typeof protocol.getMetaItem !== 'function') continue;
+                let stored: unknown;
+                try {
+                    stored = await protocol.getMetaItem({ type: item.type, name: item.name, ...(item.member ? { member: item.member } : {}) });
+                } catch (e: any) {
+                    // No such item: the protocol answers it `NOT_LOOSE`, and
+                    // there is no body to admit. Any other failure refuses the
+                    // move, as the duplicate door refuses an unreadable source.
+                    if (e?.status === 404) continue;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": knowledge_source '${item.name}' could not be read `
+                            + `(${clientFacingFailureText(e, 'the read failed')}), and a knowledge source is admitted for `
+                            + 'the caller before it moves. Try again.',
+                            503,
+                        ),
+                    };
+                }
+                const body = (stored as { item?: unknown } | undefined)?.item ?? stored;
+                const refused = await authoredKnowledgeSourceRefusal({
+                    type: item.type,
+                    item: body,
+                    executionContext: moveCaller,
+                    resolveKnowledgeService: () =>
+                        deps.resolveServiceOrLoud(_context, KNOWLEDGE_SOURCE_ADMISSION_SERVICE, _context.environmentId),
+                });
+                if (refused) {
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": knowledge_source '${item.name}' — ${refused.message}`,
+                            refused.status,
+                            { code: refused.code },
+                        ),
+                    };
+                }
             }
             try {
                 const actor = resolvePackageWriteActor(_context);
@@ -4118,8 +4184,8 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     ...(declared.data.dryRun ? { dryRun: true } : {}),
                     ...(actor !== undefined ? { actor } : {}),
                 }) as { outcome?: string; refused?: ReadonlyArray<{ type: string; name: string; code: string; error: string }> };
-                // A refused move wrote nothing, and answers as the save door
-                // answers the same refusal: 422 with the first item's own code
+                // A refused move left every item loose (what had moved was
+                // moved back), and answers as the save door answers the same refusal: 422 with the first item's own code
                 // in `error.code`. `error.details` is the whole move answer
                 // (`MoveIntoPackageResponseSchema`, `outcome: 'refused'`), so a
                 // caller reads every item's refusal, not only the first.

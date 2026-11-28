@@ -342,7 +342,7 @@ A navigation item another installed package contributes to an app the base owns,
 | **name** | `string` | ✅ | Name of the moved item; a move never renames. |
 | **member** | `string` | optional | The bundle member moved, for a bundled type. |
 | **states** | `Enum<'active' \| 'draft'>[]` | ✅ | Which of the item's rows moved: its published row, its pending draft, or both. |
-| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
+| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5) when the target package declares a namespace. After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
 | **qualifiedAddress** | `string` | optional | The package-qualified address the item answers at after the move (`NAMESPACE/NAME`), present beside `environmentAddress`. |
 | **aiFaceName** | `{ before: string; after: string }` | optional | The AI face name change (ADR-0150 D6), present for a tool, skill, agent or object-less action whose face the move changes. |
 
@@ -388,7 +388,7 @@ Body of `POST /packages/:id/move-in`: the selection of loose items to move into 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **items** | `{ type: string; name: string; member?: string }[]` | ✅ | The loose items to move: one, several, or every loose item of a type, across types. Each names an item bound to no package; an item a package holds, a customization pair item and an overlay of a shipped item are not loose and are refused. Listed once each. |
-| **dryRun** | `boolean` | optional | Judge the move and answer what it would do, writing nothing. Omitted or false, the move is made. |
+| **dryRun** | `boolean` | optional | Answer what the move would do from the judgement made before any door runs (loose, target, the object judges, the set), calling no door and writing nothing. A save-door judge runs only on the real move, so it can still refuse an item a dry run passed. Omitted or false, the move is made. |
 
 ### Nested Shape: `MoveIntoPackageRequest.items[number]`
 
@@ -403,13 +403,13 @@ Body of `POST /packages/:id/move-in`: the selection of loose items to move into 
 
 ## MoveIntoPackageResponse
 
-Answer of the move door: what moved (or would move) and what each moved item's addresses become, or every refusal with nothing moved.
+Answer of the move door: what moved (or would move) and what each moved item's addresses become, or every refusal with every item left loose.
 
 ### Properties
 
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
-| **outcome** | `Enum<'moved' \| 'would_move' \| 'refused'>` | ✅ | `moved`: every item moved. `would_move`: a dry run that would move every item; nothing was written. `refused`: at least one item is refused, so nothing moved. |
+| **outcome** | `Enum<'moved' \| 'would_move' \| 'refused'>` | ✅ | `moved`: every item moved. `would_move`: a dry run whose judgement passed every item; no door ran and nothing was written. `refused`: at least one item is refused, so what had moved was moved back and every item is loose, as before. |
 | **targetPackageId** | `string` | ✅ | The package the items move into. |
 | **moved** | `{ type: string; name: string; member?: string; states: Enum<'active' \| 'draft'>[]; … }[]` | ✅ | Every item, with what the move changes in its addresses. Empty on `refused`. |
 | **refused** | `{ type: string; name: string; member?: string; code: string; … }[]` | ✅ | Every refused item, each with its own code. Empty unless `outcome` is `refused`. |
@@ -423,7 +423,7 @@ Answer of the move door: what moved (or would move) and what each moved item's a
 | **name** | `string` | ✅ | Name of the moved item; a move never renames. |
 | **member** | `string` | optional | The bundle member moved, for a bundled type. |
 | **states** | `Enum<'active' \| 'draft'>[]` | ✅ | Which of the item's rows moved: its published row, its pending draft, or both. |
-| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
+| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5) when the target package declares a namespace. After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
 | **qualifiedAddress** | `string` | optional | The package-qualified address the item answers at after the move (`NAMESPACE/NAME`), present beside `environmentAddress`. |
 | **aiFaceName** | `{ before: string; after: string }` | optional | The AI face name change (ADR-0150 D6), present for a tool, skill, agent or object-less action whose face the move changes. |
 

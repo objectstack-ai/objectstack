@@ -399,8 +399,13 @@ export const MoveIntoPackageItemSchema = lazySchema(() => z.object({
  * Every item goes through the save door into the target, so it is refused
  * with the save door's own code, and the selection is judged as a set first:
  * a moved item that names a loose item left behind is refused (ADR-0150
- * D3 (a)). Any refusal refuses the whole call and nothing is written.
- * `dryRun: true` answers the same judgement and writes nothing.
+ * D3 (a)). Any refusal refuses the whole call: what had moved is moved back
+ * and every item stays loose, as before. If moving an item back fails, the
+ * call answers a fault naming the items that did not go back, never
+ * `refused`.
+ * `dryRun: true` answers the judgement made before any door runs (loose,
+ * target, the object judges, the set) and calls no door, so a save-door judge
+ * that runs only on the real move can still refuse it.
  */
 export const MoveIntoPackageRequestSchema = lazySchema(() => z.object({
   items: z.array(MoveIntoPackageItemSchema).min(1).describe(
@@ -409,7 +414,9 @@ export const MoveIntoPackageRequestSchema = lazySchema(() => z.object({
     + 'are not loose and are refused. Listed once each.',
   ),
   dryRun: z.boolean().optional().describe(
-    'Judge the move and answer what it would do, writing nothing. Omitted or false, the move is made.',
+    'Answer what the move would do from the judgement made before any door runs (loose, target, the object '
+    + 'judges, the set), calling no door and writing nothing. A save-door judge runs only on the real move, so '
+    + 'it can still refuse an item a dry run passed. Omitted or false, the move is made.',
   ),
 }).strict().describe(
   'Body of `POST /packages/:id/move-in`: the selection of loose items to move into the package the path names.',
@@ -425,7 +432,7 @@ export const MoveIntoPackageMovedItemSchema = lazySchema(() => z.object({
   ),
   environmentAddress: z.string().optional().describe(
     'The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type '
-    + 'addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at '
+    + 'addressed by package (ADR-0150 D5) when the target package declares a namespace. After the move it no longer resolves: the item answers at '
     + '`qualifiedAddress` and, while it is the only holder of its name, at its bare name.',
   ),
   qualifiedAddress: z.string().optional().describe(
@@ -467,8 +474,9 @@ export const MoveIntoPackageRefusedItemSchema = lazySchema(() => z.object({
  */
 export const MoveIntoPackageResponseSchema = lazySchema(() => z.object({
   outcome: z.enum(['moved', 'would_move', 'refused']).describe(
-    '`moved`: every item moved. `would_move`: a dry run that would move every item; nothing was written. '
-    + '`refused`: at least one item is refused, so nothing moved.',
+    '`moved`: every item moved. `would_move`: a dry run whose judgement passed every item; no door ran and '
+    + 'nothing was written. `refused`: at least one item is refused, so what had moved was moved back and every '
+    + 'item is loose, as before.',
   ),
   targetPackageId: z.string().describe('The package the items move into.'),
   moved: z.array(MoveIntoPackageMovedItemSchema).describe(
@@ -480,7 +488,7 @@ export const MoveIntoPackageResponseSchema = lazySchema(() => z.object({
   commitId: z.string().optional().describe('The package commit the move recorded (absent on a dry run or a refusal).'),
 }).strict().describe(
   'Answer of the move door: what moved (or would move) and what each moved item\'s addresses become, or every '
-  + 'refusal with nothing moved.',
+  + 'refusal with every item left loose.',
 ));
 
 /**

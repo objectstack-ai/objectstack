@@ -34,23 +34,35 @@
  *     reservation; and the selection as a set — a moved item that names a loose
  *     item the selection leaves behind would be read from a package caller that
  *     never resolves a bare name to an environment item (ADR-0150 D3 (a)), so it
- *     is refused naming what it leaves behind.
+ *     is refused naming what it leaves behind. A dry run answers here: it calls
+ *     no door, because the doors' side effects in the running process (the
+ *     mutation projectors, the mutation signal, the registry) are not covered by
+ *     a store rollback. So a dry run is phase 0's judgement, not the save
+ *     door's, and a `would_move` can still meet a save-door refusal.
  *  1. Objects, each through the delete door (storage kept) and the save door,
  *     OUTSIDE the transaction: an object's save runs its storage sync, which is
  *     DDL, and DDL inside the driver transaction waits forever on the lock the
  *     transaction holds (measured on SQLite; `publishPackageDrafts` defers the
  *     same DDL past its transaction for the same reason). A later refusal undoes
- *     them, newest first. A dry run judges objects in phase 0 alone.
+ *     them, newest first.
  *  2. Every other item's delete and save inside ONE `engine.transaction()`, the
  *     package commit recorded inside it too. Any refusal rolls them back and
- *     undoes phase 1. A dry run runs the same writes and always rolls back.
+ *     undoes phase 1.
  *  3. On a runtime that cannot roll back (`engineCanRollBack`), a refusal undoes
- *     every step already taken, newest first; a dry run there answers phase 0's
- *     judgement alone, because only a rollback makes a write invisible.
+ *     every step already taken, newest first.
  *
- * After any rollback the registry is put back from the restored rows: the save
- * and delete doors mutate the in-memory registry as they go, and that cannot
- * roll back with the store.
+ * Each delete names the version phase 0 read, so a write that lands on a
+ * selected item after phase 0 answers `METADATA_CONFLICT` instead of being
+ * lost under the phase-0 body.
+ *
+ * After a rollback or an undo, the running process is put back too: the save
+ * and delete doors ran the registry write-through, the awaited mutation
+ * projector and the mutation signal as they went, and none of that rolls back
+ * with the store. So for every item touched, the registry is written back
+ * through at the package-less address, and the projector and the signal run
+ * again at both addresses (the target's as deleted, the package-less one as
+ * restored), as the doors would for those writes. An undo that fails is not a
+ * refusal: the door answers a fault naming what it could not restore.
  */
 
 import { isPlatformRecordRow } from '@objectstack/metadata';
@@ -68,6 +80,8 @@ import { REFERENCE_SITES } from './reference-sites.js';
 import { resolveCallerPackageAddress } from './protocol-exact-qualifier.js';
 import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
 import { extensionFieldSuffixRefusalError, judgeExtensionFieldSuffix } from './protocol-extension-field-suffix.js';
+import { clientFacingFailureCode, clientFacingFailureText, declaresClientRefusal } from './protocol-client-failures.js';
+import { mutationEventPackage, projectorEventPackage } from './protocol-mutation-package.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 /** What the door is asked, after the route parsed the body. */
@@ -82,6 +96,7 @@ export interface MoveIntoPackageRequest {
 type MoveHost = Pick<ProtocolHost,
     | 'applyRegistryWriteThrough'
     | 'classifyObjectContribution'
+    | 'emitMetadataMutation'
     | 'engine'
     | 'ensureOverlayIndex'
     | 'facade'
@@ -92,8 +107,10 @@ type MoveHost = Pick<ProtocolHost,
     | 'objectNamespaceObjectNameClash'
     | 'objectNamespacePrefixViolation'
     | 'overlayPackageMismatchError'
+    | 'receiptVersion'
     | 'recordPackageCommit'
     | 'refuseOrganizationScopedWrite'
+    | 'runMutationProjector'
     | 'saveMetaItem'
     | 'storedOverlayEntries'
     | 'uninstalledNamedBaseRefusal'
@@ -108,6 +125,8 @@ interface StoredRow extends Record<string, unknown> {
     readonly package_id?: string | null;
     readonly member?: string | null;
     readonly metadata?: unknown;
+    /** The stored body's content hash: the version a write against this row names. */
+    readonly checksum?: string | null;
 }
 
 /** One selected item, judged loose, with its rows. */
@@ -121,9 +140,6 @@ interface LooseItem {
 
 /** The ADR-0150 D6 faces: these types are listed to AI clients by a derived name. */
 const AI_FACE_TYPES: ReadonlySet<string> = new Set(['tool', 'skill', 'agent', 'action']);
-
-/** The sentinel a dry run throws to roll its transaction back. */
-const DRY_RUN_ROLLBACK = Symbol('move-in dry run');
 
 /** Whether a stored row is bound to no package (null, empty, or the legacy `sys_metadata` sentinel). */
 function isPackageLessRow(row: { package_id?: unknown }): boolean {
@@ -143,8 +159,24 @@ function keyOf(item: { type: string; name: string; member?: string | null }): st
     return `${item.type}/${item.name}${item.member ? `#${item.member}` : ''}`;
 }
 
-/** The refusal an error thrown by a door becomes: the door's own code and words. */
+/**
+ * The refusal an error thrown by a door becomes: the door's own code and words,
+ * filtered as `publishPackageDrafts` filters them — a code outside the
+ * catalogue becomes the standard code for its status, and only a declared
+ * client refusal's sentence is quoted. A refusal with no code is `MOVE_FAILED`.
+ */
 function refusalOf(item: { type: string; name: string; member?: string }, e: unknown): MoveIntoPackageRefusedItemParsed {
+    return {
+        type: item.type,
+        name: item.name,
+        ...(item.member ? { member: item.member } : {}),
+        code: clientFacingFailureCode(e) ?? 'MOVE_FAILED',
+        error: clientFacingFailureText(e, `The move of ${item.type} '${item.name}' was refused.`),
+    };
+}
+
+/** A phase-0 refusal from one of the save door's own judges, which this door asked itself: its code and words as built. */
+function judgedRefusalOf(item: { type: string; name: string; member?: string }, e: unknown): MoveIntoPackageRefusedItemParsed {
     const err = e as { code?: unknown; message?: unknown } | undefined;
     return {
         type: item.type,
@@ -153,6 +185,15 @@ function refusalOf(item: { type: string; name: string; member?: string }, e: unk
         code: typeof err?.code === 'string' && err.code !== '' ? err.code : 'MOVE_FAILED',
         error: typeof err?.message === 'string' ? err.message : String(e),
     };
+}
+
+/** A fault the door answers as one (a 5xx), its sentence and code filtered as {@link refusalOf} filters them. */
+function moveFault(message: string, cause: unknown): Error {
+    const fault = new Error(message) as Error & { status?: number; code?: string };
+    fault.status = 500;
+    const code = clientFacingFailureCode(cause);
+    if (code && !declaresClientRefusal(cause)) fault.code = code;
+    return fault;
 }
 
 /** Only the namespace a package's manifest declares (`undefined` for none). */
@@ -254,7 +295,7 @@ export class ProtocolPackageMoveInFacet {
         const probe = items[0] ?? { type: 'flow', name: '_' };
         const unbound = host.uninstalledNamedBaseRefusal({ type: probe.type, name: probe.name, packageId: target });
         if (unbound) {
-            for (const item of items) refuse(refusalOf(item, unbound));
+            for (const item of items) refuse(judgedRefusalOf(item, unbound));
             return answerRefused();
         }
         if (!host.isWritablePackage(target)) {
@@ -286,13 +327,13 @@ export class ProtocolPackageMoveInFacet {
             // this move hands over; any other owner refuses it.
             const layer = host.classifyObjectContribution(item.name, target);
             if (layer.kind === 'mismatch' && layer.ownerPackageId !== 'sys_metadata') {
-                refuse(refusalOf(item, host.overlayPackageMismatchError(item.name, target, layer.ownerPackageId)));
+                refuse(judgedRefusalOf(item, host.overlayPackageMismatchError(item.name, target, layer.ownerPackageId)));
                 continue;
             }
             const body = bodyOf(item.active ?? item.draft);
             if (body) {
                 const suffix = judgeExtensionFieldSuffix({ packageId: target, objects: { [item.name]: { ...body, name: item.name } } });
-                if (suffix.length > 0) refuse(refusalOf(item, extensionFieldSuffixRefusalError(suffix)));
+                if (suffix.length > 0) refuse(judgedRefusalOf(item, extensionFieldSuffixRefusalError(suffix)));
             }
         }
 
@@ -346,10 +387,11 @@ export class ProtocolPackageMoveInFacet {
 
         const namespace = namespaceOf(host, target);
         const moved = items.map((item) => movedAnswer(item, namespace));
-        const canRollBack = engineCanRollBack(host.engine);
-        if (request.dryRun && !canRollBack) {
+        // A dry run is phase 0's judgement: it calls no door (see the header).
+        if (request.dryRun) {
             return { outcome: 'would_move', targetPackageId: target, moved, refused: [] };
         }
+        const canRollBack = engineCanRollBack(host.engine);
 
         const objects = items.filter((i) => i.type === 'object');
         const others = items.filter((i) => i.type !== 'object');
@@ -363,12 +405,18 @@ export class ProtocolPackageMoveInFacet {
                 const row = state === 'active' ? item.active : item.draft;
                 const body = bodyOf(row);
                 if (!row || !body) continue;
+                // The version phase 0 read: a write that landed since answers
+                // `METADATA_CONFLICT` rather than being lost under this body.
+                const parentVersion = typeof row.checksum === 'string' && row.checksum !== ''
+                    ? await host.receiptVersion(row.checksum)
+                    : undefined;
                 await host.facade.deleteMetaItem({
                     type: item.type,
                     name: item.name,
                     state,
                     packageId: null,
                     dropStorage: false,
+                    ...(parentVersion ? { parentVersion } : {}),
                     ...(item.member ? { member: item.member } : {}),
                     ...(request.actor ? { actor: request.actor } : {}),
                 });
@@ -399,41 +447,57 @@ export class ProtocolPackageMoveInFacet {
                 })),
             });
             commitId = commit?.commitId;
-            if (request.dryRun) throw DRY_RUN_ROLLBACK;
         };
         const landedObjects = () => landed.filter((l) => l.item.type === 'object');
-        let transacted = false;
+        /** The phase-2 steps a rollback removed from the store, for the process to be put back after it. */
+        let rolledBack: Array<{ item: LooseItem; state: 'active' | 'draft' }> = [];
         try {
             // ── Phase 1: objects, outside the transaction (their storage sync is DDL) ──
-            if (!request.dryRun) {
-                for (const item of objects) await moveItem(item);
-            }
+            for (const item of objects) await moveItem(item);
             const objectSteps = landed.length;
             // ── Phase 2: the rest, in one transaction ─────────────────────
-            transacted = true;
             const engine = host.engine;
             if (engineCanRollBack(engine)) {
                 try {
                     await retireOverlayCacheOnRollback(engine, () => engine.transaction(() => run()));
                 } catch (e: unknown) {
                     // Rolled back in storage: what the transaction wrote is gone.
-                    landed.splice(objectSteps);
+                    rolledBack = landed.splice(objectSteps);
                     throw e;
                 }
             } else {
                 await run();
             }
         } catch (e: unknown) {
+            const unrestored: string[] = [];
             if (canRollBack) {
-                if (transacted) await ProtocolPackageMoveInFacet.restoreRegistry(host, others, target);
-                await ProtocolPackageMoveInFacet.undoLanded(host, landedObjects(), target, request.actor);
+                await ProtocolPackageMoveInFacet.restoreAfterRollback(host, rolledBack, target);
+                unrestored.push(...await ProtocolPackageMoveInFacet.undoLanded(host, landedObjects(), target, request.actor));
             } else {
-                await ProtocolPackageMoveInFacet.undoLanded(host, landed, target, request.actor);
+                unrestored.push(...await ProtocolPackageMoveInFacet.undoLanded(host, landed, target, request.actor));
             }
-            if (e === DRY_RUN_ROLLBACK) {
-                return { outcome: 'would_move', targetPackageId: target, moved, refused: [] };
+            const cause = current;
+            const said = cause
+                ? `the move of ${cause.type} '${cause.name}' ${declaresClientRefusal(e) ? 'was refused' : 'failed'}`
+                : 'recording the package commit failed';
+            if (unrestored.length > 0) {
+                throw moveFault(
+                    `Moving loose items into package '${target}' stopped (${said}: `
+                    + `${clientFacingFailureText(e, 'no detail can be quoted')}), and undoing what had already moved `
+                    + `failed for ${unrestored.join(', ')}. Each of those may now be stored in neither place, or in `
+                    + `package '${target}': read it, and re-save it from its history `
+                    + '(GET /meta/TYPE/NAME/history) where it is missing. Every other item is loose, as before.',
+                    e,
+                );
             }
-            const cause = current ?? items[0]!;
+            // A thrown fault is answered as a fault, never as an item's refusal.
+            if (!cause || !declaresClientRefusal(e)) {
+                throw moveFault(
+                    `Nothing was moved into package '${target}': ${said} `
+                    + `(${clientFacingFailureText(e, 'no detail can be quoted')}). Every item is loose, as before; try again.`,
+                    e,
+                );
+            }
             refuse(refusalOf(cause, e));
             return answerRefused();
         }
@@ -442,28 +506,38 @@ export class ProtocolPackageMoveInFacet {
 
     /**
      * After a rollback the store holds every loose row again, but the delete
-     * and save doors already moved the in-memory registry: put each item back
-     * at its package-less address, from its restored body.
+     * and save doors already changed the running process: for each step the
+     * rollback removed, write the item back through the registry at its
+     * package-less address, and run the projector and the signal again at both
+     * addresses ({@link replayRestored}).
      */
-    static async restoreRegistry(host: MoveHost, items: readonly LooseItem[], target: string): Promise<void> {
-        for (const item of items) {
-            const body = bodyOf(item.active);
-            if (!item.active || !body) continue;
+    static async restoreAfterRollback(
+        host: MoveHost,
+        steps: ReadonlyArray<{ item: LooseItem; state: 'active' | 'draft' }>,
+        target: string,
+    ): Promise<void> {
+        for (const { item, state } of [...steps].reverse()) {
+            const row = state === 'active' ? item.active : item.draft;
+            const body = bodyOf(row);
+            if (!row || !body) continue;
             try {
-                const [entry] = host.storedOverlayEntries({ type: item.type }, [item.active as never]);
-                await host.applyRegistryWriteThrough({
-                    type: item.type,
-                    name: entry?.name ?? item.name,
-                    item: entry?.data ?? body,
-                    packageId: null,
-                    organizationId: null,
-                    reboundFrom: { packageId: target },
-                });
+                if (state === 'active') {
+                    const [entry] = host.storedOverlayEntries({ type: item.type }, [row as never]);
+                    await host.applyRegistryWriteThrough({
+                        type: item.type,
+                        name: entry?.name ?? item.name,
+                        item: entry?.data ?? body,
+                        packageId: null,
+                        organizationId: null,
+                        reboundFrom: { packageId: target },
+                    });
+                }
+                await ProtocolPackageMoveInFacet.replayRestored(host, item, state, body, target, true);
             } catch (err: any) {
                 console.error(
                     `[Protocol] moveIntoPackage: the move of ${item.type}/${item.name} into '${target}' was rolled back `
-                    + `in storage, but the registry could not be put back: ${err?.message ?? err}. Until the next restart `
-                    + 'the running process may serve the item at its package address although no row binds it there. '
+                    + `in storage, but the running process could not be put back: ${err?.message ?? err}. Until the next `
+                    + 'restart it may serve the item at its package address although no row binds it there. '
                     + 'Fix: restart the server; the boot registers the item from its stored row.',
                 );
             }
@@ -471,31 +545,68 @@ export class ProtocolPackageMoveInFacet {
     }
 
     /**
+     * The projector and the signal for a step put back: at the target's
+     * address as deleted (when the target row was removed by no door, i.e.
+     * after a rollback), then at the package-less address as the restored
+     * state, with its body. Each projector re-reads the store at the address
+     * it is handed, so the order leaves it serving the package-less row.
+     */
+    static async replayRestored(
+        host: MoveHost,
+        item: LooseItem,
+        state: 'active' | 'draft',
+        body: Record<string, unknown>,
+        target: string,
+        targetRemovedByRollback: boolean,
+    ): Promise<void> {
+        const member = item.member ? { member: item.member } : {};
+        if (targetRemovedByRollback) {
+            await host.runMutationProjector({
+                type: item.type, name: item.name, state: 'deleted', organizationId: null,
+                ...projectorEventPackage(item.type, target),
+            });
+            host.emitMetadataMutation({
+                type: item.type, name: item.name, state: 'deleted', organizationId: null, ...member,
+                ...mutationEventPackage(target),
+            });
+        }
+        await host.runMutationProjector({
+            type: item.type, name: item.name, state, organizationId: null, body,
+            ...projectorEventPackage(item.type, null),
+        });
+        host.emitMetadataMutation({
+            type: item.type, name: item.name, state, organizationId: null, ...member,
+            ...mutationEventPackage(null),
+        });
+    }
+
+    /**
      * Undo each step no transaction covered, newest first — every step on a
      * runtime that cannot roll back, the objects' steps on one that can:
-     * remove the row written into the target, put the loose row back as it was
-     * stored, then put the registry back at the package-less address.
+     * remove the row written into the target (the delete door answers a
+     * success with nothing removed when the save never wrote it), put the loose
+     * row back as it was stored, then put the running process back at the
+     * package-less address. Answers the steps it could not undo, as
+     * `TYPE/NAME`; a step whose target-side delete fails stops there, so the
+     * loose row is never put back beside a target row still stored.
      */
     static async undoLanded(
         host: MoveHost,
         landed: ReadonlyArray<{ item: LooseItem; state: 'active' | 'draft' }>,
         target: string,
         actor: string | undefined,
-    ): Promise<void> {
+    ): Promise<string[]> {
         const repo = host.getOverlayRepo();
+        const unrestored: string[] = [];
         for (const { item, state } of [...landed].reverse()) {
             const row = state === 'active' ? item.active : item.draft;
             const body = bodyOf(row);
             try {
-                try {
-                    await host.facade.deleteMetaItem({
-                        type: item.type, name: item.name, state, packageId: target, dropStorage: false,
-                        ...(item.member ? { member: item.member } : {}),
-                        ...(actor ? { actor } : {}),
-                    });
-                } catch {
-                    // The save never wrote it: nothing to remove.
-                }
+                await host.facade.deleteMetaItem({
+                    type: item.type, name: item.name, state, packageId: target, dropStorage: false,
+                    ...(item.member ? { member: item.member } : {}),
+                    ...(actor ? { actor } : {}),
+                });
                 // `runtime-only`: the loose row is an item no package ships, put
                 // back where it was. The default intent (`override-artifact`) is
                 // refused on a type with no overlay channel, an object among them
@@ -525,14 +636,17 @@ export class ProtocolPackageMoveInFacet {
                         reboundFrom: { packageId: target },
                     });
                 }
+                if (body) await ProtocolPackageMoveInFacet.replayRestored(host, item, state, body, target, false);
             } catch (err: any) {
+                unrestored.push(`${item.type}/${item.name}`);
                 console.error(
-                    `[Protocol] moveIntoPackage: the refused move of ${item.type}/${item.name} into '${target}' could `
+                    `[Protocol] moveIntoPackage: the stopped move of ${item.type}/${item.name} into '${target}' could `
                     + `not be undone (a write no transaction covered): ${err?.message ?? err}. The item may now be `
-                    + 'stored in neither place, or in the target, although the answer says nothing moved. Fix: '
+                    + 'stored in neither place, or in the target; the door answers a fault naming it. Fix: '
                     + `re-save ${item.type}/${item.name} from its history (GET /meta/${item.type}/${item.name}/history).`,
                 );
             }
         }
+        return unrestored;
     }
 }

@@ -78,7 +78,7 @@
 //                                `'view'`: it heals the old-shape `view` row a
 //                                `form` save, publish or delete re-saved, so no
 //                                stored spelling reaches it.
-//   9. `restoreRegistry` (#38150) passes the item's type as the move-in
+//   9. `restoreAfterRollback` (#38150) passes the item's type as the move-in
 //                                door folded it through `canonicalMetaType`
 //                                when it judged the selection: it puts each
 //                                moved item back at its package-less address
