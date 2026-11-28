@@ -159,6 +159,9 @@ export function applyConversions(
     if (conversion.retiredFromLoadPath && !includeRetired) continue;
     const retiresIn = conversion.toMajor + 1;
     const context: ConversionContext = {
+      // Only the data-at-rest doors (and the fixture CI) replay retired
+      // entries, so the window this pass opens says what it reads.
+      atRest: includeRetired,
       reportTodo: onTodo
         ? (detail) =>
             onTodo({

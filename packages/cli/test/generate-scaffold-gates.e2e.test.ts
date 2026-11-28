@@ -62,6 +62,26 @@
  * Both expectations are read off the bare starter's own build, and each must
  * still hold there — so the PR that changes the starter turns this file red.
  *
+ * ## The app shell the scaffold leaves the author to finish (#35143)
+ *
+ * The starter app lists the starter's objects, and its header tells the author
+ * what a new one needs: "add a navigation entry for it below … and give it a
+ * list view — `objectstack generate view OBJECT` writes one". `os g` edits no
+ * app (#32153), so an object a leg generates is one no navigation entry opens,
+ * and `object-unreachable-from-navigation` says so. That finding is true and
+ * the author's to answer, exactly as `nav-object-ungranted` is above, so it is
+ * ⛔ not a ledger line: every leg pins that it fires on objects the leg
+ * generated and on none the starter declares, then answers it as the header
+ * says — the entry the hint names goes into the app, and `os g view` for an
+ * object that then reports `object-without-view` — before the three gates run.
+ *
+ * One finding is the scaffold's own, and is carried, not answered:
+ * `os g dashboard` writes `widgets: []` under a comment that says the
+ * dashboard has nothing to draw until a widget names a dataset, and which
+ * numbers it shows is the author's to say. `dashboard-without-widgets` is that
+ * comment as a finding; {@link SCAFFOLD_ADVISORIES} carries it for the one
+ * generator that writes it, pinned to fire exactly there.
+ *
  * ## The starter ledger — EMPTY since #21370, and shrink-only
  *
  * A bare starter can be clean without being clean: `field-no-consumers` stays
@@ -97,7 +117,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GENERATOR_SCAFFOLD_TARGETS } from '../src/commands/generate.js';
@@ -127,6 +147,21 @@ const PREREQUISITE_STEM: Record<string, string> = { object: 'gate_target', flow:
  * that way.
  */
 const STARTER_LATENT_FINDINGS: Record<string, string> = {};
+
+/**
+ * [#35143] The advisory a generator's own output raises, by generator, with
+ * the reason it is carried rather than answered. Each must fire in its leg at
+ * every gate and nowhere else, or this file is red.
+ */
+const SCAFFOLD_ADVISORIES: Record<string, { finding: string; reason: string }> = {
+  dashboard: {
+    finding: 'dashboard-without-widgets@dashboards[0].widgets',
+    reason:
+      'the scaffold writes an empty canvas under a comment naming the widget shape; a widget needs a dataset ' +
+      'and measures only the author can choose, so the generator cannot fill it',
+  },
+};
+const scaffoldAdvisory = (kind: string, finding: string) => SCAFFOLD_ADVISORIES[kind]?.finding === finding;
 
 /**
  * [#32393] The generator the bare starter refuses: the starter ships the one
@@ -258,6 +293,8 @@ interface Leg {
    * after the chain and BEFORE the starter's listed objects are granted.
    */
   wake?: { run: Run; findings: string[] | null };
+  /** [#35143] The objects the app-shell answer covered, by rule. */
+  shell: { unreachable: string[]; withoutView: string[]; steps: { args: string[]; run: Run }[] };
   gates: Record<Gate, { run: Run; findings: string[] | null }>;
 }
 
@@ -291,6 +328,49 @@ const grantFor = (objectName: string) => [
   '--object', objectName,
 ];
 
+/** The object a `object "NAME"` finding locates, from its `where`. */
+const objectOfWhere = (where: unknown) => /^object "([^"]+)"$/.exec(String(where))?.[1];
+
+/**
+ * [#35143] Answer the app shell as the starter app's header tells the author
+ * to: an entry in the app for every object no entry opens, then `os g view`
+ * for every object that entry opened with no list view. Returns the objects
+ * answered under each rule, read off `os validate --json`.
+ */
+async function answerAppShell(dir: string, ns: string): Promise<{ unreachable: string[]; withoutView: string[]; steps: { args: string[]; run: Run }[] }> {
+  const read = async (rule: string) => {
+    const r = await os(['validate', '--json'], dir);
+    let body: AnyRec = {};
+    try {
+      body = JSON.parse(r.stdout) as AnyRec;
+    } catch {
+      throw new Error(`os validate --json printed no JSON:\n${out(r)}`);
+    }
+    return [body.errors, body.warnings]
+      .flatMap((l) => (Array.isArray(l) ? (l as AnyRec[]) : []))
+      .filter((f) => f.rule === rule)
+      .map((f) => objectOfWhere(f.where))
+      .filter((n): n is string => !!n);
+  };
+  const unreachable = await read('object-unreachable-from-navigation');
+  if (unreachable.length > 0) {
+    const appsDir = join(dir, 'src', 'apps');
+    const [appFile] = readdirSync(appsDir).filter((f) => f.endsWith('.app.ts'));
+    if (!appFile) throw new Error(`no app file under ${appsDir} to add an entry to`);
+    const source = readFileSync(join(appsDir, appFile), 'utf-8');
+    const entries = unreachable.map((n) => `    { id: 'nav_${n}', type: 'object', objectName: '${n}' },\n`).join('');
+    if (!source.includes('  navigation: [\n')) throw new Error(`${appFile} has no \`navigation: [\` line to add to`);
+    writeFileSync(join(appsDir, appFile), source.replace('  navigation: [\n', `  navigation: [\n${entries}`));
+  }
+  const withoutView = await read('object-without-view');
+  const steps: { args: string[]; run: Run }[] = [];
+  for (const n of withoutView) {
+    const args = ['g', 'view', n.startsWith(`${ns}_`) ? n.slice(ns.length + 1) : n];
+    steps.push({ args, run: await os(args, dir) });
+  }
+  return { unreachable, withoutView, steps };
+}
+
 beforeAll(async () => {
   root = mkdtempSync(join(HERE, '..', 'node_modules', '.generate-scaffold-gates-'));
   // Sequential on purpose: cold starts in a container several agents share.
@@ -312,12 +392,16 @@ beforeAll(async () => {
         steps.push({ args, run: await os(args, dir) });
       }
     }
+    const answered = await answerAppShell(dir, NS);
     const gates = {} as Leg['gates'];
     for (const gate of GATES) {
       const r = await os([gate, '--json'], dir);
       gates[gate] = { run: r, findings: findingsOf(gate, r.stdout) };
     }
-    legs[leg] = { dir, steps, ...(wake ? { wake } : {}), gates };
+    legs[leg] = {
+      dir, steps, ...(wake ? { wake } : {}),
+      shell: { unreachable: answered.unreachable, withoutView: answered.withoutView, steps: answered.steps }, gates,
+    };
     if (leg === BARE) starterListed = navListedObjects(builtStack(dir));
   }
 }, RUN_TIMEOUT_MS);
@@ -376,7 +460,10 @@ describe('[#32393] the starter\'s app, which `os g app` and `os g permission` me
       expect(wake, `leg ${kind} ran no \`os validate\` before granting`).toBeDefined();
       expect(wake!.run.code, out(wake!.run)).toBe(0);
       expect(wake!.findings, `os validate --json printed no JSON:\n${out(wake!.run)}`).not.toBeNull();
-      expect([...wake!.findings!].sort()).toEqual(
+      // [#35143] The object the leg generated is one no entry opens; it is
+      // answered after the grants, and pinned in the app-shell block below.
+      const woken = wake!.findings!.filter((f) => !f.startsWith('object-unreachable-from-navigation@'));
+      expect([...woken].sort()).toEqual(
         starterListed.map(({ path }) => `nav-object-ungranted@${path}`).sort(),
       );
     },
@@ -404,9 +491,39 @@ describe('[#21325] every generator: fresh starter + `os g <kind>` → zero findi
       const { run: r, findings } = legs[kind].gates[gate];
       expect(r.code, out(r)).toBe(0);
       expect(findings, `os ${gate} --json printed no JSON:\n${out(r)}`).not.toBeNull();
-      expect(findings!.filter((f) => !(f in STARTER_LATENT_FINDINGS))).toEqual([]);
+      expect(findings!.filter((f) => !(f in STARTER_LATENT_FINDINGS) && !scaffoldAdvisory(kind, f))).toEqual([]);
     },
   );
+});
+
+describe('[#35143] the app shell a scaffold leaves to its author, and the one advisory it carries', () => {
+  const starterObjects = () => itemsOf(builtStack(legs[BARE].dir).objects).map((o) => String(o.name));
+
+  it('the bare starter needs no answer: every object it declares is opened from navigation, with a view', () => {
+    expect(legs[BARE].shell).toMatchObject({ unreachable: [], withoutView: [], steps: [] });
+  });
+
+  it('every `os g view` the answer ran exits 0', () => {
+    for (const [leg, l] of Object.entries(legs)) {
+      for (const { args, run: r } of l.shell.steps) expect(r.code, `${leg}: os ${args.join(' ')}\n${out(r)}`).toBe(0);
+    }
+  });
+
+  it('an object a leg generates is reported unreachable, and no object of the starter ever is', () => {
+    const answered = Object.entries(legs).flatMap(([, l]) => [...l.shell.unreachable, ...l.shell.withoutView]);
+    expect(answered.length, 'no leg generated an object: the answer step is dead').toBeGreaterThan(0);
+    for (const name of answered) expect(starterObjects()).not.toContain(name);
+    expect(legs.object.shell.unreachable).toEqual([target('object').itemName(ITEM, NS)]);
+  });
+
+  it.each(Object.keys(SCAFFOLD_ADVISORIES))('`os g %s` carries its own advisory at every gate, and no other leg does', (kind) => {
+    const { finding } = SCAFFOLD_ADVISORIES[kind];
+    for (const gate of GATES) expect(legs[kind].gates[gate].findings, gate).toContain(finding);
+    for (const [leg, l] of Object.entries(legs)) {
+      if (leg === kind) continue;
+      for (const gate of GATES) expect(l.gates[gate].findings ?? [], `${leg} ${gate}`).not.toContain(finding);
+    }
+  });
 });
 
 describe('[#21325] the starter ledger cannot outlive its defect or cover a scaffold', () => {
@@ -469,6 +586,7 @@ describe('[#32153] a fresh `os init` project: the new generator variants pass ev
   let dir = '';
   const steps = new Map<string, Run>();
   const gates = {} as Record<Gate, { run: Run; findings: string[] | null }>;
+  let shell: Awaited<ReturnType<typeof answerAppShell>>;
   let refusal: Run;
   let viewsBeforeRefusal: string[] = [];
   let viewsAfterRefusal: string[] = [];
@@ -479,6 +597,7 @@ describe('[#32153] a fresh `os init` project: the new generator variants pass ev
     if (init.code !== 0) throw new Error(`os init failed: ${out(init)}`);
     dir = join(initRoot, INIT_PROJECT);
     for (const args of VARIANTS) steps.set(args.join(' '), await os([...args], dir));
+    shell = await answerAppShell(dir, INIT_NS);
     for (const gate of GATES) {
       const r = await os([gate, '--json'], dir);
       gates[gate] = { run: r, findings: findingsOf(gate, r.stdout) };
@@ -499,11 +618,16 @@ describe('[#32153] a fresh `os init` project: the new generator variants pass ev
     expect(r.code, out(r)).toBe(0);
   });
 
-  it.each(GATES)('then `os %s`: exit 0 and no finding at any severity', (gate) => {
+  it('[#35143] the new object is the one no entry opens; its named view already lists it', () => {
+    expect(shell.unreachable).toEqual([`${INIT_NS}_ticket`]);
+    expect(shell.withoutView).toEqual([]);
+  });
+
+  it.each(GATES)('then `os %s`: exit 0 and no finding beyond the dashboard scaffold\'s own', (gate) => {
     const { run: r, findings } = gates[gate];
     expect(r.code, out(r)).toBe(0);
     expect(findings, `os ${gate} --json printed no JSON:\n${out(r)}`).not.toBeNull();
-    expect(findings).toEqual([]);
+    expect(findings).toEqual([SCAFFOLD_ADVISORIES.dashboard.finding]);
   });
 
   it('the object is written in the starter style, and its barrel line re-exports it by name', () => {

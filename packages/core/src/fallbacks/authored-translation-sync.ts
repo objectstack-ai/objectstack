@@ -185,6 +185,9 @@ export async function readAuthoredTranslationLayer(
       },
     });
 
+    // The chain yields no item of the row: nothing to merge (the stored seam's
+    // contract; no translation conversion deletes a row today).
+    if (data === undefined) continue;
     const locale: string | undefined =
       (typeof data?.locale === 'string' && data.locale)
       || (typeof row?.name === 'string' && LOCALE_LIKE.test(row.name) ? row.name : undefined)

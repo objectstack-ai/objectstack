@@ -357,7 +357,7 @@ describe('MCP tool arguments — no upgrade-guide pointer, and the recordId hand
     });
     expect(refused).toBe(true);
     expect(json.result?.isError).toBe(true);
-    expect(text).toContain('-32602');
+    expect(JSON.parse(text).error.code).toBe('VALIDATION_ERROR');
     expect(text).toContain('`id` → `recordId`');
     expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
     expect(bridge.calls.find((c: any[]) => c[0] === 'update')).toBeUndefined();
@@ -369,7 +369,7 @@ describe('MCP tool arguments — no upgrade-guide pointer, and the recordId hand
       filter: { stage: 'open' },
     });
     expect(refused).toBe(true);
-    expect(text).toContain('-32602');
+    expect(JSON.parse(text).error.code).toBe('VALIDATION_ERROR');
     expect(text).toContain('`filter` → `where`');
     expect(text).not.toContain(PROTOCOL_UPGRADE_GUIDE_URL);
   });

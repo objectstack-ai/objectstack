@@ -1360,9 +1360,6 @@ export function isHeadlessInvokableAction(_deps: ActionExecutionDeps, action: an
     // forwards it in-process to its declared `target` (see
     // {@link forwardApiAction}). An off-origin one stays browser-only.
     if (type === 'api') return isSameOriginApiTarget(action?.target);
-    // `url`, `modal`, `form` and `ask_ai` (ADR-0160 D7 — it focuses the
-    // console's assistant on a record and is never an AI tool) have no server
-    // dispatch.
     return false;
 }
 
@@ -2505,16 +2502,6 @@ export function headlessActionTypeError(_deps: ActionExecutionDeps, action: any,
             `forward to it. Only a same-origin \`target\` (a path starting with \`/\`) is dispatched through ` +
             `this door. Call ${target ? `\`${target}\`` : 'its `target` endpoint'} directly` +
             `${typeof action?.method === 'string' ? ` (${action.method})` : ''}.`
-        );
-    }
-    if (type === 'ask_ai') {
-        // ADR-0160 D7: `ask_ai` names nothing and runs nothing server-side —
-        // the console focuses its in-app assistant on the record. The generic
-        // sentence below ("the renderer opens its `target`") would describe a
-        // key this type refuses at parse.
-        return (
-            `Action '${name}'${on} is \`type: 'ask_ai'\` — a client-side action with no server dispatch. ` +
-            `The console opens its in-app assistant focused on the record; there is nothing for the server to run.`
         );
     }
     return (

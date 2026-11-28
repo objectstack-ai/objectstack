@@ -207,6 +207,24 @@ describe('KnowledgeTursoPlugin', () => {
     services[EMBEDDER_SERVICE] = new FakeEmbedder(32, 'late-model');
     expect(adapter.embedding).toEqual({ dimensions: 32, model: 'late-model' });
   });
+
+  it('hands vectorIndexThreshold to its adapter: a complete build at the threshold makes the approximate index', async () => {
+    const root = tempDir();
+    const { ctx, adapters } = contextOf();
+    const plugin = new KnowledgeTursoPlugin({ projectRoot: root, env: {}, vectorIndexThreshold: 3, vectorIndexOverfetch: 10 });
+    await plugin.start(ctx);
+    const adapter = adapters.get('turso')!;
+    const source = { name: 'notes', label: 'n', adapter: 'turso', source: { kind: 'object', object: 'o', content: ['b'] } } as never;
+    const build = { source, reason: 'manual', index: { fingerprint: 'fp:1', recipeHash: 'rh:1' } } as never;
+    await adapter.beginBuild!(build);
+    await adapter.upsert(['oak table', 'pine chair', 'elm desk'].map((content, i) => ({ id: `d${i}`, sourceId: 'notes', content })), build);
+    await adapter.completeBuild!(build);
+    const { createClient } = await import('@libsql/client');
+    const probe = createClient({ url: `file:${join(root, '.objectstack', 'data', 'knowledge.db')}` });
+    expect((await probe.execute("SELECT name FROM sqlite_master WHERE name = 'knowledge_notes_g1-vec'")).rows).toHaveLength(1);
+    probe.close();
+    await plugin.destroy();
+  });
 });
 
 /**
@@ -296,11 +314,17 @@ describe('resolveSettingsStoreUrl', () => {
  * A settings service answering saved `knowledge` values as `SettingsService.get`
  * resolves them — and, as the real one does, only once its data engine is
  * bound: until `bound` is set a saved value reads as the manifest default.
+ * It serves a `knowledge` page the plugin's init() contributes the Turso group
+ * to, as the knowledge service's page is on a real boot.
  */
 function settingsOf(saved: Record<string, string | undefined>, failure?: Error) {
+  let page = { namespace: 'knowledge', specifiers: [] as Array<{ key?: string; id?: string }> };
   const settings = {
     bound: false,
     reads: 0,
+    getManifest: () => page,
+    registerManifest: (m: typeof page) => { page = m; },
+    registerAction: () => undefined,
     get: async (namespace: string, key: string) => {
       settings.reads += 1;
       if (failure) throw failure;

@@ -154,13 +154,16 @@ export function storedOverlayEntries(
     // software-package binding so the sidebar package filter and
     // provenance classification see overlay rows the way they see
     // registry items.
-    return records.map((record) => {
+    return records.flatMap((record) => {
         const parsed = this.convertStoredItem(
             String(record.type ?? request.type),
             typeof record.metadata === 'string'
                 ? JSON.parse(record.metadata)
                 : record.metadata,
         ) as any;
+        // The stored seam yields no item of this row (ADR-0160 D7: a stored action
+        // row of the retired type): nothing is registered or served for it.
+        if (parsed === undefined) return [];
         const recPkg = (record as { package_id?: string | null }).package_id ?? undefined;
         // [#28594] The row's package is its COLUMN's, and only the column's: a
         // `_packageId` the stored body carries is not served (dropped when the
@@ -179,10 +182,10 @@ export function storedOverlayEntries(
         // ({@link readActiveOverlayRows}) leave a legacy organization's
         // rows out off the physical column. (The form doors' legacy layer
         // that once needed the row's own scope here is deleted.)
-        return {
+        return [{
             name: String(record.name), data, packageId: recPkg, organizationId: null,
             type: String(record.type ?? request.type),
-        };
+        }];
     });
 }
 

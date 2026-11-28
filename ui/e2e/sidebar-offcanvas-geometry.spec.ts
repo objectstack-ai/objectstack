@@ -67,6 +67,10 @@ import { uiRoot } from '../scripts/ui-root.mjs';
  * The workspace packages are stubbed rather than resolved because this lane
  * builds no workspace `dist/`, and their `exports` point there.
  *
+ * The same cases are also read in a right-to-left document (objectstack#37914,
+ * the last describe block): there every reading must be the left-to-right one
+ * mirrored across the viewport's centre line.
+ *
  * Static markup carries no client effects, so `useIsMobile()` reads desktop and
  * the mobile `Sheet` branch is out of scope: this patch does not touch it, and
  * below `md` the desktop form is `hidden` anyway.
@@ -271,15 +275,23 @@ interface Reading {
     cssLeft: string;
     cssRight: string;
     afterLeft: string;
+    cursor: string;
   };
+  /** The panel's divider widths, `[left, right]`. */
+  border: [string, string];
 }
 
-async function measure(page: Page, markup: string, css: string): Promise<Reading> {
+async function measure(page: Page, markup: string, css: string, dir: 'ltr' | 'rtl' = 'ltr'): Promise<Reading> {
   await page.setViewportSize(VIEWPORT);
   // One document, the stylesheet ahead of the markup, so the first style
   // resolution is the styled one and no `transition-*` utility animates a
-  // change while the reading is taken.
-  await page.setContent(`<style>${css}</style>${markup}`, { waitUntil: 'load' });
+  // change while the reading is taken. A right-to-left document carries `dir`
+  // on `<html>` from the first parse, where the i18n provider puts it.
+  const html =
+    dir === 'rtl'
+      ? `<html dir="rtl"><head><style>${css}</style></head><body>${markup}</body></html>`
+      : `<style>${css}</style>${markup}`;
+  await page.setContent(html, { waitUntil: 'load' });
   await page.waitForFunction(
     () => {
       const panel = document.querySelector('[data-sidebar="sidebar"]')?.parentElement;
@@ -321,8 +333,10 @@ async function measure(page: Page, markup: string, css: string): Promise<Reading
               cssLeft: railStyle.left,
               cssRight: railStyle.right,
               afterLeft: getComputedStyle(rail, '::after').left,
+              cursor: railStyle.cursor,
             }
           : null,
+      border: [getComputedStyle(panel).borderLeftWidth, getComputedStyle(panel).borderRightWidth] as [string, string],
     };
   });
 }
@@ -429,5 +443,50 @@ test.describe('the sidebar offcanvas form in Chromium (objectui#11464)', () => {
     expect([collapsed.state, collapsed.collapsible]).toEqual(['collapsed', 'offcanvas']);
     expect(collapsed.panel.right).toBeLessThanOrEqual(0);
     expect(collapsed.page?.left).toBe(0);
+  });
+});
+
+/** A box reflected across the viewport's vertical centre line. */
+const mirror = (b: Box): Box => ({ left: VIEWPORT.width - b.right, right: VIEWPORT.width - b.left, width: b.width });
+
+/** The cursor a mirrored rail shows: west and east swap. */
+const mirrorCursor = (c: string) => (c === 'w-resize' ? 'e-resize' : c === 'e-resize' ? 'w-resize' : c);
+
+/**
+ * objectstack#37914: in a right-to-left document (`dir="rtl"` on `<html>`, set
+ * by the i18n provider for Arabic) the flex row is reversed, so the gap moves
+ * to the right. With physical `left-0` the fixed panel stayed on the left, over
+ * the end of the page, where a right-to-left page header keeps its buttons:
+ * measured on main, the panel at 0..256 over a page laid out at 0..1024. The
+ * primitive now places the panel, its divider and the rail with logical insets
+ * (`sidebarLogicalInsetPatches` in `scripts/shadcn-local-patches.mjs`).
+ */
+test.describe('the sidebar in a right-to-left document (objectstack#37914)', () => {
+  test('an expanded sidebar sits beside the page at the right edge, not over the page at the left', async ({ page }) => {
+    for (const collapsible of ['offcanvas', 'icon'] as const) {
+      const rtl = await measure(page, markup.primitive[`${collapsible}-left-expanded`], css, 'rtl');
+      expect.soft({ panel: rtl.panel, page: rtl.page, gap: rtl.gapWidth }, collapsible).toEqual({
+        panel: { left: VIEWPORT.width - SIDEBAR_PX, right: VIEWPORT.width, width: SIDEBAR_PX },
+        page: { left: 0, right: VIEWPORT.width - SIDEBAR_PX, width: VIEWPORT.width - SIDEBAR_PX },
+        gap: SIDEBAR_PX,
+      });
+      // The divider faces the page.
+      expect.soft(rtl.border, `${collapsible}: the divider`).toEqual(['1px', '0px']);
+    }
+  });
+
+  test('every reading is the left-to-right one mirrored, on either side, expanded or collapsed', async ({ page }) => {
+    for (const key of Object.keys(markup.primitive) as Array<keyof Markup['primitive']>) {
+      const ltr = await measure(page, markup.primitive[key], css, 'ltr');
+      const rtl = await measure(page, markup.primitive[key], css, 'rtl');
+      expect.soft(rtl.panel, `${key}: the panel`).toEqual(mirror(ltr.panel));
+      expect.soft(rtl.gapWidth, `${key}: the gap`).toBe(ltr.gapWidth);
+      expect.soft(rtl.page, `${key}: the page`).toEqual(ltr.page ? mirror(ltr.page) : null);
+      expect.soft(rtl.border, `${key}: the divider`).toEqual([ltr.border[1], ltr.border[0]]);
+      expect.soft(rtl.rail?.box, `${key}: the rail`).toEqual(ltr.rail ? mirror(ltr.rail.box) : undefined);
+      expect.soft(rtl.rail?.cursor, `${key}: the rail's cursor`).toBe(
+        ltr.rail ? mirrorCursor(ltr.rail.cursor) : undefined,
+      );
+    }
   });
 });
