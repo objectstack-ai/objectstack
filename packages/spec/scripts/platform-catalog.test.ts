@@ -74,6 +74,12 @@ describe('the live catalog — every name is one the contract package declares',
     }
   });
 
+  it('a token a shipped item also mounts says so in its Boot cell; the others read on `requires`', () => {
+    const page = renderPlatformCatalog();
+    expect(page).toMatch(/^\| `knowledge` \|.*\| on `requires`, or a shipped `knowledgeSources` item \|$/m);
+    expect(page).toMatch(/^\| `record-context` \|.*\| on `requires` \|$/m);
+  });
+
   it('covers every value domain exactly', () => {
     expect(Object.keys(VALUE_DOMAIN_ROWS).sort()).toEqual([...ValueDomainSchema.options].sort());
   });
