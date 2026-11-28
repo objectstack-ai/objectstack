@@ -14,9 +14,9 @@ import {
  * field label by a second pass.
  *
  * The translator is shaped as `FileI18nAdapter.t` answers: handed `params`, it
- * fills `{{name}}` itself. Asked for the template with params, its answer would
- * already carry the user's `{{label}}`, and the renderer's own pass would then
- * expand it. Asked without params, it returns the template and the renderer
+ * fills `{{name}}` itself (inner whitespace allowed). Asked for the template
+ * with params, its answer would already carry the user's `{{label}}`, and the
+ * renderer's own pass would then expand it. Asked without params, it returns the template and the renderer
  * fills it exactly once.
  */
 describe('renderValidationMessage — a deployment override is interpolated once', () => {
@@ -25,7 +25,7 @@ describe('renderValidationMessage — a deployment override is interpolated once
   const interpolatingTranslate = (k: string, _locale: string, params?: Record<string, unknown>) => {
     if (k !== key) return k;
     return params && Object.keys(params).length > 0
-      ? overrideTemplate.replace(/\{\{(\w+)\}\}/g, (m, name: string) => (params[name] != null ? String(params[name]) : m))
+      ? overrideTemplate.replace(/\{\{\s*(\w+)\s*\}\}/g, (m, name: string) => (params[name] != null ? String(params[name]) : m))
       : overrideTemplate;
   };
   const written = '{{label}} plan';
@@ -39,6 +39,15 @@ describe('renderValidationMessage — a deployment override is interpolated once
   it('prints a written value containing a placeholder as written on the override path', () => {
     expect(renderValidationMessage(input, { locale: 'zh-CN', translate: interpolatingTranslate }))
       .toBe(`套餐的取值「${written}」无效，请从 basic, pro 中选择`);
+  });
+
+  it('prints a written value containing a spaced placeholder as written on the override path', () => {
+    // The renderer now reads `{{ label }}` as a placeholder in a TEMPLATE; a
+    // value that carries one must still be printed as written, not expanded.
+    const spacedWritten = '{{ label }} plan';
+    const spacedInput = { ...input, params: { value: spacedWritten, allowed: 'basic, pro' } };
+    expect(renderValidationMessage(spacedInput, { locale: 'zh-CN', translate: interpolatingTranslate }))
+      .toBe(`套餐的取值「${spacedWritten}」无效，请从 basic, pro 中选择`);
   });
 
   it('CONTROL — the built-in path, which was already single-pass, prints it as written too', () => {

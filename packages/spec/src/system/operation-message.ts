@@ -114,10 +114,12 @@
  *
  * ## Interpolation
  *
- * `{{name}}` placeholders, matching `II18nService.t()`'s convention. An unknown
- * placeholder is left verbatim so a broken override is visible rather than
- * silently blank — {@link interpolateValidationMessage} is shared with the
- * sibling catalog so the two cannot drift on this.
+ * `{{name}}` placeholders, matching `II18nService.t()`'s convention; whitespace
+ * inside the braces is allowed (`{{ name }}`), as the Console reads the same
+ * translation string. An unknown placeholder is left exactly as written so a
+ * broken override is visible rather than silently blank —
+ * {@link interpolateValidationMessage} is shared with the sibling catalog so
+ * the two cannot drift on this.
  */
 
 import { resolveBundleLocale } from './i18n-resolver';

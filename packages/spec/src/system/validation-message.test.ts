@@ -224,6 +224,36 @@ describe('interpolateValidationMessage', () => {
     expect(renderValidationMessage({ messageKey: 'no_such_key', label: 'Qty' }))
       .toBe('Qty (no_such_key)');
   });
+
+  // One translation string feeds this renderer, the server `t()` and the
+  // Console's i18next, so a hole the Console fills must be filled here too, or
+  // a 400 shows the braces. Each expected value is what i18next (the Console's
+  // default `{{ }}` interpolation) answers for the same template and params.
+  const spellings: Array<[string, string, string]> = [
+    ['no spaces', 'Hi {{name}}!', 'Hi Ada!'],
+    ['spaces inside the braces', 'Hi {{ name }}!', 'Hi Ada!'],
+    ['a tab and two spaces', 'Hi {{  name\t}}!', 'Hi Ada!'],
+    ['single braces (not a placeholder)', 'Hi {name}!', 'Hi {name}!'],
+    ['a spaced hole with no value', 'Hi {{ missing }}!', 'Hi {{ missing }}!'],
+  ];
+
+  it.each(spellings)('fills the way the Console does: %s', (_form, template, console) => {
+    expect(interpolateValidationMessage(template, { name: 'Ada' })).toBe(console);
+  });
+
+  it.each(spellings)('a deployment override is filled the way the Console does: %s', (_form, template, console) => {
+    const key = validationMessageTranslationKey('required');
+    const translate = (k: string) => (k === key ? template : k);
+    expect(renderValidationMessage({ messageKey: 'required', label: 'Qty', params: { name: 'Ada' } }, { translate }))
+      .toBe(console);
+  });
+
+  it('a spaced override names the field label, as the import runner renders it', () => {
+    const key = validationMessageTranslationKey('required');
+    const translate = (k: string) => (k === key ? '{{ label }} is needed' : k);
+    expect(renderValidationMessage({ messageKey: 'required', label: 'Qty' }, { translate }))
+      .toBe('Qty is needed');
+  });
 });
 
 /**
