@@ -594,8 +594,17 @@ describe('celEngine', () => {
       });
 
       it('is idempotent — an already-coerced operand is not re-wrapped', () => {
+        // [#38135] `date(…)` returns a Timestamp, so the call arm now wraps the
+        // field opposite it, whatever that field holds; the coerced side is never
+        // wrapped twice. A Date-valued `previous.due` passes through `date()`.
         expect(rewriteTemporalEquality('date(record.due) == previous.due', mixed))
-          .toBe('date(record.due) == previous.due');
+          .toBe('date(record.due) == date(previous.due)');
+        expect(rewriteTemporalEquality('date(record.due) == date(previous.due)', mixed))
+          .toBe('date(record.due) == date(previous.due)');
+        expect(celEngine.evaluate(cel('date(record.due) == previous.due'), mixed)).toEqual({ ok: true, value: true });
+        // Both ISO texts: the coerced side used to meet the other's text and answer a silent false.
+        expect(celEngine.evaluate(cel('date(record.due) == previous.due'),
+          { record: { due: '2026-06-20' }, previous: { due: '2026-06-20' } })).toEqual({ ok: true, value: true });
       });
 
       it('composes with the temporal-call arm on one expression', () => {
