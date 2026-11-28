@@ -72,8 +72,8 @@ function stubEngine({ money = false }: { money?: boolean } = {}) {
         if (src.includes("'")) return 'text' as const;
         if (src.includes('+')) return 'unknown' as const;
         // A field-over-field operator types `dyn`, as the engine answers it
-        // (formula-return.ts): the quotient's type is unproven.
-        if (/record\.\w+\s*\/\s*record\./.test(src)) return 'unknown' as const;
+        // (formula-return.ts): the product's or quotient's CEL type is unproven.
+        if (/record\.\w+\s*[*/]\s*record\./.test(src)) return 'unknown' as const;
         if (src.includes('>')) return 'boolean' as const;
         return 'number' as const;
       },
@@ -94,6 +94,7 @@ function Harness({
     est_hours: { type: 'number' },
     budget: { type: 'number' },
     amount: { type: 'currency', currencyConfig: USD },
+    tax: { type: 'currency', currencyConfig: USD },
     total: { type: 'summary', summaryOperations: { object: 'line', field: 'amount', function: 'sum' } },
     fee_eur: { type: 'currency', currencyConfig: EUR },
     home_amount: { type: 'currency' },
@@ -256,9 +257,12 @@ describe('ObjectFieldInspector — the money verdict proves or withdraws a decla
   });
 
   it('an unproven verdict (a field-over-field quotient) still keeps a declared `currency`', async () => {
+    // objectstack#35815 — a quantity over an amount: the proof cannot read it
+    // as a plain number, so the verdict is unproven. (Two quantities, as
+    // `record.est_hours / record.budget`, are proven `number` now.)
     const { box, latest } = asCurrency();
-    fireEvent.change(box, { target: { value: 'record.est_hours / record.budget' } });
-    await waitFor(() => expect(latest().expression).toBe('record.est_hours / record.budget'), { timeout: 3000 });
+    fireEvent.change(box, { target: { value: 'record.est_hours / record.amount' } });
+    await waitFor(() => expect(latest().expression).toBe('record.est_hours / record.amount'), { timeout: 3000 });
     await settle();
     expect(latest().returnType).toBe('currency');
     expect(latest().currencyConfig).toEqual(USD);
@@ -333,5 +337,45 @@ describe('ObjectFieldInspector — the money verdict proves or withdraws a decla
     fireEvent.change(box, { target: { value: 'record.amount > 40' } });
     await waitFor(() => expect(latest().returnType).toBe('boolean'), { timeout: 3000 });
     expect('currencyConfig' in latest()).toBe(false);
+  });
+});
+
+describe('ObjectFieldInspector — a field-over-field quantity withdraws a declared currency (objectstack#35815)', () => {
+  // The CEL type of an operator over two field reads is `dyn`, so the plain
+  // inference proves nothing; the engine's money verdict reads both operands'
+  // declared units and answers `number`, which withdraws the `currency`.
+  const MONEY = 'record.amount * 0.1';
+  const asCurrency = () => renderFormula('currency', { money: true, extra: { expression: MONEY, currencyConfig: USD } });
+
+  it("the card's repro: an edit from an amount to quantity-times-quantity drops `currency` and its `currencyConfig`", async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.est_hours * record.budget' } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect(latest().expression).toBe('record.est_hours * record.budget');
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('a ratio of two amounts in one currency drops `currency` too: it is a plain number', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount / record.tax' } });
+    await waitFor(() => expect(latest().returnType).toBe('number'), { timeout: 3000 });
+    expect(latest().expression).toBe('record.amount / record.tax');
+    expect('currencyConfig' in latest()).toBe(false);
+  });
+
+  it('CONTROL — a ratio across two currencies is unproven and keeps the declared `currency`', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.amount / record.fee_eur' } });
+    await waitFor(() => expect(latest().expression).toBe('record.amount / record.fee_eur'), { timeout: 3000 });
+    await settle();
+    expect(latest().returnType).toBe('currency');
+    expect(latest().currencyConfig).toEqual(USD);
+  });
+
+  it('CONTROL — an amount times a quantity over two field reads still proves money', async () => {
+    const { box, latest } = asCurrency();
+    fireEvent.change(box, { target: { value: 'record.fee_eur * record.est_hours' } });
+    await waitFor(() => expect(latest().currencyConfig).toEqual(EUR), { timeout: 3000 });
+    expect(latest().returnType).toBe('currency');
   });
 });
