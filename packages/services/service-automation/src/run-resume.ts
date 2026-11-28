@@ -139,13 +139,15 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
         flowName: flow.name,
         ...(runId ? { flowRunId: runId } : {}),
     };
-    // The run's own copy of the record it was handed (`copyHeldValue`), taken
-    // before anything below writes onto it: the lookups the start node
-    // declares (`expandDeclaredLookups`, at the end) are grafted into a new
-    // top-level record that replaces it, and the run's variables are seeded
-    // from that, so nothing the run does reaches the caller's object, a record
-    // that is not a plain object included. A record that contains itself throws
-    // `HeldValueCycleError` here, which `execute()` answers as a failed run.
+    // The run's own copy of a plain record it was handed (`copyHeldValue`).
+    // When the start node declares lookups (`expandDeclaredLookups`, at the
+    // end), they are grafted into a new top-level record that replaces this
+    // one, and the run's variables are seeded from that, so no engine write
+    // reaches the caller's object, a record that is not a plain object
+    // included. With no graft, a record that is not a plain object is not
+    // copied: it is itself the object the run binds as `record`. A record that
+    // contains itself throws `HeldValueCycleError` here, which `execute()`
+    // answers as a failed run.
     if (context?.record) runContext.record = copyHeldValue(context.record) as Record<string, unknown>;
 
     // #3356 (follow-up to #1888) — a `runAs:'user'` run must enforce its data

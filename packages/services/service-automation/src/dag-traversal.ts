@@ -1292,9 +1292,12 @@ export function seedRunVariables(
 ): Map<string, unknown> {
     const variables = this.seedDeclaredVariables(flow, context);
     if (context?.record) {
-        // The run's own copy of the record it was handed (`copyHeldValue`):
+        // The run's own copy of a plain record it was handed (`copyHeldValue`):
         // nothing the run does to `record` / `$record` — a node that changes
-        // it in place included — reaches the trigger's object.
+        // it in place included — reaches the trigger's object. A record that
+        // is not a plain object is not copied: it is itself the object bound
+        // as `record` / `$record`. A record that contains itself throws
+        // `HeldValueCycleError`.
         const record = copyHeldValue(context.record) as Record<string, unknown>;
         variables.set('$record', record);
         variables.set('record', record);
