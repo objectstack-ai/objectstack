@@ -20,7 +20,7 @@ import {
     judgeEnvironmentMembership as judgeEnvironmentMembershipOf, isMembershipJudgedEnvironment,
     type AuthGate,
 } from '@objectstack/core';
-import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, declaredUserMessage, inProcessSessionReadInput, driverNotNullRefusalAnswer, thrownAnswerOf } from '@objectstack/types';
+import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, declaredUserMessage, inProcessSessionReadInput, driverNotNullRefusalAnswer, thrownAnswerOf, answerVariesByLanguage, LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
 import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -85,6 +85,8 @@ import {
     describeDeniedDiagnostics,
     routeObjectFromPath,
 } from './security/permission-denied-envelope.js';
+// [#38232] A sandboxed hook's refusal on a `/data/:object` route, answered as `RestServer` answers it.
+import { dataRouteHookRefusalAnswer } from './data-route-hook-refusal.js';
 
 // randomUUID moved to ./domains/auth.ts with its only consumer (D11③ PR-7).
 
@@ -3382,6 +3384,30 @@ export class HttpDispatcher {
             if (notNullRefusal) {
                 const { error: message, ...details } = notNullRefusal.body;
                 return { handled: true, response: this.error(String(message), notNullRefusal.status, details) };
+            }
+            // [#38232] A sandboxed hook's refusal on the same routes is answered
+            // HERE too, with `RestServer`'s body for it (`mapDataError`), for the
+            // reason the NOT NULL arm above states. Thrown on, it reached the
+            // Hono exit (`declaredEnvelopeForThrow`), which serves only a
+            // registered code: a hook's own code (`OVERLAP`, `CREDIT_LIMIT`)
+            // answered `500 INTERNAL_ERROR` with no `userMessage` and no
+            // `details.refusals`, and a registered one kept a `userMessage` the
+            // REST routes cut at 500 characters. See `dataRouteHookRefusalAnswer`.
+            const hookRefusal = routeObject !== undefined ? dataRouteHookRefusalAnswer(e, routeObject) : undefined;
+            if (hookRefusal) {
+                const response = this.error(
+                    hookRefusal.message, hookRefusal.status, hookRefusal.details, hookRefusal.code, hookRefusal.extra,
+                );
+                // [#37828] A declared `userMessage` is in the caller's language,
+                // so the answer varies by `Accept-Language`, as the Hono exit
+                // this arm displaces declared it. The array form is the
+                // contract's multi-value one, which the hosts APPEND.
+                return {
+                    handled: true,
+                    response: answerVariesByLanguage(response.body)
+                        ? { ...response, headers: { Vary: [LOCALIZED_ANSWER_VARY] } }
+                        : response,
+                };
             }
             throw e;
         }
