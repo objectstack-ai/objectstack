@@ -24,7 +24,6 @@
 import type { PluginContext } from '@objectstack/core';
 import {
   knowledgeSettingsManifest,
-  knowledgeTestActionHandler,
   aiSettingsManifest,
   withAiEmbedderSection,
   aiEmbedderSettingsSpecifiers,
@@ -134,7 +133,8 @@ export function contributeKnowledgeSettings(
   if (!settings || typeof settings.registerManifest !== 'function') return offered;
 
   settings.registerManifest(knowledgeSettingsManifest);
-  settings.registerAction('knowledge', 'test', knowledgeTestActionHandler);
+  // No `test` action here: "Test connection" checks the Turso fields, and
+  // `@objectstack/knowledge-turso` registers it with them, where it reads them.
   if (service) {
     settings.registerAction('knowledge', KNOWLEDGE_REBUILD_ACTION, knowledgeRebuildActionHandler(service));
     settings.registerAction('knowledge', KNOWLEDGE_INDEX_STATUS_ACTION, knowledgeIndexStatusActionHandler(service));

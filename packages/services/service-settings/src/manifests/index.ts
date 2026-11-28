@@ -39,7 +39,7 @@ export {
   type AiModelRuleHost,
   type AiSettingReader,
 } from './ai-models.js';
-export { knowledgeSettingsManifest, knowledgeTestActionHandler } from './knowledge.manifest.js';
+export { knowledgeSettingsManifest } from './knowledge.manifest.js';
 export { localizationSettingsManifest } from './localization.manifest.js';
 export { companySettingsManifest } from './company.manifest.js';
 

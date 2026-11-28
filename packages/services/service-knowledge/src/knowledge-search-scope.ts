@@ -164,6 +164,46 @@ function parentLinksOf(objSource: ObjectKnowledgeSource, schema: unknown): Map<s
 }
 
 /**
+ * The most record ids a non-system caller's visible-id read may answer and
+ * still narrow a source's search to them ({@link narrowToVisible}): the same
+ * bound one scope entry is held to. The read asks one more than this, so a
+ * caller who may read more is told apart from one who may read exactly this many.
+ */
+export const SEARCH_VISIBLE_IDS_MAX = SEARCH_SCOPE_MAX_IDS;
+
+/**
+ * The terms a source's search is handed once the ids of its records the caller
+ * may read are known (`visible`, at most {@link SEARCH_VISIBLE_IDS_MAX}). The
+ * adapter ranks only the rows some term holds for, so it never spends `topK` on
+ * a row the permission re-check would remove.
+ *
+ * The adapter ORs the terms it is handed, so the visible ids are never added as
+ * one more term: that would widen a caller's own scope to every record they may
+ * read. They are intersected with it instead:
+ *
+ * - no caller scope → one `record` term holding the visible ids;
+ * - a caller scope of `record` terms only → one `record` term holding the
+ *   caller's ids (in their order, once each) that are visible;
+ * - a caller scope with a `metadata` (parent) term → `undefined`: a union of
+ *   terms cannot say "this parent AND these records", so the source is searched
+ *   on the caller's terms alone, as before, and its hits re-checked one by one.
+ *
+ * A returned term may hold no ids: the caller may read none of the records the
+ * search could answer. The service does not apply such a narrowing.
+ */
+export function narrowToVisible(
+  terms: readonly AdapterScopeTerm[] | undefined,
+  visible: readonly string[],
+): AdapterScopeTerm[] | undefined {
+  if (terms === undefined) return [{ kind: 'record', ids: [...new Set(visible)] }];
+  if (terms.some((term) => term.kind !== 'record')) return undefined;
+  const readable = new Set(visible);
+  const ids = new Set<string>();
+  for (const term of terms) for (const id of term.ids) if (readable.has(id)) ids.add(id);
+  return [{ kind: 'record', ids: [...ids] }];
+}
+
+/**
  * The check every hit passes after its adapter answers, whatever the adapter
  * did: `true` when some term holds for the hit, judged on the hit's
  * `sourceRecordId` (a `record` term) or `metadata[field]` (a `metadata` term).

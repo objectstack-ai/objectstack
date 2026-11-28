@@ -735,9 +735,6 @@ export const fr: PlatformTranslationData = {
           help: 'Longueur maximale d’un passage, en caractères, lorsque le service de connaissances découpe un document. Une taille fixée sur la source elle-même l’emporte ; la limite d’entrée du modèle d’embedding peut l’abaisser.',
         },
       },
-      actions: {
-        test: { label: 'Tester la connexion' },
-      },
     },
     lifecycle: {
       title: 'Cycle de vie des données',

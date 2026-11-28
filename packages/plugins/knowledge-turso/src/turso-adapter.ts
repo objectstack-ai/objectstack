@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
-import type { Client, InArgs, InStatement, Transaction } from '@libsql/client';
+import type { Client, InArgs, InStatement, ResultSet, Transaction } from '@libsql/client';
 import type {
   AdapterContext,
   AdapterEmbeddingDescriptor,
@@ -20,6 +20,7 @@ import {
   TRIGRAM_MIN_CHARS,
   type KeywordIndexShape,
   type TableShape,
+  type VectorIndexShape,
   tableShape,
   assertSourceId,
   containsPattern,
@@ -34,6 +35,12 @@ import {
   legacyTable,
   passageTableDdl,
   quoted,
+  dropVectorIndexDdl,
+  organizationIndexDdl,
+  vectorBackfillSql,
+  vectorIndexDdl,
+  vectorIndexNames,
+  vectorIndexShape,
   vectorLiteral,
 } from './sql.js';
 
@@ -74,7 +81,75 @@ export interface TursoKnowledgeAdapterOptions {
    * bound (a `file:` store waits only for the busy timeout).
    */
   requestTimeoutMs?: number;
+  /**
+   * The passage count at or above which a complete build of a source makes
+   * its approximate vector index (a side table of one-bit vectors, a 32nd of
+   * the float32 ones), so its vector leg ranks `topK × vectorIndexOverfetch`
+   * candidates by that index and reads the float32 vector of those alone,
+   * instead of every one. Counted when the build completes, on the generation it
+   * completes; `Infinity` never makes one. A source whose passage table holds
+   * more than one organization never gets one, and is never searched through
+   * one. @default 20000
+   */
+  vectorIndexThreshold?: number;
+  /**
+   * How many candidates per hit the vector leg reads from the approximate
+   * index before the organization, record-scope and metadata filter run: the
+   * index ranks before the filter, so a filter that removes candidates is
+   * answered from what is left, and a leg left with fewer than
+   * {@link VECTOR_MIN_POOL} × `topK` candidates in scope is run again as the
+   * exact scan. A whole number, {@link VECTOR_MIN_POOL} or more. @default 40
+   */
+  vectorIndexOverfetch?: number;
 }
+
+/** The passage count at or above which a complete build makes a source's approximate vector index. */
+export const VECTOR_INDEX_THRESHOLD = 20_000;
+
+/**
+ * How many approximate-index candidates the vector leg reads per hit it
+ * ranks. Measured at 200,000 passages of 1,536 dimensions (clustered, topK
+ * 10): 10 candidates a hit gave a recall@10 of 0.90 against the exact scan,
+ * 40 gave 0.99, 100 gave 1.00, at about the same cost — the one-bit scan
+ * reads every row either way.
+ */
+export const VECTOR_INDEX_OVERFETCH = 40;
+
+/**
+ * How many in-scope candidates per hit the approximate vector leg must keep
+ * after the filter for its answer to stand; below it the leg runs again as
+ * the exact scan. The candidates are ranked before the filter, so a filter
+ * that keeps a few percent of the passages leaves a pool from which the
+ * float32 re-rank picks the wrong neighbours. Measured at 200,000 passages
+ * of 1,536 dimensions (clustered, topK 10, 40 candidates a hit), a pool of
+ * at least topK gave a recall@10 of 0.95 with 10% of the passages in scope,
+ * 0.91 at 5% and 0.88 at 3%; a pool of at least 4 × topK still left a query
+ * at 0.7 with 10% in scope. At 8 × topK alone a scope of 15% or less runs
+ * exact; {@link VECTOR_RETRY_POOL} is what answers those first.
+ */
+const VECTOR_MIN_POOL = 8;
+
+/**
+ * How many times the first pass's candidates a second approximate pass
+ * reads, when the first leaves fewer than {@link VECTOR_MIN_POOL} × topK in
+ * scope: the same `WHERE` over the nearest `topK × vectorIndexOverfetch × 10`
+ * by their one-bit vector, kept only if it clears the same floor; otherwise
+ * the leg runs exact. It is tried only when the first pass's pool, scaled by
+ * this factor, reaches the floor, so a scope too narrow for it goes to the
+ * exact scan without a pass that could not answer; and never under a scope
+ * of record terms alone, whose exact scan the record index serves from the
+ * rows in scope. Measured at 200,000 passages of 1,536 dimensions
+ * (clustered, topK 10, 40 candidates a hit), 50 queries a share: under a
+ * parent (metadata) scope keeping 10%, 15% and 20% of the passages, the
+ * exact scan's p95 was 848, 907 and 908 ms and the search's with this pass
+ * 351, 328 and 337 ms, at the floor's recall; under a record scope the
+ * exact scan's was 128, 207 and 265 ms, and the search's with this pass
+ * 333, 313 and 407 ms.
+ */
+const VECTOR_RETRY_POOL = 10;
+
+/** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
+const VECTOR_BACKFILL_BATCH = 2048;
 
 /** The ADR-0112 code of a write or a search refused under another fingerprint (ADR-0161 K7, rules 4 and 5). */
 export const KNOWLEDGE_REBUILD_REQUIRED = 'KNOWLEDGE_REBUILD_REQUIRED';
@@ -223,8 +298,18 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  * legs that rank it, divided by the score of a passage first in both, so it
  * lies in `(0, 1]`.
  *
- * - The vector leg: an exact scan by cosine distance, no approximate index. A
- *   passage whose cosine similarity is not positive is not ranked by it.
+ * - The vector leg: by cosine distance to the stored float32 vector. A
+ *   passage whose cosine similarity is not positive is not ranked by it. An
+ *   exact scan of the rows in scope — or, for a generation with an
+ *   approximate index ({@link buildVectorIndex}) and passages of one
+ *   organization at most, the `topK × vectorIndexOverfetch` candidates
+ *   nearest by their one-bit vector, of which those in scope are ranked by
+ *   their float32 vector; a leg the filter leaves with fewer than
+ *   {@link VECTOR_MIN_POOL} × `topK` candidates in scope, or short of
+ *   `topK` hits, is run once more over {@link VECTOR_RETRY_POOL} times the
+ *   candidates when its pool says that can clear the floor and its scope is
+ *   not of record terms alone, and is run again exactly otherwise, or when
+ *   that pass falls short too.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -234,9 +319,10 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   term most passages hold weighs little.
  *
  * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
- * and the metadata-equality `filter` are one `WHERE`, run in both legs before
- * either ranks — which libSQL's DiskANN index (`vector_top_k`) cannot do: it
- * ranks first.
+ * and the metadata-equality `filter` are one `WHERE`, run in both legs: before
+ * the exact scan and the keyword leg rank, after the approximate index,
+ * which ranks every passage of the table first — so that index is never used
+ * over the passages of two organizations, and its candidates are over-fetched.
  *
  * The keyword index of a passage table is made with the table, and for a
  * table made before it existed, by the first search of that table, from the
@@ -308,6 +394,21 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly noLegacy = new Set<string>();
   /** Passage tables whose keyword index is known to be complete. */
   private readonly keyed = new Set<string>();
+  /**
+   * Whether the approximate vector index of a generation instance (its
+   * passage table and the time its generation row was made, {@link
+   * vectorIndexKey}) is complete, as this process last found it: kept true by
+   * the triggers while the instance lasts.
+   */
+  private readonly vectorIndexKnown = new Map<string, boolean>();
+  /**
+   * Sources whose last complete build did not make their approximate vector
+   * index because the database refused it, with the reason: named by
+   * {@link healthCheck} until a later build of the source makes it.
+   */
+  private readonly vectorIndexRefused = new Map<string, string>();
+  private readonly vectorIndexThreshold: number;
+  private readonly vectorIndexOverfetch: number;
 
   constructor(opts: TursoKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'turso';
@@ -319,6 +420,18 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     if (opts.requestTimeoutMs !== undefined && (!Number.isFinite(opts.requestTimeoutMs) || opts.requestTimeoutMs <= 0)) {
       throw new RangeError(`knowledge-turso: requestTimeoutMs must be a positive number, got ${String(opts.requestTimeoutMs)}`);
     }
+    const threshold = opts.vectorIndexThreshold ?? VECTOR_INDEX_THRESHOLD;
+    if (Number.isNaN(threshold) || threshold < 1) {
+      throw new RangeError(`knowledge-turso: vectorIndexThreshold must be a number of passages, 1 or more, got ${String(threshold)}`);
+    }
+    this.vectorIndexThreshold = threshold;
+    const overfetch = opts.vectorIndexOverfetch ?? VECTOR_INDEX_OVERFETCH;
+    if (!Number.isInteger(overfetch) || overfetch < VECTOR_MIN_POOL) {
+      throw new RangeError(
+        `knowledge-turso: vectorIndexOverfetch must be a whole number, ${VECTOR_MIN_POOL} or more, got ${String(overfetch)}`,
+      );
+    }
+    this.vectorIndexOverfetch = overfetch;
     this.client =
       opts.client === undefined || opts.requestTimeoutMs === undefined
         ? opts.client
@@ -580,6 +693,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // the metadata filter, each bound as values. ?1 is the query vector.
     const args: unknown[] = [vectorLiteral(vector)];
     const where: string[] = [];
+    // Whether the record index can serve the exact scan: a scope of record terms alone.
+    let recordScope = false;
     if (opts.organizationIds !== undefined) {
       args.push(JSON.stringify(opts.organizationIds));
       where.push(`organization_id IN (SELECT value FROM json_each(?${args.length}))`);
@@ -592,6 +707,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // `metadata` term holds for a stored string or number equal to an id as
       // text, or a list with such an element; any other value holds for nothing.
       const scopeTerms: string[] = [];
+      let parentTerm = false;
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         args.push(JSON.stringify(term.ids));
@@ -600,6 +716,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           scopeTerms.push(`source_record_id IN ${ids}`);
           continue;
         }
+        parentTerm = true;
         args.push(term.field);
         scopeTerms.push(
           `EXISTS (SELECT 1 FROM json_each(metadata) AS m WHERE m.key = ?${args.length} AND (` +
@@ -609,6 +726,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         );
       }
       where.push(`(${scopeTerms.join(' OR ')})`);
+      recordScope = !parentTerm;
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       args.push(key, JSON.stringify(value === undefined ? null : value));
@@ -621,16 +739,30 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const limit = `?${args.length}`;
     const tableName = generationTable(opts.source.name, active.generation);
     const table = quoted(tableName);
+    const vectorIndex = vectorIndexNames(tableName);
 
     const legs: string[] = [];
     const ctes: string[] = [];
-    if (vectorLeg) {
-      ctes.push(`vec AS (
-        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
-          SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}
-        ) WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`);
-      legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
-    }
+    // The vector leg, exact or approximate: the same in-scope WHERE and the
+    // same order by the stored vector's cosine distance, over every row in
+    // scope, or over those of the approximate index's `candidates` nearest
+    // that are in scope (`pool`) — that index ranks before the filter, so its
+    // candidates are filtered after, and the statement answers how many were
+    // left. Either way the leg's ranks 1…topK feed the fusion below as they are.
+    const vectorCtes = (approximate: boolean): string[] => {
+      // The candidate count is bound for the approximate statement alone, after every other value.
+      const candidates = `?${args.length + 1}`;
+      const pool = approximate
+        ? `SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}
+             AND chunk_id IN (SELECT chunk_id FROM ${quoted(vectorIndex.side)}
+               ORDER BY vector_distance_cos(embedding, vector1bit(?1)) LIMIT ${candidates})`
+        : `SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}`;
+      const ranked = (from: string) => `vec AS (
+        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM ${from}
+         WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`;
+      return approximate ? [`pool AS (${pool})`, ranked('pool')] : [ranked(`(${pool})`)];
+    };
+    if (vectorLeg) legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
     if (terms.length > 0) {
       // A term's match: the trigram index for three characters or more, LIKE
       // over the rows in scope below that.
@@ -662,20 +794,53 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       );
       legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
     }
+    // `candidates`: the approximate statement over that many one-bit candidates; absent, the exact one.
+    const statement = (candidates?: number): InStatement => ({
+      sql: `WITH ${[...(vectorLeg ? vectorCtes(candidates !== undefined) : []), ...ctes].join(',\n')}
+              SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
+                     p.heading_path, u.vpos, u.kpos${candidates !== undefined ? ', (SELECT count(*) FROM pool) AS pool' : ''}
+                FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
+                       GROUP BY chunk_id) u
+                JOIN ${table} p ON p.chunk_id = u.chunk_id`,
+      args: (candidates !== undefined ? [...args, candidates] : args) as InArgs,
+    });
     const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
       const now = await this.generations(opts.source.name);
       if (now.active?.generation !== active.generation) return undefined;
       if (terms.length > 0) await this.ensureKeywordIndex(tableName);
-      return client.execute({
-        sql: `WITH ${ctes.join(',\n')}
-              SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
-                     p.heading_path, u.vpos, u.kpos
-                FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
-                       GROUP BY chunk_id) u
-                JOIN ${table} p ON p.chunk_id = u.chunk_id`,
-        args: args as InArgs,
-      });
+      const instance = now.active.createdAt;
+      if (vectorLeg && (await this.approximateSearchable(tableName, instance))) {
+        // A failed approximate statement (its index gone under this process's
+        // memory of it) forgets that memory and is answered by the exact scan.
+        const approximate = (candidates: number) =>
+          client.execute(statement(candidates)).catch(() => {
+            this.vectorIndexKnown.delete(vectorIndexKey(tableName, instance));
+            return undefined;
+          });
+        // A vector leg the filter left with fewer than VECTOR_MIN_POOL × topK
+        // candidates in scope does not stand: the float32 re-rank of a thin
+        // pool misses neighbours the one-bit ranking put past the cut, and an
+        // answer of fewer than topK says the source holds no more, which the
+        // candidates cannot say.
+        const poolOf = (near: ResultSet) => Number(near.rows[0]?.pool ?? 0);
+        const stands = (near: ResultSet) =>
+          poolOf(near) >= VECTOR_MIN_POOL * topK && near.rows.filter((r) => r.vpos !== null).length >= topK;
+        const candidates = topK * this.vectorIndexOverfetch;
+        const near = await approximate(candidates);
+        if (near === undefined) return client.execute(statement());
+        if (stands(near)) return near;
+        // Such a leg tries VECTOR_RETRY_POOL times the candidates once, under
+        // the same floor, when the first pool says the wider one can reach it;
+        // otherwise, or short again, the exact scan answers. Not under a scope
+        // of record terms alone: the record index serves that exact scan from
+        // the rows in scope, which costs less than the wider pass.
+        if (!recordScope && poolOf(near) * VECTOR_RETRY_POOL >= VECTOR_MIN_POOL * topK) {
+          const wide = await approximate(candidates * VECTOR_RETRY_POOL);
+          if (wide !== undefined && stands(wide)) return wide;
+        }
+      }
+      return client.execute(statement());
     });
     if (result === undefined) {
       // Switched while the query was embedded: searched again, a bounded number of times.
@@ -766,6 +931,9 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const client = this.requireClient();
     assertSourceId(ctx.source.name);
     await this.ready();
+    // The approximate vector index of the generation this build completes,
+    // made before that generation is switched to, a batch at a time.
+    await this.buildVectorIndex(ctx.source.name, index.fingerprint);
     await this.queued(client, async () => {
       const legacy = await this.hasLegacy(ctx.source.name);
       await this.transaction(async (tx) => {
@@ -836,6 +1004,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         return { commit: true, value: undefined };
       });
       if (legacy) this.noLegacy.add(sourceId);
+      this.vectorIndexRefused.delete(sourceId);
     });
   }
 
@@ -843,7 +1012,19 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     try {
       this.requireClient();
       await this.ready();
-      return { ok: true, message: 'libSQL vectors ready' };
+      // A refused approximate vector index is a speed-up lost, never a fault:
+      // `ok` stays true, and the message names it for the operator.
+      const notes: string[] = [];
+      if (this.vectorIndexThreshold !== Infinity && !(await oneBitVectorsWork(this.requireClient()))) {
+        notes.push(
+          'this database does not compute one-bit vectors (vector1bit), so no source gets an approximate vector ' +
+            'index and every search reads every vector in scope',
+        );
+      }
+      for (const [sourceId, reason] of this.vectorIndexRefused) {
+        notes.push(`the approximate vector index of source '${sourceId}' was not made: ${reason}`);
+      }
+      return { ok: true, message: ['libSQL vectors ready', ...notes].join('; ') };
     } catch (err) {
       const remedy = remedyOf(err);
       return { ok: false, message: `${errorText(err)}${remedy === undefined ? '' : ` ${remedy}`}` };
@@ -994,9 +1175,184 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       );
     }
     await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
+    await this.assertVectorIndexOurs(tx, table, sourceId, generation);
     await tx.execute(`DROP TABLE IF EXISTS ${quoted(table)}`);
     for (const statement of dropKeywordIndexDdl(table)) await tx.execute(statement);
+    for (const statement of dropVectorIndexDdl(table)) await tx.execute(statement);
     this.keyed.delete(table);
+    this.forgetVectorIndex(table);
+  }
+
+  /** The shape of the vector index of the passage table `table` (`vectorIndexShape`). */
+  private async vectorShapeOf(db: Pick<Client, 'execute'>, table: string): Promise<VectorIndexShape> {
+    const { side, org, triggers } = vectorIndexNames(table);
+    const names = [side, org, ...triggers];
+    const rows = await db.execute({
+      sql: `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')})`,
+      args: names,
+    });
+    const columns = await db.execute({ sql: 'SELECT name, type FROM pragma_table_info(?)', args: [side] });
+    return vectorIndexShape(table, rows.rows, columns.rows);
+  }
+
+  /**
+   * Refuses, naming it, an object under one of the vector-index names of
+   * `table` that this store did not make; the transaction is rolled back with
+   * the refusal, so nothing of the call is removed.
+   */
+  private async assertVectorIndexOurs(db: Pick<Client, 'execute'>, table: string, sourceId: string, generation: number): Promise<void> {
+    if ((await this.vectorShapeOf(db, table)) !== 'other') return;
+    throw vectorIndexNotOurs(table, sourceId, generation);
+  }
+
+  /**
+   * Whether a search of the passage table `table`, of the generation
+   * instance whose row was made at `instance`, may rank its vector leg
+   * through the approximate index: its side table and triggers are there and
+   * hold every passage of the table (read from the catalog once per instance
+   * and remembered, either way: the triggers keep a complete index complete,
+   * a build of this process records what it found, and with a threshold of
+   * `Infinity` nothing is read), and the table holds passages of one
+   * organization at most — read at each search, from the organization index,
+   * so a second organization written after the index was made turns the
+   * table back to the exact scan at once. The index ranks before the
+   * organization filter: over two organizations' passages, one
+   * organization's candidates would crowd out the other's. Runs inside the
+   * client's queue.
+   */
+  private async approximateSearchable(table: string, instance: string): Promise<boolean> {
+    // `Infinity` never makes an index, and never reads the catalog for one.
+    if (this.vectorIndexThreshold === Infinity) return false;
+    const client = this.requireClient();
+    const key = vectorIndexKey(table, instance);
+    let complete = this.vectorIndexKnown.get(key);
+    if (complete === undefined) {
+      complete = (await this.vectorShapeOf(client, table)) === 'complete';
+      if (complete) {
+        const counts = await client.execute(
+          `SELECT (SELECT count(*) FROM ${quoted(table)}) AS n, (SELECT count(*) FROM ${quoted(vectorIndexNames(table).side)}) AS v`,
+        );
+        complete = Number(counts.rows[0].n) === Number(counts.rows[0].v);
+      }
+      this.vectorIndexKnown.set(key, complete);
+    }
+    if (!complete) return false;
+    return (await this.organizationsIn(client, table)) <= 1;
+  }
+
+  /** Forgets what this process knew of the approximate vector index of every instance of the passage table `table`. */
+  private forgetVectorIndex(table: string): void {
+    const prefix = vectorIndexKey(table, '');
+    for (const key of this.vectorIndexKnown.keys()) if (key.startsWith(prefix)) this.vectorIndexKnown.delete(key);
+  }
+
+  /**
+   * How many organizations the passages of `table` belong to, counting
+   * passages of no organization as one more, up to 2: three seeks of the
+   * organization index when the table has one.
+   */
+  private async organizationsIn(db: Pick<Client, 'execute'>, table: string): Promise<number> {
+    const t = quoted(table);
+    const found = await db.execute(
+      `SELECT (SELECT min(organization_id) FROM ${t}) AS lo, (SELECT max(organization_id) FROM ${t}) AS hi,
+              EXISTS (SELECT 1 FROM ${t} WHERE organization_id IS NULL) AS anonymous`,
+    );
+    const { lo, hi, anonymous } = found.rows[0];
+    const named = lo === null ? 0 : lo === hi ? 1 : 2;
+    return Math.min(2, named + (Number(anonymous) === 1 ? 1 : 0));
+  }
+
+  /**
+   * Makes the approximate vector index of the generation of `sourceId` a
+   * build under `fingerprint` completes (ADR-0161 K7: the generation under
+   * construction, or the active one rebuilt inside), when its passage table
+   * holds {@link TursoKnowledgeAdapterOptions.vectorIndexThreshold} passages
+   * or more, of one organization at most. The structure is made empty in one
+   * transaction, then the table's rows are copied in, {@link
+   * VECTOR_BACKFILL_BATCH} at a time, each batch a write transaction of its
+   * own on the client's queue: a search waits at most one batch, and is
+   * answered by the exact scan until the copy ends. A copy cut short (the
+   * process ended) resumes at the next complete build; the triggers keep
+   * every write in step meanwhile. A generation switched away or dropped
+   * during the copy ends it.
+   */
+  private async buildVectorIndex(sourceId: string, fingerprint: string): Promise<void> {
+    const client = this.requireClient();
+    // Each complete build says anew whether the database refused the index.
+    this.vectorIndexRefused.delete(sourceId);
+    const planned = await this.queued(client, async () => {
+      const { active, building } = await this.generations(sourceId);
+      const target =
+        building?.fingerprint === fingerprint ? building : active?.fingerprint === fingerprint ? active : undefined;
+      // No generation of this fingerprint: completeBuild refuses the call.
+      if (target === undefined) return undefined;
+      const table = generationTable(sourceId, target.generation);
+      // What this build finds is what a search of this generation instance would: no index is remembered as such.
+      const none = () => {
+        this.vectorIndexKnown.set(vectorIndexKey(table, target.createdAt), false);
+        return undefined;
+      };
+      const shape = await this.vectorShapeOf(client, table);
+      if (shape === 'other') throw vectorIndexNotOurs(table, sourceId, target.generation);
+      if (shape !== 'complete') {
+        const count = await client.execute(`SELECT count(*) AS n FROM ${quoted(table)}`);
+        if (Number(count.rows[0].n) < this.vectorIndexThreshold) return none();
+        // A database that refuses the one-bit vectors (a host whose libSQL
+        // lacks them) or the index's DDL keeps the exact scan, and the build
+        // completes: the index is a speed-up, never a condition of the build.
+        // The probe comes first because a trigger naming an unknown function
+        // is created without complaint and then fails every write of a passage.
+        if (!(await oneBitVectorsWork(client))) {
+          this.vectorIndexRefused.set(sourceId, 'this database does not compute one-bit vectors (vector1bit)');
+          return none();
+        }
+        try {
+          await this.transaction(async (tx) => {
+            await tx.execute(organizationIndexDdl(table));
+            // One organization at most, or no index: it ranks before the organization filter.
+            if ((await this.organizationsIn(tx, table)) > 1) return { commit: true, value: undefined };
+            for (const statement of vectorIndexDdl(table, target.dim)) await tx.execute(statement);
+            return { commit: true, value: undefined };
+          });
+        } catch (err) {
+          this.vectorIndexRefused.set(sourceId, `the database refused its DDL (${errorText(err)})`);
+          return none();
+        }
+        if ((await this.vectorShapeOf(client, table)) !== 'complete') return none();
+      }
+      return { target, table };
+    });
+    if (planned === undefined) return;
+    const { target, table } = planned;
+    const { last, copy } = vectorBackfillSql(table);
+    for (let cursor = ''; ; ) {
+      // A batch the database refuses ends the copy, and the build completes:
+      // a side table short of its passage table is never searched (its count
+      // differs), the triggers keep the rows they hold in step, and the next
+      // complete build resumes the copy.
+      const step = await this.queued(client, () =>
+        this.transaction(async (tx) => {
+          const still = await tx.execute({
+            sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND created_at = ?`,
+            args: [sourceId, target.generation, target.fingerprint, target.createdAt],
+          });
+          if (still.rows.length === 0) return { commit: false, value: undefined };
+          const upTo = (await tx.execute({ sql: last, args: [cursor, VECTOR_BACKFILL_BATCH] })).rows[0]?.last;
+          if (upTo === null || upTo === undefined) return { commit: false, value: undefined };
+          await tx.execute({ sql: copy, args: [cursor, String(upTo)] });
+          return { commit: true, value: String(upTo) };
+        }),
+      ).catch((err: unknown) => {
+        this.vectorIndexRefused.set(sourceId, `the database refused its copy (${errorText(err)}); the next complete build resumes it`);
+        return null;
+      });
+      if (step === null || step === undefined) {
+        // The copy ended, was refused, or its generation went away: the next search reads the index anew.
+        this.vectorIndexKnown.delete(vectorIndexKey(table, target.createdAt));
+        return;
+      }
+      cursor = step;
+    }
   }
 
   /** The shape of the keyword index of the passage table `table` (`keywordIndexShape`). */
@@ -1085,8 +1441,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       );
     }
     await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
+    await this.assertVectorIndexOurs(tx, table, sourceId, generation);
+    // A vector index left behind under this name (its side table outlives the
+    // passage table's DROP) is dropped with it: the new table starts without one.
+    for (const statement of dropVectorIndexDdl(table)) await tx.execute(statement);
     for (const statement of passageTableDdl(table, embedder.dimensions)) await tx.execute(statement);
     this.keyed.add(table);
+    this.forgetVectorIndex(table);
     await tx.execute({
       sql: `INSERT INTO ${quoted(GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state) VALUES (?, ?, ?, ?, ?, ?)`,
       args: [sourceId, generation, fingerprint ?? null, embedder.dimensions, embedder.model ?? null, state],
@@ -1168,6 +1529,27 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     } finally {
       tx.close();
     }
+  }
+}
+
+/** The key of a generation instance in the memory of its approximate vector index: its passage table and the time its row was made. */
+function vectorIndexKey(table: string, createdAt: string): string {
+  return `${table} @ ${createdAt}`;
+}
+
+/**
+ * Whether the database computes one-bit vectors and their distance, as the
+ * approximate vector index needs (libSQL's `vector1bit`); a database that
+ * refuses the probe gets no index.
+ */
+async function oneBitVectorsWork(db: Pick<Client, 'execute'>): Promise<boolean> {
+  try {
+    const probe = await db.execute(
+      "SELECT vector_distance_cos(vector1bit(vector32('[1,-1,1,-1]')), vector1bit(vector32('[1,-1,1,-1]'))) AS d",
+    );
+    return Number(probe.rows[0]?.d) === 0;
+  } catch {
+    return false;
   }
 }
 
@@ -1268,6 +1650,17 @@ function switchedDuringSearch(diagnosis: string, detail: string): Error {
     code: CONCURRENT_MODIFICATION,
     status: 409,
   });
+}
+
+/** The refusal of an object under a vector-index name of `table` that the store did not make. */
+function vectorIndexNotOurs(table: string, sourceId: string, generation: number): Error {
+  const { side, org } = vectorIndexNames(table);
+  return notReady(
+    `an object it did not make holds a name of the vector index of generation ${generation} of source '${sourceId}'`,
+    `The database holds a table, index or trigger under '${side}', '${org}' or a '${table}-vec-*' trigger ` +
+      `that is not this store's vector index, so it is not dropped, and generation ${generation} of source ` +
+      `'${sourceId}' cannot be built, replaced or removed. Rename or remove it, or keep the store in a database of its own.`,
+  );
 }
 
 /**

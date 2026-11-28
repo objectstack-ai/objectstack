@@ -44,7 +44,7 @@
 - 每区 dev 位空即补;逐位上张 PR 入合并队列才领下张,此前跑修复轮;Tier H 或待裁 PR 让位。
 - 席每轮逐区查,核认领 Container & model 行;取卡照点名范围次序,p0/p1 插队;p3 留收口或搭同文件 PR 成批(每 PR ≤5 卡)。
 - 认领必答:同区卡过 `execution-duties.md` 折叠五门即默认合一 PR,否则串行;额度墙亦照该文。
-- 留道:域席已退役,修法已清的卡碰哪个域的路径都在本席开发、本席 L1/L2,先于 `domains/spec.md` 的移道与 `--tier` 提示;交出闭集:他席已认领、cloud 路由、披露纪律卡、ADR。
+- 留道:域席已退役,修法已清的卡碰哪个域的路径都在本席开发、本席 L1/L2,先于 `domains/spec.md` 的移道;交出闭集:他席已认领、cloud 路由、披露纪律卡、ADR。
 - 送审:≤50 行、只改文本或测试、`Clause-②: no` 且无他契约面 PR 由区照 `l1-review-checklist.md` 自审落地,ACCEPT 点名自审;余者由 L1 线程 ACCEPT 读,先于 `contract-review.md` 不起第二个 agent。
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。

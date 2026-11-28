@@ -87,6 +87,8 @@ const EXPECTED_TRUTHS: Record<string, Truth> = {
   // reaches 15 days past due only on 11-08.
   harbor_recent_followups: groups(['e07', 1], ['e09', 1]),
   september_commission: UNANSWERABLE,
+  // A field no seeded object carries: the tools answer it as not recorded.
+  cedar_shipping_charges: UNANSWERABLE,
 };
 
 /** The same questions answered AS a persona: row scope applied, hidden reads withheld. */
@@ -179,9 +181,9 @@ describe('scenario card order_to_cash (docs/qa/scenarios/order_to_cash.json)', (
     const orders = run.seed.sales_order;
     expect(orders.length).toBeGreaterThanOrEqual(100);
     expect(new Set(orders.map((o) => String(o.order_date).slice(0, 7))).size).toBeGreaterThanOrEqual(3);
-    // 8-10 questions, 4-6 operations, no countsReason needed.
+    // 8-11 questions, 4-6 operations, no countsReason needed.
     expect(run.questions.length).toBeGreaterThanOrEqual(8);
-    expect(run.questions.length).toBeLessThanOrEqual(10);
+    expect(run.questions.length).toBeLessThanOrEqual(11);
     expect(run.operations.length).toBeGreaterThanOrEqual(4);
     expect(run.operations.length).toBeLessThanOrEqual(6);
     expect(run.countsReason).toBeUndefined();

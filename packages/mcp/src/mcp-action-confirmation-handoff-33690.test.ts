@@ -193,9 +193,10 @@ describe('[#34209] run_action and resume_run refuse the retired confirm member o
       expect(unknown.result.isError, tool).toBe(true);
       expect(statementOf(memberText), tool).toBe(statementOf(unknownText));
       expect(statementOf(memberText).length, `${tool}: the statement read empty`).toBeGreaterThan(10);
-      // Not an ADR-0112 envelope: no second code is minted for the member.
-      expect(memberText, tool).not.toContain('ACTION_CONFIRMATION_REQUIRED","status"');
-      expect(() => JSON.parse(memberText), tool).toThrow();
+      // No second code is minted for the member: it is the schema refusal's VALIDATION_ERROR (#37411), the
+      // code the undeclared key gets, never the confirmation gate's.
+      expect(JSON.parse(memberText).error.code, tool).toBe('VALIDATION_ERROR');
+      expect(JSON.parse(unknownText).error.code, tool).toBe('VALIDATION_ERROR');
     }
   });
 

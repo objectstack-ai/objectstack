@@ -38,7 +38,6 @@ import {
   registerSettingsRoutes,
   aiEmbedderSettingsSpecifiers,
   aiTestEmbedderActionHandler,
-  knowledgeTestActionHandler,
   type CryptoAdapter,
   type SettingsService,
 } from '@objectstack/service-settings';
@@ -119,13 +118,19 @@ describe('#33933 — knowledge settings are contributed by the mounted knowledge
     for (const key of [...EMBEDDER_KEYS, 'embedder', 'test_embedder']) expect(bareKeys, key).not.toContain(key);
   });
 
-  it('both test buttons reach their handlers when the service is mounted', async () => {
+  it('the embedder test reaches its handler when the service is mounted; the Turso check is not the service\'s', async () => {
     // "Reached" is judged by the handler's own answer for the same inputs,
     // never by message text: the no-handler answer is a different result.
-    const knowledgeValues = await namespaceValues(mounted.settings, 'knowledge');
-    expect(await mounted.settings.runAction('knowledge', 'test', {})).toEqual(
-      await knowledgeTestActionHandler({ namespace: 'knowledge', actionId: 'test', values: knowledgeValues, payload: {}, ctx: {} }),
-    );
+    // "Test connection" checks the Turso fields, and `@objectstack/knowledge-turso`
+    // contributes it with them; without that store the page has no such action.
+    const knowledgeIds = (mounted.settings.getManifest('knowledge').specifiers as Array<{ key?: string; id?: string }>)
+      .map((x) => x.key ?? x.id);
+    expect(knowledgeIds).toContain('chunk_target');
+    expect(knowledgeIds).not.toContain('test');
+    const unanswered = await mounted.settings.runAction('knowledge', 'never_declared', {});
+    const turso = await mounted.settings.runAction('knowledge', 'test', {});
+    expect({ ok: turso.ok, severity: turso.severity }).toEqual({ ok: unanswered.ok, severity: unanswered.severity });
+    expect(turso.ok).toBe(false);
     const aiValues = await namespaceValues(mounted.settings, 'ai');
     const embedder = await mounted.settings.runAction('ai', 'test_embedder', {});
     expect(embedder).toEqual(
@@ -173,13 +178,17 @@ describe('embedderSettings: false keeps the embedder section off the ai page', a
     expect(await mounted.settings.runAction('ai', 'test_embedder', {})).not.toEqual(offAnswer);
   });
 
-  it('the knowledge page, its test button and its Setup entry are offered as before', async () => {
+  it('the knowledge page, its actions and its Setup entry are offered as before', async () => {
     expect(off.settings.listManifests().map((m) => m.namespace)).toContain('knowledge');
     expect(off.settings.getManifest('knowledge')).toEqual(mounted.settings.getManifest('knowledge'));
-    const knowledgeValues = await namespaceValues(off.settings, 'knowledge');
-    expect(await off.settings.runAction('knowledge', 'test', {})).toEqual(
-      await knowledgeTestActionHandler({ namespace: 'knowledge', actionId: 'test', values: knowledgeValues, payload: {}, ctx: {} }),
-    );
+    // Test connection is not this service's: `@objectstack/knowledge-turso`
+    // contributes it with the Turso fields, and pins it beside this option.
+    // Here `knowledge/test` answers as on the default mount, which answers it
+    // as an undeclared action (judged by that control, never by message text).
+    const offTest = await off.settings.runAction('knowledge', 'test', {});
+    expect(offTest).toEqual(await mounted.settings.runAction('knowledge', 'test', {}));
+    const undeclared = await off.settings.runAction('knowledge', 'never_declared', {});
+    expect({ ok: offTest.ok, severity: offTest.severity }).toEqual({ ok: undeclared.ok, severity: undeclared.severity });
     expect(knowledgeEntries(off.registered)).toHaveLength(1);
   });
 
@@ -241,14 +250,16 @@ describe('[#24769] the two buttons the knowledge service contributes, at the HTT
     expect(answer.body?.data?.message).toContain('text-embedding-3-small');
   });
 
-  it('POST /api/settings/knowledge/test is answered by the Turso form check (200, not 400)', async () => {
-    // The Turso fields alone: the check reads no `adapter` since #37104.
-    const answer = await post(http, 'knowledge', 'test', {
-      values: { turso_url: 'file:./knowledge.db' },
-    });
-    expect(answer.status).toBe(200);
-    expect(answer.body?.data?.ok).toBe(true);
-    expect(answer.body?.data?.message).toContain('file:./knowledge.db');
+  it('POST /api/settings/knowledge/test answers as an undeclared action: the Turso check comes with its store', async () => {
+    // `@objectstack/knowledge-turso` declares the action and registers its
+    // handler where it contributes the Turso fields, and pins that case.
+    const body = { values: { turso_url: 'file:./knowledge.db' } };
+    const answer = await post(http, 'knowledge', 'test', body);
+    const control = await post(http, 'knowledge', 'never_declared', body);
+    expect(answer.status).toBe(400);
+    expect(answer.body?.error?.code).toBe('SETTINGS_ACTION_FAILED');
+    expect([control.status, control.body?.error?.code]).toEqual([answer.status, answer.body?.error?.code]);
+    expect(JSON.stringify(answer.body)).not.toContain('file:./knowledge.db');
   });
 });
 

@@ -63,8 +63,6 @@ export const TaskDetailPage = definePage({
               // record_page — inline buttons.
               'showcase_mark_done',
               'showcase_log_time',
-              // ask_ai — opens the in-app assistant on this task (ADR-0160 D7).
-              'showcase_ask_about_task',
               'showcase_archive_task',
               // record_page folded (action:menu) — the ⋯ overflow (url, api).
               'showcase_open_docs',

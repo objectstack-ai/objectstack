@@ -284,4 +284,47 @@ describe('#6406 sandbox ctx.api.transaction joins the host transaction (real eng
 
     expect(checkouts).toHaveLength(1);
   }, 30000);
+
+  /**
+   * The unit a body opened itself with `ctx.api.transaction` — an action
+   * body's — is a host transaction too. That face is `ScopedContext`'s discrete
+   * trio, which no closure spans from begin to commit; every operation made
+   * through the trio's context publishes its handle for that operation's
+   * duration (ADR-0034 D1), so the hook a write in it fires runs inside it and
+   * the hook body's own `ctx.api.transaction` JOINS it (ADR-0067 D2). Driven
+   * here as the sandbox's `__txBegin` / `__txCommit` / `__txRollback` leaves
+   * drive it, on the engine's own scoped context. The engine face is pinned in
+   * `engine-ambient-transaction.test.ts`; this is the hook body's.
+   */
+  const openedByABody = async (end: 'commit' | 'rollback') => {
+    const scoped: any = (engine as any).createContext({ isSystem: true });
+    const begun = await scoped.beginTransaction();
+    expect(begun.owned).toBe(true);
+    await begun.ctx.object('thing').insert({ name: 'outer' });
+    if (end === 'commit') await scoped.commitTransaction(begun.handle);
+    else await scoped.rollbackTransaction(begun.handle);
+  };
+
+  it("inside a transaction a body opened, the hook body's ctx.api.transaction joins it: one begin, both rows commit with it", async () => {
+    await wire(TX_BODY);
+
+    await openedByABody('commit');
+
+    expect(seen.begins).toHaveLength(1);
+    expect(seen.creates).toHaveLength(2);
+    expect(seen.creates.map((c) => c.transaction)).toEqual([seen.begins[0], seen.begins[0]]);
+    expect(seen.commits).toEqual([seen.begins[0]]);
+    expect(committedNames('thing')).toEqual(['inner', 'outer']);
+  }, 30000);
+
+  it("inside a transaction a body opened, its rollback undoes the hook body's joined write too", async () => {
+    await wire(TX_BODY);
+
+    await openedByABody('rollback');
+
+    expect(seen.begins).toHaveLength(1);
+    expect(seen.commits).toHaveLength(0);
+    expect(seen.rollbacks).toEqual([seen.begins[0]]);
+    expect(committedNames('thing')).toEqual([]);
+  }, 30000);
 });

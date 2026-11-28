@@ -74,6 +74,55 @@ export function useObjectGridGenerateColumns({
   /** objectstack#33317 — `false` ⇒ the host's row click opens nothing (`ObjectGrid`'s prop). */
   rowOpensRecord?: boolean;
 }) {
+  // One object field's column draft, as the SYNTHESIZED path (no authored
+  // `columns` / `fields`) draws it: the field's own renderer, its translated
+  // label, and field-level security (`null` for a field the viewer may not
+  // read, or one the object does not declare). Shared with the phone card,
+  // which draws the object's `highlightFields` (ADR-0085) whether or not the
+  // view shows them as columns (objectstack#37891).
+  const synthesizeFieldColumn = useCallback((fieldName: string): ObjectGridColumnDraft | null => {
+    if (!objectSchema) return null;
+    const settledFor = (field: unknown, row: Record<string, unknown> | undefined): boolean =>
+      isDeadlineSettled(field as Parameters<typeof isDeadlineSettled>[0], row, { scope: predicateScope, fields: objectFields });
+    const field = objectSchema.fields?.[fieldName];
+    if (!field) return null;
+
+    // FLS: drop columns the current user cannot read (server-resolved
+    // /me/permissions via checkField — the schema itself carries no
+    // per-caller permission bits, objectstack#3661). Same gate ListView
+    // applies to its auto-derived columns.
+    if (perms?.isLoaded && schema.objectName
+      && !perms.checkField(schema.objectName, fieldName, 'read')) return null;
+
+    // Annotated for the same reason as paths A-C (objectui#6004): `field` is
+    // `any`, so these values have to be named before they reach a spread
+    // below — the naming now lives on `GridCellRendering`'s `string | null`
+    // members. `fieldType` is the DECLARED type the emit forwards to the
+    // inline editor; the renderer comes from the `format`-promoted key, which
+    // this path used to skip (objectui#8920).
+    const { declaredType: fieldType, rendererType, Renderer: CellRenderer } = resolveGridCellRendering(field);
+    const translatedField = field.options
+      ? { ...field, options: translateOptions(schema.objectName, fieldName, field.options) }
+      : field;
+    const header = schema.objectName ? resolveFieldLabel(schema.objectName, fieldName, field.label || fieldName) : field.label || fieldName;
+    // The face is handed the header's label, as paths A-C hand it
+    // (objectui#11689).
+    const fieldForCell: any = field.label ? { ...translatedField, label: header } : translatedField;
+    // A `referenceVia` pointer column (objectui#12608), as path A.
+    const pointerFace = recordPointerFace(fieldName, fieldType, field, dataSource);
+    return {
+      header,
+      accessorKey: fieldName,
+      // Forward the field type for the type-aware inline editor.
+      ...(fieldType && { type: fieldType }),
+      // Aligned on the RENDERER key, like paths A-C: a `text` column with
+      // `format: 'currency'` renders as currency, so it aligns as currency.
+      ...(alignsAsNumber(rendererType, field.returnType) && { align: 'right' as const }),
+      cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
+      sortable: field.sortable !== false,
+    };
+  }, [objectSchema, objectFields, resolveFieldLabel, translateOptions, schema.objectName, perms, dataSource, predicateScope]);
+
   const generateColumns = useCallback((): ObjectGridColumnDraft[] => {
     // objectui#11815 — the host's verdict on a declared deadline's
     // `settledWhen` for ONE row, handed to the cell as `deadlineSettled`. The
@@ -965,47 +1014,12 @@ export function useObjectGridGenerateColumns({
     }
 
     fieldsToShow.forEach((fieldName) => {
-      const field = objectSchema.fields?.[fieldName];
-      if (!field) return;
-
-      // FLS: drop columns the current user cannot read (server-resolved
-      // /me/permissions via checkField — the schema itself carries no
-      // per-caller permission bits, objectstack#3661). Same gate ListView
-      // applies to its auto-derived columns.
-      if (perms?.isLoaded && schema.objectName
-        && !perms.checkField(schema.objectName, fieldName, 'read')) return;
-
-      // Annotated for the same reason as paths A-C (objectui#6004): `field` is
-      // `any`, so these values have to be named before they reach a spread
-      // below — the naming now lives on `GridCellRendering`'s `string | null`
-      // members. `fieldType` is the DECLARED type the emit forwards to the
-      // inline editor; the renderer comes from the `format`-promoted key, which
-      // this path used to skip (objectui#8920).
-      const { declaredType: fieldType, rendererType, Renderer: CellRenderer } = resolveGridCellRendering(field);
-      const translatedField = field.options
-        ? { ...field, options: translateOptions(schema.objectName, fieldName, field.options) }
-        : field;
-      const header = schema.objectName ? resolveFieldLabel(schema.objectName, fieldName, field.label || fieldName) : field.label || fieldName;
-      // The face is handed the header's label, as paths A-C hand it
-      // (objectui#11689).
-      const fieldForCell: any = field.label ? { ...translatedField, label: header } : translatedField;
-      // A `referenceVia` pointer column (objectui#12608), as path A.
-      const pointerFace = recordPointerFace(fieldName, fieldType, field, dataSource);
-      generatedColumns.push({
-        header,
-        accessorKey: fieldName,
-        // Forward the field type for the type-aware inline editor.
-        ...(fieldType && { type: fieldType }),
-        // Aligned on the RENDERER key, like paths A-C: a `text` column with
-        // `format: 'currency'` renders as currency, so it aligns as currency.
-        ...(alignsAsNumber(rendererType, field.returnType) && { align: 'right' as const }),
-        cell: (value: any, row: any) => pointerFace?.(row) ?? <CellRenderer value={value} field={fieldForCell} dependentValues={row} deadlineSettled={settledFor(fieldForCell, row)} inGridColumn />,
-        sortable: field.sortable !== false,
-      });
+      const column = synthesizeFieldColumn(fieldName);
+      if (column) generatedColumns.push(column);
     });
 
     return generatedColumns;
-  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope, recordLinkAdornment, rowOpensRecord]);
+  }, [objectSchema, objectFields, objectTypesPending, schemaFields, schemaColumns, dataConfig, hasInlineData, objectName, navigation.handleClick, executeAction, data, resolveFieldLabel, translateOptions, schema.objectName, perms, uiLanguage, dataSource, predicateScope, recordLinkAdornment, rowOpensRecord, synthesizeFieldColumn]);
 
-  return { generateColumns };
+  return { generateColumns, synthesizeFieldColumn };
 }

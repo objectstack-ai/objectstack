@@ -257,3 +257,141 @@ describe('the phone card amount slot takes a formula or summary that draws as mo
     expect(within(card).queryByTestId('grid-card-amount-line')).toBeNull();
   });
 });
+
+/**
+ * objectstack#37891 — when the object declares `highlightFields` (ADR-0085,
+ * "which fields matter most", in order), the phone card reads its amount and
+ * subtitle from that list, not from the view's column order: the amount is
+ * the first highlighted field that draws as money, the subtitle the next
+ * three, in that order, empty values dropped, and a number, currency or
+ * percent part carries its field label. A highlighted field no column shows
+ * is drawn too, and the grid's fetch asks for it. An object that declares no
+ * `highlightFields` keeps the column-order rule above.
+ *
+ * The fixture is HotCRM's order line (`crm_sales_order_line`), whose related
+ * list shows `line_number, product_title, quantity, unit_price, discount,
+ * total_price`: on the base tree its card read `1 · 2` with the unit price as
+ * the amount, whatever `highlightFields` said.
+ *
+ * ── Directions on the base tree (measured by reverting the fix) ──────────
+ *   amount is the highlighted total, not the unit price                RED
+ *   subtitle is the labelled highlighted parts, in order               RED
+ *   a text part is drawn bare                                          RED
+ *   a highlighted field no column shows is drawn and fetched           RED
+ *   an empty highlighted part is dropped                               RED
+ *   control: a masked highlighted field is neither amount nor part     RED  (its amount half: the base tree shows the unit price)
+ *   control: no highlightFields keeps `1 · 2`, unit price, no labels   GREEN
+ */
+describe('the phone card follows the object\'s highlightFields (objectstack#37891)', () => {
+  const LINE_OBJECT = 'crm_sales_order_line_37891';
+  const LINE_FIELDS = {
+    id: { type: 'text' },
+    product_title: { type: 'text', label: 'Product Title' },
+    crm_product: { type: 'text', label: 'Product' },
+    quantity: { type: 'number', label: 'Quantity', scale: 0 },
+    unit_price: { type: 'currency', label: 'Sales Price' },
+    discount: { type: 'percent', label: 'Discount %', scale: 2 },
+    total_price: {
+      type: 'formula',
+      label: 'Total',
+      returnType: 'currency',
+      expression: 'record.quantity * record.unit_price * (1 - record.discount)',
+    },
+    line_number: { type: 'number', label: 'Line #', scale: 0 },
+    access_pin: { type: 'password', label: 'Access PIN' },
+  };
+  const LINE_ROWS = [
+    { id: 'l1', line_number: 1, product_title: 'Admin Training Workshop', crm_product: 'Training', quantity: 2, unit_price: 6000, discount: 0.1, total_price: 10800, access_pin: 's3cr3t-pin' },
+    { id: 'l2', line_number: 2, product_title: 'AI Agent Seat (Annual)', crm_product: 'Seat', quantity: 10, unit_price: 1000, discount: null, total_price: 10000, access_pin: 's3cr3t-pin' },
+  ];
+  /** HotCRM's `relatedListColumns` for the order's lines. */
+  const RELATED = ['line_number', 'product_title', 'quantity', 'unit_price', 'discount', 'total_price'];
+
+  async function lineCards(columns: string[], highlightFields?: string[]) {
+    setWidth(390);
+    const find = vi.fn(async () => ({ data: LINE_ROWS, total: LINE_ROWS.length, hasMore: false, pageSize: 50 }));
+    const dataSource = {
+      find,
+      getObjectSchema: async (name: string) => ({
+        name,
+        nameField: 'product_title',
+        ...(highlightFields ? { highlightFields } : {}),
+        fields: structuredClone(LINE_FIELDS),
+      }),
+    } as never;
+    render(
+      <LocalizationProvider value={{ currency: 'CNY', locale: 'en' }}>
+        <ActionProvider>
+          <SchemaRendererProvider dataSource={dataSource}>
+            <ObjectGrid
+              schema={{ type: 'object-grid', objectName: LINE_OBJECT, columns: columns.map((field) => ({ field })), pagination: { pageSize: 50 } } as never}
+              dataSource={dataSource}
+            />
+          </SchemaRendererProvider>
+        </ActionProvider>
+      </LocalizationProvider>,
+    );
+    // The money cells read the field defs, so a CN¥ amount proves they landed.
+    await waitFor(() => expect(cards()).toHaveLength(2));
+    await waitFor(() => expect(document.body.textContent).toContain('CN¥'));
+    expect(document.querySelector('table'), 'the card layout, not the table').toBeNull();
+    return { find, first: cardOf('Admin Training Workshop'), second: cardOf('AI Agent Seat (Annual)') };
+  }
+  const parts = (card: HTMLElement) => within(card).getAllByTestId('grid-card-subtitle-part');
+  const labels = (card: HTMLElement) =>
+    within(card).queryAllByTestId('grid-card-subtitle-label').map((el) => el.textContent?.trim());
+
+  it('takes the first highlighted money field as the amount: the line total, not the unit price the table shows first', async () => {
+    const { first } = await lineCards(RELATED, ['total_price', 'quantity', 'unit_price', 'discount']);
+    expect(within(first).getByTestId('grid-card-amount').textContent).toBe('CN¥10,800.00');
+  });
+
+  it('draws the next highlighted fields as the subtitle, in order, each figure under its field label', async () => {
+    const { first } = await lineCards(RELATED, ['total_price', 'quantity', 'unit_price', 'discount']);
+    expect(parts(first)).toHaveLength(3);
+    expect(labels(first)).toEqual(['Quantity', 'Sales Price', 'Discount %']);
+    const [quantity, price, discount] = parts(first).map((p) => p.textContent);
+    expect(quantity).toBe('Quantity 2');
+    expect(price).toBe('Sales Price CN¥6,000.00');
+    expect(discount).toMatch(/^Discount % 10\.00\s?%$/);
+    // The line number the table shows first is no longer a subtitle part.
+    expect(within(first).getByTestId('grid-card-subtitle').textContent).not.toMatch(/^1 ·/);
+  });
+
+  it('labels only figures: a text part is drawn bare', async () => {
+    const { first } = await lineCards(RELATED, ['total_price', 'crm_product', 'quantity']);
+    expect(parts(first).map((p) => p.textContent)).toEqual(['Training', 'Quantity 2']);
+    expect(labels(first)).toEqual(['Quantity']);
+  });
+
+  it('drops an empty highlighted part rather than drawing it', async () => {
+    const { second } = await lineCards(RELATED, ['total_price', 'quantity', 'unit_price', 'discount']);
+    expect(within(second).getByTestId('grid-card-amount').textContent).toBe('CN¥10,000.00');
+    expect(labels(second)).toEqual(['Quantity', 'Sales Price']);
+  });
+
+  it('draws a highlighted field no column shows, and the fetch asks for it', async () => {
+    const { first, find } = await lineCards(
+      ['line_number', 'product_title', 'quantity', 'unit_price'],
+      ['total_price', 'quantity', 'unit_price', 'discount'],
+    );
+    expect(within(first).getByTestId('grid-card-amount').textContent).toBe('CN¥10,800.00');
+    expect(labels(first)).toEqual(['Quantity', 'Sales Price', 'Discount %']);
+    const select = (find.mock.calls.at(-1) as unknown[] | undefined)?.[1] as { $select?: string[] } | undefined;
+    expect(select?.$select).toEqual(expect.arrayContaining(['total_price', 'discount']));
+  });
+
+  it('CONTROL: an object with no highlightFields keeps the column-order card (line number · quantity, unit price, no labels)', async () => {
+    const { first } = await lineCards(RELATED);
+    expect(within(first).getByTestId('grid-card-subtitle').textContent).toBe('1 · 2');
+    expect(within(first).getByTestId('grid-card-amount').textContent).toBe('CN¥6,000.00');
+    expect(labels(first)).toEqual([]);
+  });
+
+  it('CONTROL: a masked highlighted field is neither the amount nor a subtitle part, and its value is never printed', async () => {
+    const { first } = await lineCards(RELATED, ['access_pin', 'total_price', 'quantity']);
+    expect(within(first).getByTestId('grid-card-amount').textContent).toBe('CN¥10,800.00');
+    expect(labels(first)).toEqual(['Quantity']);
+    expect(first.textContent).not.toContain('s3cr3t-pin');
+  });
+});

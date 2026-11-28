@@ -620,9 +620,6 @@ export const zhCN: PlatformTranslationData = {
       keys: {
         chunk_target: { label: '目标 chunk 大小(字符)', help: '知识服务切分文档时每个片段的最大字符数。知识源自身设置的大小优先；嵌入模型的输入上限可能将其调低。' },
       },
-      actions: {
-        test: { label: '测试连接' },
-      },
     },
 
     lifecycle: {
