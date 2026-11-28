@@ -152,8 +152,11 @@ export const DraftReviewListSchema = lazySchema(() => strictObject(
 ));
 
 export type DraftReviewVerdictRefusal = z.input<typeof DraftReviewVerdictRefusalSchema>;
+export type DraftReviewVerdictRefusalParsed = z.infer<typeof DraftReviewVerdictRefusalSchema>;
 export type DraftReviewVerdict = z.input<typeof DraftReviewVerdictSchema>;
+export type DraftReviewVerdictParsed = z.infer<typeof DraftReviewVerdictSchema>;
 export type DraftReviewLinks = z.input<typeof DraftReviewLinksSchema>;
+export type DraftReviewLinksParsed = z.infer<typeof DraftReviewLinksSchema>;
 export type DraftReviewItem = z.input<typeof DraftReviewItemSchema>;
 export type DraftReviewItemParsed = z.infer<typeof DraftReviewItemSchema>;
 export type DraftReviewList = z.input<typeof DraftReviewListSchema>;
