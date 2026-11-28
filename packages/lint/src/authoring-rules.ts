@@ -1086,11 +1086,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-widget-bindings.ts',
     surfaces: CLI_AND_RUNTIME,
     runtimeTypes: ['dashboard'],
-    // [#35143] `dashboard-without-widgets` is an error on the CLI and a warning
-    // at the runtime door, where Studio's own create paths save a dashboard
-    // with `widgets: []` before its first widget; `runtimeWriteType` is set by
-    // the runtime gate alone.
-    run: (stack, ctx) => validateWidgetBindings(stack, { atPublishDoor: ctx.runtimeWriteType !== undefined }),
+    run: (stack) => validateWidgetBindings(stack),
   },
   // #16354 — the AUTHORING-TIME leg of the aggregate × field-type contract
   // (director ruling, decision batch #59, 2026-09-06: "both legs, table in

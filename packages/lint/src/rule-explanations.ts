@@ -1585,9 +1585,9 @@ const DASHBOARD_WITHOUT_WIDGETS_EXPLANATION: RuleExplanation = {
     'A dashboard with `widgets: []` parses and publishes, and opens on its header over an empty canvas: the ' +
       'renderer draws no empty state for it, so a user reaching it from navigation sees nothing and is told ' +
       'nothing.',
-    'An error on `os validate`, `os lint` and `os build`, where a shipped package has nothing left to add. A ' +
-      'warning at the runtime publish door, because Studio creates a new dashboard with `widgets: []` and ' +
-      'fills it afterwards, and the door must not refuse the platform\'s own first step.',
+    'A warning at every door (`os validate`, `os lint`, `os build` and the runtime publish door): the shape ' +
+      'breaks no request, and the platform\'s own create steps write `widgets: []` and fill it afterwards ' +
+      '(Studio, the spec\'s dashboard create seed, and `os generate dashboard`).',
     'To fix it, add a widget bound to a dataset, or remove the dashboard and any navigation entry that ' +
       'opens it.',
   ],
@@ -1612,14 +1612,15 @@ const OBJECT_UNREACHABLE_FROM_NAVIGATION_EXPLANATION: RuleExplanation = {
   covers: 'when an object is reachable from the app shell',
   paragraphs: [
     'An object is reachable when some app\'s navigation, or navigation the stack contributes into another ' +
-      'package\'s app, names it in a `type: \'object\'` entry. An object nothing names is stored and served, ' +
-      'but no user can open its list from the shell.',
+      'package\'s app, names it in a `type: \'object\'` entry. The finding says only that no navigation ' +
+      'entry opens the object\'s list; it does not say no user can reach a record some other way.',
     'A warning, on `os validate`, `os lint` and `os build` only: the verdict reads every app and object of ' +
       'the stack, which the runtime door\'s per-write snapshot does not carry. Not judged: a stack with no ' +
-      'app and no contributed navigation, an object with a `master_detail` field (it shows as a related list ' +
-      'on its parent), and an object whose `enable.apiEnabled` is `false`.',
-    'To fix it, add a `type: \'object\'` entry for it to an app\'s navigation, or make it the child of the ' +
-      'object it belongs to with a `master_detail` field.',
+      'app and no contributed navigation; an object with a `master_detail` field, or one another object ' +
+      'names in `relatedLists` (it shows on its parent\'s record page); an object a page names when a ' +
+      '`type: \'page\'` entry opens that page; and an object whose `enable.apiEnabled` is `false`.',
+    'To fix it, add a `type: \'object\'` entry for it to an app\'s navigation, or name it in its parent ' +
+      'object\'s `relatedLists`.',
   ],
 };
 
@@ -1627,12 +1628,14 @@ const OBJECT_WITHOUT_VIEW_EXPLANATION: RuleExplanation = {
   rule: 'object-without-view',
   covers: 'what an object opened from navigation shows with no view',
   paragraphs: [
-    'An object a navigation entry opens, with no `list`, no `listViews` entry and no `views` item bound to it, ' +
+    'An object a navigation entry opens as a list (an entry with no `recordId`), with no `listViews` entry ' +
+      'and no `views` item bound to it, ' +
       'opens on an "All records" tab the console builds itself: the name field followed by `highlightFields`, ' +
       'or by the first five fields in declared order, with no filter, sort or grouping and no other tab.',
     'A warning, on `os validate`, `os lint` and `os build` only, for the reason `object-unreachable-from-' +
       'navigation` gives. Judged only for objects navigation opens, the one place that list is shown.',
-    'To fix it, declare the list users should see: a `list` on the object, or a `views` entry bound to it.',
+    'To fix it, declare the list users should see: a `listViews` entry on the object, or a `views` entry ' +
+      'bound to it.',
   ],
 };
 

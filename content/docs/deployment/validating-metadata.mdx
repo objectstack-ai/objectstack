@@ -500,7 +500,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Retired object title template — an object that declares `titleFormat`, retired by ADR-0079 for `nameField` (`title-format-retired`, #29007) | ✓ | ✓ | ✓ | ✓ᵒ |
 | Roll-up aggregands — a `summaryOperations` `min` / `max` whose answer is not a number, or a `sum` / `avg` over a child field type the aggregate × field-type table refuses (`rollup/non-numeric-aggregand`) | ✓ | ✓ | ✓ | ✓ᵒ |
 | View container shape | ✓ | ✓ | ✓ | — |
-| Widget-binding integrity (ADR-0021) — and a dashboard with no widgets, which opens on its header over an empty canvas (`dashboard-without-widgets`, #35143): an error on the CLI and a warning at the publish door, where Studio creates a dashboard empty and fills it afterwards | ✓ | ✓ | ✓ | ✓ᵈ |
+| Widget-binding integrity (ADR-0021) — and a dashboard with no widgets, which opens on its header over an empty canvas (`dashboard-without-widgets`, #35143): a warning at every door, since Studio, the create seed and `os generate dashboard` write it empty and fill it afterwards | ✓ | ✓ | ✓ | ✓ᵈ |
 | Dataset measure `aggregate` × the field's declared type — a pair the spec's compatibility table refuses, e.g. `avg` over a `datetime` field (#16354) | ✓ | ✓ | ✓ | ✓ᵈᵗ |
 | Dashboard action/route references (ADR-0049) | ✓ | ✓ | ✓ | — |
 | Filter placeholder resolvability (#3574) | ✓ | ✓ | ✓ | — |
@@ -514,7 +514,7 @@ orthogonal to both, and no cell here can carry it; it is written out in
 | Chart bindings outside dashboards (#3583) | ✓ | ✓ | ✓ | ✓ᶠʳᵛᵒ |
 | Navigation vs. granted access (ADR-0090 D6) | ✓ | ✓ | ✓ | ✓ᶠ |
 | App shell, advisory — an app with no navigation entry, which opens on the "no access" empty state (`app-navigation-empty`, #35143) | ✓ | ✓ | ✓ | ✓ᵃ |
-| App shell reach, advisory — an object no app's navigation opens (`object-unreachable-from-navigation`) and an object navigation opens with no list view (`object-without-view`, #35143); they read every app, view and object of the stack, which no per-write snapshot carries | ✓ | ✓ | ✓ | — |
+| App shell reach, advisory — an object no navigation entry, navigated page or parent's `relatedLists` shows (`object-unreachable-from-navigation`) and an object navigation opens as a list with no `listViews` entry or bound view (`object-without-view`, #35143); they read every app, view and object of the stack, which no per-write snapshot carries | ✓ | ✓ | ✓ | — |
 | SDUI scoped styling (ADR-0065) | ✓ | ✓ | ✓ | — |
 | SDUI component props — every `ComponentPropsMap` verdict: an undeclared prop, a value its props schema rejects, a missing `dataSource.object` binding, and a retired prop (`retiredKey()`) refused with its prescription (#23026, #23147; at the save door #23388) | ✓ | ✓ | ✓ | ✓ᵖ |
 | Page component types inside a spec-reserved namespace — a type the platform does not declare, e.g. `global:serch` (`component-type-unknown`, ADR-0078; at the save door #23388) | ✓ | ✓ | ✓ | ✓ᵖ |

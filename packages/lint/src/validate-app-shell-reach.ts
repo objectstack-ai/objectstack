@@ -23,20 +23,25 @@
  *
  * An object the stack declares and no navigation entry of any app (nor any
  * navigation the stack contributes into another package's app) names in a
- * `type: 'object'` entry. Its records exist and its API answers, but no user
- * can open its list from the shell. Not judged:
+ * `type: 'object'` entry. The finding claims only what it read: no navigation
+ * entry opens the object's list. Not judged, because the shell shows the
+ * object some other way or the object is not meant to be listed:
  *
  *  - a stack that declares no app and contributes no navigation (a package of
  *    objects other packages present);
- *  - an object with a `master_detail` field: it is shown as a related list on
- *    its parent's record page, which is where such a child belongs;
+ *  - an object with a `master_detail` field, or one another object names in
+ *    its `relatedLists` (bare `child` / `child.field`, or the object form's
+ *    `list`): it is shown as a related list on its parent's record page;
+ *  - an object a page names (an `object` / `objectName` value anywhere in a
+ *    page that a `type: 'page'` entry opens): the page presents it;
  *  - an object whose `enable.apiEnabled` is `false`: its list cannot be served,
  *    which `nav-object-unservable` already says of any entry that opens it.
  *
  * ## `object-without-view` — an object opened from navigation with no list view
  *
- * An object a navigation entry opens that declares no list view: no `list`, no
- * `listViews` entry, and no `views[]` item bound to it. The console then
+ * An object a navigation entry opens as a list (a `type: 'object'` entry with
+ * no `recordId`, which opens one record instead) that declares no list view:
+ * no `listViews` entry and no `views[]` item bound to it. The console then
  * builds an "All records" tab of its own (`buildViewTabs`' fallback in
  * objectui): the name field followed by `highlightFields`, or by the first five
  * fields in declared order, with no filter, sort or grouping and no second tab.
@@ -83,15 +88,50 @@ function hasEntry(items: unknown): boolean {
   });
 }
 
-/** Every `objectName` a `type: 'object'` entry names in a navigation tree, at any depth. */
-function collectNavObjects(items: unknown, into: Set<string>): void {
+/** What a navigation tree opens, at any depth. */
+interface NavReach {
+  /** Every `objectName` a `type: 'object'` entry names. */
+  objects: Set<string>;
+  /** The subset an entry opens as a LIST: one with no `recordId`. */
+  lists: Set<string>;
+  /** Every `pageName` a `type: 'page'` entry names. */
+  pages: Set<string>;
+}
+
+function collectNav(items: unknown, into: NavReach): void {
   if (!Array.isArray(items)) return;
   for (const item of items) {
     if (!isRec(item)) continue;
     const objectName = item.type === 'object' ? strName(item.objectName) : undefined;
-    if (objectName) into.add(objectName);
-    if (item.type !== 'separator') collectNavObjects(item.children, into);
+    if (objectName) {
+      into.objects.add(objectName);
+      if (item.recordId === undefined) into.lists.add(objectName);
+    }
+    const pageName = item.type === 'page' ? strName(item.pageName) : undefined;
+    if (pageName) into.pages.add(pageName);
+    if (item.type !== 'separator') collectNav(item.children, into);
   }
+}
+
+/** Every string an `object` or `objectName` key holds anywhere under `node`. */
+function collectNamedObjects(node: unknown, into: Set<string>, depth = 0): void {
+  if (depth > 64) return;
+  if (Array.isArray(node)) {
+    for (const v of node) collectNamedObjects(v, into, depth + 1);
+    return;
+  }
+  if (!isRec(node)) return;
+  for (const [key, v] of Object.entries(node)) {
+    const named = key === 'object' || key === 'objectName' ? strName(v) : undefined;
+    if (named) into.add(named);
+    else collectNamedObjects(v, into, depth + 1);
+  }
+}
+
+/** The child object a `relatedLists` entry names: `child`, `child.field`, or the object form's `list`. */
+function relatedListChild(entry: unknown): string | undefined {
+  const spelled = typeof entry === 'string' ? entry : isRec(entry) ? strName(entry.list) : undefined;
+  return spelled ? strName(spelled.split('.')[0]) : undefined;
 }
 
 /** One collection holder: the stack itself, or one `packages[].manifest` body. */
@@ -102,22 +142,16 @@ interface Holder {
 }
 
 /**
- * The holders whose apps and objects are JUDGED: the stack itself only. An
- * assembled artifact's `packages[]` is judged by the CLI's per-package run
+ * The holders whose navigation COUNTS toward reach: the stack and every
+ * package of an assembled artifact, so an entry one package contributes into
+ * another's app reaches the object wherever the object is judged. Only the
+ * stack itself (the first holder) is JUDGED: an assembled artifact's
+ * `packages[]` is judged by the CLI's per-package run
  * (`runPerPackageAuthoringRules`), which hands each package to these rules as
  * a stack of its own; judging it here too would report each item twice.
  */
-function judgedHolders(stack: AnyRec): Holder[] {
-  return [{ body: stack, prefix: '' }];
-}
-
-/**
- * The holders whose navigation COUNTS toward reach: the stack and every
- * package of an assembled artifact, so an entry one package contributes into
- * another's app reaches the object wherever the object is judged.
- */
 function reachHolders(stack: AnyRec): Holder[] {
-  const holders = judgedHolders(stack);
+  const holders: Holder[] = [{ body: stack, prefix: '' }];
   packagesOf(stack).forEach((entry, i) => {
     if (isRec(entry.manifest)) holders.push({ body: entry.manifest, prefix: `packages[${i}].manifest.` });
   });
@@ -167,24 +201,22 @@ export function validateAppNavigationPresent(stack: AnyRec): AppShellReachFindin
   const findings: AppShellReachFinding[] = [];
   if (!isRec(stack)) return findings;
   const contributed = contributedAppNames(reachHolders(stack));
-  for (const holder of judgedHolders(stack)) {
-    for (const { app, path, name } of appsOf(holder)) {
-      if (hasEntry(app.navigation)) continue;
-      if (recordsOf(app.areas).some((area) => hasEntry(area.navigation))) continue;
-      if (contributed.has(name)) continue;
-      findings.push({
-        severity: 'warning',
-        rule: APP_NAVIGATION_EMPTY,
-        where: `app "${name}"`,
-        path: `${path}.navigation`,
-        message:
-          `app "${name}" has no navigation entry (none in \`navigation\` or in any \`areas[].navigation\`), so ` +
-          'it opens on the "no access" empty state for every member, its author included',
-        hint:
-          "Add an entry that opens something, e.g. `navigation: [{ id: 'nav_home', type: 'object', label: '…', " +
-          "objectName: '<object>' }]`, or remove the app",
-      });
-    }
+  for (const { app, path, name } of appsOf({ body: stack, prefix: '' })) {
+    if (hasEntry(app.navigation)) continue;
+    if (recordsOf(app.areas).some((area) => hasEntry(area.navigation))) continue;
+    if (contributed.has(name)) continue;
+    findings.push({
+      severity: 'warning',
+      rule: APP_NAVIGATION_EMPTY,
+      where: `app "${name}"`,
+      path: `${path}.navigation`,
+      message:
+        `app "${name}" has no navigation entry (none in \`navigation\` or in any \`areas[].navigation\`), so ` +
+        'it opens on the "no access" empty state for every member, its author included',
+      hint:
+        "Add an entry that opens something, e.g. `navigation: [{ id: 'nav_home', type: 'object', label: '…', " +
+        "objectName: '<object>' }]`, or remove the app",
+    });
   }
   return findings;
 }
@@ -198,9 +230,8 @@ function viewBinds(view: AnyRec, object: string): boolean {
   return isRec(view.listViews) && Object.values(view.listViews).some((lv) => bound(lv) === object);
 }
 
-/** Whether an object declares a list view of its own. */
+/** Whether an object declares a list view of its own (`ObjectSchema.listViews`). */
 function declaresOwnView(obj: AnyRec): boolean {
-  if (isRec(obj.list)) return true;
   return isRec(obj.listViews) && Object.values(obj.listViews).some(isRec);
 }
 
@@ -217,64 +248,78 @@ export function validateObjectShellReach(stack: AnyRec): AppShellReachFinding[] 
   if (!isRec(stack)) return findings;
   const holders = reachHolders(stack);
 
-  const reached = new Set<string>();
+  const nav: NavReach = { objects: new Set(), lists: new Set(), pages: new Set() };
   let navigates = false;
   for (const holder of holders) {
     for (const { app } of appsOf(holder)) {
       navigates = true;
-      collectNavObjects(app.navigation, reached);
-      for (const area of recordsOf(app.areas)) collectNavObjects(area.navigation, reached);
+      collectNav(app.navigation, nav);
+      for (const area of recordsOf(app.areas)) collectNav(area.navigation, nav);
     }
     for (const contribution of contributionsOf(holder.body)) {
       navigates = true;
-      collectNavObjects(contribution.items, reached);
+      collectNav(contribution.items, nav);
     }
   }
   if (!navigates) return findings;
 
+  // Shown some other way: through a page navigation opens, or as a related
+  // list on a parent's record page.
+  const shownElsewhere = new Set<string>();
+  for (const holder of holders) {
+    for (const page of recordsOf(holder.body.pages)) {
+      const name = strName(page.name);
+      if (name && nav.pages.has(name)) collectNamedObjects(page, shownElsewhere);
+    }
+    for (const obj of recordsOf(holder.body.objects)) {
+      for (const entry of Array.isArray(obj.relatedLists) ? obj.relatedLists : []) {
+        const child = relatedListChild(entry);
+        if (child) shownElsewhere.add(child);
+      }
+    }
+  }
+
   const views = holders.flatMap((holder) => recordsOf(holder.body.views));
 
-  for (const holder of judgedHolders(stack)) {
-    const objects = holder.body.objects;
-    if (!Array.isArray(objects)) continue;
-    objects.forEach((obj, i) => {
-      if (!isRec(obj)) return;
-      const name = strName(obj.name);
-      if (!name) return;
-      const path = `${holder.prefix}objects[${i}]`;
-      if (!reached.has(name)) {
-        if (hasMasterDetailField(obj)) return;
-        if (isRec(obj.enable) && obj.enable.apiEnabled === false) return;
-        findings.push({
-          severity: 'warning',
-          rule: OBJECT_UNREACHABLE_FROM_NAVIGATION,
-          where: `object "${name}"`,
-          path,
-          message:
-            `no app's navigation opens object "${name}" (no \`type: 'object'\` entry names it), so its records ` +
-            'are stored and served but no user can reach its list from the app shell',
-          hint:
-            `Add \`{ id: 'nav_${name}', type: 'object', label: '…', objectName: '${name}' }\` to an app's ` +
-            '`navigation`, or make it a child of the object it belongs to (a `master_detail` field) so it shows ' +
-            "as a related list on the parent's record page",
-        });
-        return;
-      }
-      if (declaresOwnView(obj) || views.some((view) => viewBinds(view, name))) return;
+  const objects = Array.isArray(stack.objects) ? stack.objects : [];
+  objects.forEach((obj, i) => {
+    if (!isRec(obj)) return;
+    const name = strName(obj.name);
+    if (!name) return;
+    const path = `objects[${i}]`;
+    if (!nav.objects.has(name)) {
+      if (shownElsewhere.has(name) || hasMasterDetailField(obj)) return;
+      if (isRec(obj.enable) && obj.enable.apiEnabled === false) return;
       findings.push({
         severity: 'warning',
-        rule: OBJECT_WITHOUT_VIEW,
+        rule: OBJECT_UNREACHABLE_FROM_NAVIGATION,
         where: `object "${name}"`,
         path,
         message:
-          `object "${name}" is opened from navigation but declares no list view, so the console builds an ` +
-          '"All records" tab of its own: the name field and `highlightFields` (or the first five fields), ' +
-          'with no filter, sort or grouping and no other tab',
+          `no navigation entry opens object "${name}" (no \`type: 'object'\` entry names it, no page an entry ` +
+          "opens names it, and no object lists it in `relatedLists`), so the app shell offers no way to its list",
         hint:
-          `Declare the list users should see: \`list: { type: 'grid', columns: [...] }\` on "${name}", or a ` +
-          `\`views\` entry bound to it (\`defineView({ object: '${name}', list: { ... } })\`)`,
+          `Add \`{ id: 'nav_${name}', type: 'object', label: '…', objectName: '${name}' }\` to an app's ` +
+          "`navigation`, or name it in its parent object's `relatedLists` so it shows on the parent's record page",
       });
+      return;
+    }
+    if (!nav.lists.has(name)) return;
+    if (declaresOwnView(obj) || views.some((view) => viewBinds(view, name))) return;
+    findings.push({
+      severity: 'warning',
+      rule: OBJECT_WITHOUT_VIEW,
+      where: `object "${name}"`,
+      path,
+      message:
+        `object "${name}" is opened from navigation but declares no list view, so the console builds an ` +
+        '"All records" tab of its own: the name field and `highlightFields` (or the first five fields), ' +
+        'with no filter, sort or grouping and no other tab',
+      hint:
+        `Declare the list users should see: \`listViews: { all: { type: 'grid', columns: [...] } }\` on ` +
+        `"${name}", or a ` +
+        `\`views\` entry bound to it (\`defineView({ object: '${name}', list: { ... } })\`)`,
     });
-  }
+  });
   return findings;
 }

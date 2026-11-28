@@ -2341,8 +2341,8 @@ describe('[#22161] one-line fix — the rule ids whose `fix:` line this file sho
 });
 
 // [#35143] A dashboard with no widgets publishes and opens on its header over
-// an empty canvas. An error on the CLI; a warning at the runtime door, where
-// Studio creates a dashboard with `widgets: []` and fills it afterwards.
+// an empty canvas. A warning at every door: Studio, the spec's create seed and
+// `os generate dashboard` all write `widgets: []` and fill it afterwards.
 describe('[#35143] a dashboard with no widgets', () => {
   const EMPTY = { name: 'ops_board', label: 'Ops', widgets: [] };
   const datasets = [{ name: 'task_stats', object: 'task', measures: [{ name: 'n', aggregate: 'count' }] }];
@@ -2351,12 +2351,12 @@ describe('[#35143] a dashboard with no widgets', () => {
     ...EMPTY,
     widgets: [{ id: 'w1', type: 'metric', dataset: 'task_stats', values: ['n'], layout: { x: 0, y: 0, w: 3, h: 2 } }],
   };
-  const emptyFindings = (stack: Record<string, unknown>, atPublishDoor?: boolean) =>
-    validateWidgetBindingsUnrecorded(stack, { atPublishDoor }).filter((f) => f.rule === DASHBOARD_WITHOUT_WIDGETS);
+  const emptyFindings = (stack: Record<string, unknown>) =>
+    validateWidgetBindingsUnrecorded(stack).filter((f) => f.rule === DASHBOARD_WITHOUT_WIDGETS);
 
-  it('is an error at `widgets` on the CLI, naming the fix', () => {
+  it('is a warning at `widgets`, naming the fix', () => {
     const findings = emptyFindings({ objects, datasets, dashboards: [EMPTY] });
-    expect(findings.map((f) => [f.severity, f.path])).toEqual([['error', 'dashboards[0].widgets']]);
+    expect(findings.map((f) => [f.severity, f.path])).toEqual([['warning', 'dashboards[0].widgets']]);
     expect(findings[0].hint).toContain('Add a widget');
   });
 
@@ -2365,10 +2365,13 @@ describe('[#35143] a dashboard with no widgets', () => {
     expect(emptyFindings({ objects, datasets, dashboards: [{ name: 'x', label: 'X' }] })).toEqual([]);
   });
 
-  for (const command of ['validate', 'build'] as const) {
-    it(`fails \`${command}\``, () => {
-      const { errors } = splitBySeverity(runAuthoringRules(command, { normalized: { objects, datasets, dashboards: [EMPTY] } }));
-      expect(errors.map((f) => f.rule)).toContain(DASHBOARD_WITHOUT_WIDGETS);
+  for (const command of ['validate', 'build', 'lint'] as const) {
+    it(`is an advisory on \`${command}\`, never an error`, () => {
+      const { errors, advisories } = splitBySeverity(
+        runAuthoringRules(command, { normalized: { objects, datasets, dashboards: [EMPTY] } }),
+      );
+      expect(advisories.map((f) => f.rule)).toContain(DASHBOARD_WITHOUT_WIDGETS);
+      expect(errors.map((f) => f.rule)).not.toContain(DASHBOARD_WITHOUT_WIDGETS);
     });
   }
 
@@ -2381,8 +2384,8 @@ describe('[#35143] a dashboard with no widgets', () => {
     expect(filled.advisories.map((f) => f.rule)).not.toContain(DASHBOARD_WITHOUT_WIDGETS);
   });
 
-  it('`os explain` carries the split severity', () => {
+  it('`os explain` says why it is advisory', () => {
     const text = explainRule(DASHBOARD_WITHOUT_WIDGETS)!.paragraphs.join('\n');
-    for (const fact of ['`widgets: []`', 'runtime publish door', 'Studio']) expect(text, fact).toContain(fact);
+    for (const fact of ['`widgets: []`', 'Studio', 'os generate dashboard']) expect(text, fact).toContain(fact);
   });
 });

@@ -121,6 +121,20 @@ describe('[#35143] object-unreachable-from-navigation and object-without-view', 
     expect(validateAppNavigationPresent(artifact)).toEqual([]);
   });
 
+  it('an object another object lists in `relatedLists`, or that a page navigation opens names, is not judged', () => {
+    const parent = { ...objects[0], relatedLists: ['crm_note.account'] };
+    const nav = { objects: [parent, objects[1]], views: [accountView], apps: [app(navTo('crm_account'))] };
+    expect(run(nav)).toEqual([]);
+    const objectForm = { ...objects[0], relatedLists: [{ list: 'crm_note', label: 'Notes' }] };
+    expect(run({ ...nav, objects: [objectForm, objects[1]] })).toEqual([]);
+    const pageEntry = { id: 'p', type: 'page', label: 'Notes', pageName: 'notes_page' };
+    const page = { name: 'notes_page', regions: [{ components: [{ type: 'object:list', properties: { objectName: 'crm_note' } }] }] };
+    const viaPage = { objects, views: [accountView], pages: [page], apps: [app(navTo('crm_account'), pageEntry)] };
+    expect(run(viaPage)).toEqual([]);
+    // A page no entry opens reaches nothing.
+    expect(run({ ...viaPage, apps: [app(navTo('crm_account'))] })).toEqual([[OBJECT_UNREACHABLE_FROM_NAVIGATION, 'objects[1]']]);
+  });
+
   it('a master-detail child and an API-disabled object are not judged; a stack with no app is not judged', () => {
     const child = { name: 'crm_note', fields: { account: { type: 'master_detail', reference: 'crm_account' } } };
     const hidden = { name: 'crm_log', enable: { apiEnabled: false }, fields: { body: { type: 'text' } } };
@@ -129,7 +143,6 @@ describe('[#35143] object-unreachable-from-navigation and object-without-view', 
   });
 
   it.each([
-    ['an object `list`', { objects: [{ ...objects[0], list: { type: 'grid', columns: ['name'] } }] }],
     ['an object `listViews` entry', { objects: [{ ...objects[0], listViews: { all: { type: 'grid', columns: ['name'] } } }] }],
     ['a `views` item', { objects: [objects[0]], views: [accountView] }],
     ['a flattened list overlay', { objects: [objects[0]], views: [{ name: 'a.x', object: 'crm_account', viewKind: 'list', columns: ['name'] }] }],
@@ -141,7 +154,17 @@ describe('[#35143] object-unreachable-from-navigation and object-without-view', 
     const findings = validateObjectShellReach({ objects: [objects[0]], apps: [app(navTo('crm_account'))] });
     expect(findings.map((f) => [f.rule, f.severity, f.path])).toEqual([[OBJECT_WITHOUT_VIEW, 'warning', 'objects[0]']]);
     expect(findings[0].message).toContain('All records');
-    expect(findings[0].hint).toContain('list:');
+    expect(findings[0].hint).toContain('listViews:');
+  });
+
+  it('an entry that opens one record (`recordId`) shows no list, so no view is owed', () => {
+    const recordEntry = { ...navTo('crm_account'), recordId: '{current_user_id}' };
+    expect(run({ objects: [objects[0]], apps: [app(recordEntry)] })).toEqual([]);
+  });
+
+  it('the object `list` key is not a list view: `ObjectSchema` declares `listViews`', () => {
+    const stray = { objects: [{ ...objects[0], list: { type: 'grid', columns: ['name'] } }], apps: [app(navTo('crm_account'))] };
+    expect(run(stray)).toEqual([[OBJECT_WITHOUT_VIEW, 'objects[0]']]);
   });
 
   it('runs on all three commands as an advisory, and never at the runtime door', () => {
