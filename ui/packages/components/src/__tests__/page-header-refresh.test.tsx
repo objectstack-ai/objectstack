@@ -42,6 +42,8 @@ import { I18nProvider } from '@object-ui/i18n';
 // cold transform is billed to `hookTimeout`
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -136,10 +138,10 @@ describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the �
     renderHeader({
       refresh: vi.fn(),
       actions: [
-        { name: 'start', locations: ['record_header'], label: 'Start' },
-        { name: 'expedite', locations: ['record_header'], label: 'Expedite' },
-        { name: 'report', locations: ['record_header'], label: 'Report' },
-        { name: 'archive', locations: ['record_header'], label: 'Archive' },
+        { name: 'start', locations: ['record_page'], label: 'Start' },
+        { name: 'expedite', locations: ['record_page'], label: 'Expedite' },
+        { name: 'report', locations: ['record_page'], label: 'Report' },
+        { name: 'archive', locations: ['record_page'], label: 'Archive' },
       ],
     });
 
@@ -153,12 +155,12 @@ describe('page:header — 1 primary + 2 secondary + ⋯, refresh first in the �
     expect(items).toEqual(['Refresh', 'Archive']);
   });
 
-  it('a record_more-only action folds behind the refresh', async () => {
+  it('a folded action folds behind the refresh', async () => {
     renderHeader({
       refresh: vi.fn(),
       actions: [
-        { name: 'start', locations: ['record_header'], label: 'Start' },
-        { name: 'clone', locations: ['record_more'], label: 'Clone' },
+        { name: 'start', locations: ['record_page'], label: 'Start' },
+        { name: 'clone', locations: ['record_page'], component: 'action:menu', label: 'Clone' },
       ],
     });
 

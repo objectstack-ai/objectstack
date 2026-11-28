@@ -41,7 +41,7 @@ describe('sys_team.add_team_member — Add Member opened from a team', () => {
   const fromList = action(SysTeamMember, 'add_team_member');
 
   it('is offered on the team row and the team record header', () => {
-    expect(fromTeam.locations).toEqual(['list_item', 'record_header']);
+    expect(fromTeam.locations).toEqual(['record']);
   });
 
   it('binds the team from the row it is opened on, as teamId', () => {
@@ -65,7 +65,7 @@ describe('sys_team.add_team_member — Add Member opened from a team', () => {
   });
 
   it('leaves the membership-list copy asking for the team, where none is in hand', () => {
-    expect(fromList.locations).toEqual(['list_toolbar']);
+    expect(fromList.locations).toEqual(['list']);
     expect(fromList.recordIdParam).toBeUndefined();
     expect((fromList.params ?? []).map((p) => p.name)).toEqual(['teamId', 'userId']);
   });

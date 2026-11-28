@@ -59,8 +59,8 @@ const TASK = {
     label: 'Task',
     fields: { title: { name: 'title', type: 'text', label: 'Title' } },
     actions: [
-        { name: 'showcase_mark_done', label: 'Mark Done', type: 'script', locations: ['record_header'] },
-        { name: 'showcase_snooze', label: 'Snooze', type: 'script', locations: ['record_header'] },
+        { name: 'showcase_mark_done', label: 'Mark Done', type: 'script', locations: ['record_page'] },
+        { name: 'showcase_snooze', label: 'Snooze', type: 'script', locations: ['record_page'] },
     ],
 };
 const PROJECT = {

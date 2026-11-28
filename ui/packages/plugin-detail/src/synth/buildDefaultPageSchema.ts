@@ -204,7 +204,7 @@ export interface BuildPageOptions {
    * Action definitions to surface in the header. When provided and
    * non-empty, the synthesizer emits a `record:quick_actions` node
    * immediately after `page:header`. Use ActionDef shape from the spec
-   * (must include `locations: ['record_header']` to render).
+   * (must include `locations: ['record_page']` to render).
    */
   headerActions?: any[];
   /**
@@ -573,7 +573,7 @@ export function buildDefaultActions(
   if (!Array.isArray(headerActions) || headerActions.length === 0) return null;
   return componentNode('record:quick_actions', {
     actions: headerActions,
-    location: 'record_header',
+    location: 'record_page',
   });
 }
 

@@ -9,7 +9,7 @@
 /**
  * RowActionMenu — ADR-0066 D4 `requiredPermissions` gate (framework#3923).
  *
- * `list_item` actions render here, and this component filters its own set
+ * `record_row` actions render here, and this component filters its own set
  * instead of going through `ActionEngine.getActionsForLocation` — so the
  * engine's capability gate never reached the row surface. A row action
  * declaring a capability nobody holds showed up in the "⋮" menu (and, for a

@@ -101,7 +101,7 @@ function taskApp(planted: boolean): Record<string, unknown> {
         objectName: 'vg_task',
         type: 'url',
         target: 'https://example.com/help',
-        locations: ['record_header'],
+        locations: ['record_page'],
         visible: planted ? 'done != true' : 'record.done != true',
       },
     ],

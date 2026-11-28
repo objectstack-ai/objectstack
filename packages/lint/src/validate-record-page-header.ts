@@ -29,7 +29,7 @@ import { walkPageComponents } from './page-walk.js';
  *   buttons. The incoming order is where the two differ: the full page's is
  *   the header's `actions` list, the standard page's is the object's own
  *   action declaration order, and the standard page draws every action the
- *   object places at `record_header` / `record_more`, listed or not. When that
+ *   object places at `record` / `record_page`, listed or not. When that
  *   gives a different primary button, or the listed actions in a different
  *   order within the row of buttons or within the `⋯` (the two are drawn
  *   apart), the header lists them in an order the actions do not declare:
@@ -126,8 +126,11 @@ function objectActions(stack: AnyRec, object: AnyRec, objectName: string): AnyRe
   return out;
 }
 
+/** objectui's `actionRendersAt`: `record` is drawn at `record_page` and at `record_row` (protocol 19). */
 function placedIn(action: AnyRec, location: string): boolean {
-  return Array.isArray(action.locations) && action.locations.includes(location);
+  if (!Array.isArray(action.locations)) return false;
+  return action.locations.includes(location)
+    || ((location === 'record_page' || location === 'record_row') && action.locations.includes('record'));
 }
 
 /** The header renderer's sort: `order` ascending, `variant: 'primary'` first among equals, then incoming order. */
@@ -142,11 +145,11 @@ function headerSort(actions: readonly AnyRec[]): AnyRec[] {
 
 /**
  * An action the header draws as a button in its row: placed at
- * `record_header`, and not pinned into the `⋯` by `component: 'action:menu'`.
- * The rest (`record_more`-only, menu-pinned) are drawn in the `⋯` only.
+ * `record` or `record_page`, and not folded into the `⋯` by `component:
+ * 'action:menu'`. The rest (folded) are drawn in the `⋯` only.
  */
 function isButton(action: AnyRec): boolean {
-  return placedIn(action, 'record_header') && action.component !== 'action:menu';
+  return placedIn(action, 'record_page') && action.component !== 'action:menu';
 }
 
 /**
@@ -231,7 +234,7 @@ export function validateRecordPageHeader(stack: AnyRec): RecordPageHeaderFinding
       const universe = objectActions(stack, object, objectName);
       const byName = new Map(universe.map((a) => [a.name as string, a]));
       if (!listed.every((n) => byName.has(n))) continue;
-      const isPlaced = (a: AnyRec): boolean => placedIn(a, 'record_header') || placedIn(a, 'record_more');
+      const isPlaced = (a: AnyRec): boolean => placedIn(a, 'record_page');
 
       const fullPage = headerSort([...new Set(listed)].map((n) => byName.get(n)!).filter(isPlaced));
       if (fullPage.length === 0) continue;

@@ -129,14 +129,14 @@ const ACTION = {
   label: 'Sync datasource',
   type: 'api',
   target: '/api/v1/datasources/${ctx.recordId}/sync',
-  locations: ['record_header'],
+  locations: ['record_page'],
   params: PARAMS,
 };
 
 function renderActions(params: unknown[] = PARAMS) {
   return render(
     <MetadataTypeActions
-      location="record_header"
+      location="record_page"
       recordId="ds1"
       entry={{ actions: [{ ...ACTION, params }] as never }}
     />,

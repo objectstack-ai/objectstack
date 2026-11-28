@@ -53,7 +53,7 @@ export const SysTeamMember = ObjectSchema.create({
       label: 'Add Member',
       icon: 'user-plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/add-team-member',
       // Team membership lives under organizations — multi-org-only. Gate
@@ -84,7 +84,7 @@ export const SysTeamMember = ObjectSchema.create({
       icon: 'user-minus',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/remove-team-member',
       requiresFeature: 'organization',

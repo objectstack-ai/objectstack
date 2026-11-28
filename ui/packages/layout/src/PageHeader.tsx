@@ -60,7 +60,7 @@ export interface PageHeaderComponentProps extends React.HTMLAttributes<HTMLDivEl
      * Optional inline action list rendered into the header's right-aligned
      * slot. Accepts an array of `ActionDef` objects (or action ids) and
      * delegates rendering to the standard `record:quick_actions` widget
-     * with `location: 'record_header'`. Authors no longer need to declare
+     * with `location: 'record_page'`. Authors no longer need to declare
      * a sibling `record:quick_actions` node + visual `-mt-12` hack.
      */
     actions?: unknown[];
@@ -207,7 +207,7 @@ export function PageHeader({
             <SchemaRenderer
                 schema={{
                     type: 'record:quick_actions',
-                    properties: { actions: resolvedActions, location: 'record_header', align: 'end', inline: true },
+                    properties: { actions: resolvedActions, location: 'record_page', align: 'end', inline: true },
                 } as any}
             />
         )

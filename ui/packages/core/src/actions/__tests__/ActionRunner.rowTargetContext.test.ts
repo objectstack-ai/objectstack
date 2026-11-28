@@ -14,7 +14,7 @@
  * `ActionProvider`, which also mirrors it under `ctx`). A list row binds nothing
  * there: `ObjectGrid` dispatches a row action as
  * `{ ...def, params: { _rowRecord: row } }` through the page's runner. The
- * target interpolation read the runner's context only, so a `list_item` url
+ * target interpolation read the runner's context only, so a `record_row` url
  * action declared as `/apps/APP/OBJECT/record/${ctx.recordId}/page/P` landed
  * on `/apps/APP/OBJECT/record/page/P` from a row menu.
  *

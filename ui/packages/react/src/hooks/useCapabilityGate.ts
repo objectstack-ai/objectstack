@@ -12,8 +12,8 @@
  *
  * `ActionEngine.getActionsForLocation` applies this gate for everything routed
  * through the engine. But several renderers filter their own action lists —
- * `page:header` (record_header / record_more) and the grid's row-action menu
- * (list_item) — and each of those bypassed the engine entirely, so a button
+ * `page:header` (record / record_page) and the grid's row-action menu
+ * (record_row) — and each of those bypassed the engine entirely, so a button
  * declaring a capability nobody holds still rendered (framework#3923). One hook
  * so all three surfaces gate identically and can't drift apart.
  *
