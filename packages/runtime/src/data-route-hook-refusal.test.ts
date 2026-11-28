@@ -57,6 +57,8 @@ const CASES = [
 ] as const;
 /** A hook with no catalogue that throws free text: no code, no status. */
 const UNDECLARED_OBJECT = 'booking_undeclared_38232';
+/** A hook body that crashes, and puts a code on the native error before it lets it out. */
+const CRASH_OBJECT = 'booking_crash_38232';
 
 /** A sandboxed hook that refuses every insert with a three-reason list under `code`. */
 function refusingHook(code: string, object: string, status: number) {
@@ -124,6 +126,21 @@ beforeAll(async () => {
         events: ['beforeInsert'],
         body: { language: 'js', source: "throw new Error('This slot is taken.');", capabilities: [] },
     } as any)!, { object: UNDECLARED_OBJECT });
+    engine.registry.registerObject({
+        name: CRASH_OBJECT,
+        label: 'Booking',
+        fields: { name: { name: 'name', type: 'text' as const, label: 'Name' } },
+    } as any, TEST_PACKAGE_ID);
+    engine.registerHook('beforeInsert', bind({
+        name: 'crash_with_code',
+        object: CRASH_OBJECT,
+        events: ['beforeInsert'],
+        body: {
+            language: 'js',
+            source: "try { const missing = null; missing.slot(); } catch (e) { e.code = 'PERMISSION_DENIED'; e.status = 403; throw e; }",
+            capabilities: [],
+        },
+    } as any)!, { object: CRASH_OBJECT });
     await engine.syncSchemas();
     await installDefaultOrganization(engine);
     protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -199,6 +216,21 @@ describe('[#38232] `dispatch()` answers a hook refusal on `/data` as the REST ro
         expect(error.message).toBe(rest.body.error);
         expect(error.message).toBe('This slot is taken.');
         expect(await engine.find(UNDECLARED_OBJECT, {})).toHaveLength(0);
+    });
+
+    it('a hook body that crashes answers the REST routes\' sanitised 500, whatever code it carries', async () => {
+        const result: any = await post(CRASH_OBJECT, { name: 'clash' });
+        const rest = await restAnswer(CRASH_OBJECT, { name: 'clash' });
+        expect(rest.status).toBe(500);
+        expect(result?.handled).toBe(true);
+        const error = result.response.body.error;
+        expect(result.response.status).toBe(rest.status);
+        expect(error.code).toBe('INTERNAL_ERROR');
+        expect(error.message).toBe(rest.body.error);
+        expect(error).not.toHaveProperty('declaredCode');
+        expect(error).not.toHaveProperty('userMessage');
+        expect(error).not.toHaveProperty('details');
+        expect(await engine.find(CRASH_OBJECT, {})).toHaveLength(0);
     });
 
     it('a hook\'s own code travels as `declaredCode` beside the registered `code`', async () => {

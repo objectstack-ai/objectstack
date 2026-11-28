@@ -3315,9 +3315,11 @@ export class HttpDispatcher {
             // that registered code in its `refusals` catalogue, and
             // `isPermissionDeniedError` matches on the code, so that arm would
             // take the hook's refusal and answer it with a body `RestServer`
-            // does not send for it. Only a hook's reported refusal is taken
-            // here; a denial from anything else reaches that arm exactly as
-            // before.
+            // does not send for it. The same holds for a hook body that CRASHED
+            // with a code set on the native error: `RestServer` answers it the
+            // sanitised `500`, so this arm does too. Only a throw a hook body
+            // raised is taken here; a denial from anything else reaches that
+            // arm exactly as before.
             const routeObject = routeObjectFromPath(cleanPath);
             const hookRefusal = routeObject !== undefined ? dataRouteHookRefusalAnswer(e, routeObject) : undefined;
             if (hookRefusal) {

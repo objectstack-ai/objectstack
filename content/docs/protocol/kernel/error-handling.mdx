@@ -265,7 +265,8 @@ hook's own code rides beside it as `declaredCode`), sentence and `userMessage` (
 characters) are the flat door's, and `error.details` carries `object` and, for a reasons
 list, `refusals` with every line whole. Being the dispatcher's answer, it also carries
 `error.httpStatus`, and its `details.object` is the route's: the ⛔ line below is about
-this renderer and does not apply to it.
+this renderer and does not apply to it. A hook body that crashes is answered there too,
+as the flat door answers it: `500 INTERNAL_ERROR`, whatever code it carries.
 
 `UNIQUE_VIOLATION` is not the code the engine throws: its `DuplicateRecordError`, whose
 in-process `code` is `DUPLICATE_RECORD`, is answered as `UNIQUE_VIOLATION` here exactly
