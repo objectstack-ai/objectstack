@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 // cannot accept a call ObjectQL refuses (`check:engine-double-contract`).
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, hashSpec } from '@objectstack/metadata-core';
 import { ObjectSchema } from '@objectstack/spec/data';
+import { ALL_CONVERSIONS } from '@objectstack/spec';
 // The draft verdict reaches `import('@objectstack/lint')`; paid at collection,
 // never inside a case's clock (`check:test-source-alias`).
 import '@objectstack/lint';
@@ -172,6 +173,22 @@ function rewriteStoredDraft(rows: Map<string, Row>, name: string, body: unknown)
     row.checksum = hashSpec(body, 'object');
 }
 
+/** The ADR-0087 conversion whose retired object key the legacy-spelling CONTROL stores. */
+const LEGACY_SPELLING_CONVERSION = 'object-external-sharing-model-removed';
+
+/**
+ * The object keys conversion `id` strips, with the values its own fixture
+ * stores: the keys of the fixture's first `before` object that the matching
+ * `after` object no longer carries.
+ */
+function retiredObjectKeysOf(id: string): Record<string, unknown> {
+    const conversion = ALL_CONVERSIONS.find((c) => c.id === id);
+    if (!conversion) throw new Error(`no ADR-0087 conversion '${id}'`);
+    const [before] = (conversion.fixture.before as { objects: Array<Record<string, unknown>> }).objects;
+    const [after] = (conversion.fixture.after as { objects: Array<Record<string, unknown>> }).objects;
+    return Object.fromEntries(Object.entries(before ?? {}).filter(([key]) => !(after && key in after)));
+}
+
 const rowsFor = (rows: Map<string, Row>, name: string) =>
     Array.from(rows.values())
         .filter((r) => r.type === 'object' && r.name === name)
@@ -308,10 +325,14 @@ describe('[#35924] what the publish still promotes', () => {
         const { engine, rows } = makeStubEngine();
         const protocol = new ObjectStackProtocolImplementation(engine);
         const name = 'crm_ledger';
-        // `externalSharingModel` is tombstoned on the object shape (a live
-        // author is refused at parse) and stripped from a stored row by the
-        // chain (`object-external-sharing-model-removed`).
-        const legacy = { ...sealedLedger(name), externalSharingModel: 'private' };
+        // The retired spelling comes from the retirement kit's own fixture,
+        // never authored here: the keys the conversion's `before` object
+        // carries and its `after` object does not. This file authors no
+        // retired key, so the kit's tree-scoped absence pin keeps its radius.
+        // Its key is tombstoned on the object shape (a live author is refused
+        // at parse) and stripped from a stored row by the chain.
+        const legacy = { ...sealedLedger(name), ...retiredObjectKeysOf(LEGACY_SPELLING_CONVERSION) };
+        expect(Object.keys(retiredObjectKeysOf(LEGACY_SPELLING_CONVERSION))).not.toEqual([]);
         expect(ObjectSchema.safeParse(legacy).success).toBe(false);
         await stagePreRefinementDraft(protocol, rows, name, legacy);
 

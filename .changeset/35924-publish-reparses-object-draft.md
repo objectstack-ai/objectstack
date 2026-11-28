@@ -5,7 +5,7 @@
 
 fix(metadata-protocol)!: publishing an object draft judges it by the current ObjectSchema
 
-Clause-②: no
+Clause-②: no (narrowing)
 Metadata-protocol: narrowed
 
 <!-- adr-0087: registered publish-refuses-object-draft-the-current-schema-refuses -->
