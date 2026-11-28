@@ -184,7 +184,6 @@ export {
   // What `@objectstack/service-knowledge` contributes when it is mounted —
   // never registered by default (`builtinSettingsManifests`).
   knowledgeSettingsManifest,
-  knowledgeTestActionHandler,
   aiSettingsManifest,
   aiEmbedderSettingsSpecifiers,
   withAiEmbedderSection,

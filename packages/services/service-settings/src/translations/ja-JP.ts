@@ -590,9 +590,6 @@ export const jaJP: PlatformTranslationData = {
         chunk_target: { label: '目標チャンクサイズ（文字数）',
           help: 'ナレッジサービスがドキュメントを分割するときの、パッセージ 1 件あたりの最大文字数。ナレッジソース自身に設定したサイズが優先され、埋め込みモデルの入力上限によって小さくなることがあります。' },
       },
-      actions: {
-        test: { label: '接続テスト' },
-      },
     },
 
     lifecycle: {

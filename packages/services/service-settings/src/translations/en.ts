@@ -425,9 +425,6 @@ export const en: PlatformTranslationData = {
         chunk_target: { label: 'Target chunk size (chars)',
           help: 'Longest passage, in characters, when the knowledge service splits a document. A size set on a knowledge source itself wins; the embedding model\'s input limit can lower it.' },
       },
-      actions: {
-        test: { label: 'Test connection' },
-      },
     },
   },
 };
