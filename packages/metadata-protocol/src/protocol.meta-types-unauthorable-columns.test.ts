@@ -63,10 +63,10 @@ import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
 // below cannot accept a call ObjectQL itself refuses.
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate, type EngineFindOneQueryInput } from '@objectstack/metadata-core';
-import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema } from '@objectstack/spec/kernel';
+import { DEFAULT_METADATA_TYPE_REGISTRY, getMetadataTypeSchema, MetadataProtectionFields } from '@objectstack/spec/kernel';
 import { METADATA_FORM_REGISTRY } from '@objectstack/spec/system';
 import { ObjectStackProtocolImplementation } from './protocol.js';
-import { acceptsNothing } from './unauthorable-nodes.js';
+import { acceptsNothing, isPlatformStampedKey } from './unauthorable-nodes.js';
 // [#19295] The emitter's OWN erased-authoring hook — the baseline below is
 // derived with the code the server derives with, so the one difference this
 // pin reads is the strip's.
@@ -303,7 +303,7 @@ describe('#17502 — the served repeater row offers no column the parse door ref
         expect(offenders).toEqual([]);
     });
 
-    it('over-drop guard: the served payload is its derivation MINUS unsatisfiable nodes, nothing else', async () => {
+    it('over-drop guard: the served payload is its derivation MINUS unsatisfiable nodes and platform-stamped keys, nothing else', async () => {
         // ⚠️ This is the direction the blast-radius pin in
         // `protocol.meta-types-degenerate-derivation.test.ts` CANNOT see. Since
         // #17502 its baseline is `stripUnauthorableProperties(preFixDerivation(type))`,
@@ -332,9 +332,16 @@ describe('#17502 — the served repeater row offers no column the parse door ref
                 .map((before) => strippedDiff(before, after))
                 .find((d) => d.other.length === 0);
             if (!diff) { unexplained.push(type); continue; }
-            removedByType.set(type, diff.removed.map((r) => `${type}${r.path.slice(1)}`));
+            // [#35879] The strip's second class: an ADR-0010 key the platform
+            // stamps, dropped from a `properties` map. Judged by its position
+            // and name, never by its node — those nodes admit instances.
+            const stamped = (path: string) => {
+                const at = path.lastIndexOf('.properties.');
+                return at >= 0 && isPlatformStampedKey(path.slice(at + '.properties.'.length));
+            };
+            removedByType.set(type, diff.removed.filter((r) => !stamped(r.path)).map((r) => `${type}${r.path.slice(1)}`));
             for (const r of diff.removed) {
-                if (!acceptsNothing(r.node)) overDropped.push(`${type}${r.path.slice(1)}`);
+                if (!acceptsNothing(r.node) && !stamped(r.path)) overDropped.push(`${type}${r.path.slice(1)}`);
             }
         }
 
@@ -438,5 +445,116 @@ describe('#17502 — the removal is payload-only: every prescription channel sur
         for (const key of RETIRED_COMPONENT_COLUMNS) {
             expect(Object.keys(row)).toContain(key);
         }
+    });
+});
+
+/**
+ * [#35879] The served payload offers no key the platform stamps.
+ *
+ * Every metadata type spreads the ADR-0010 protection envelope, and so does
+ * every schema embedded in one, so the derivation lists `_lock`, `_lockReason`,
+ * `_lockSource`, `_provenance`, `_packageId`, `_packageVersion` and
+ * `_lockDocsUrl` among the properties Studio and the MCP draft door read as
+ * the offer. None of them is an author's to write: a package's loader and the
+ * registration stamp them (ADR-0010). Measured on `origin/main` at 7605e0c9
+ * before the strip: 308 such
+ * nodes (44 envelopes) across 33 served types, `object` at its root, inside its
+ * `fields` entries and in a `$defs` union, `view` in each union arm.
+ *
+ * The controls make each half fail on the tree before the fix: the pre-strip
+ * derivation must carry the envelope where this pins its absence, and every
+ * node the strip took must be an envelope node exactly as the envelope
+ * declares it, at a place the whole envelope is spread, so a property that
+ * merely shares a name is never what went missing.
+ */
+describe('[#35879] the served types offer no key the platform stamps', () => {
+    const STAMPED = Object.keys(MetadataProtectionFields);
+
+    /** Every `<path>.properties.<key>` in a document whose key is a stamped one, at any depth. */
+    function stampedPaths(node: unknown, path = '$'): string[] {
+        if (Array.isArray(node)) return node.flatMap((n, i) => stampedPaths(n, `${path}[${i}]`));
+        if (!node || typeof node !== 'object') return [];
+        const out: string[] = [];
+        for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+            if (key === 'default' || key === 'const' || key === 'enum' || key === 'examples') continue;
+            if (key === 'properties' && value && typeof value === 'object') {
+                for (const prop of Object.keys(value as Record<string, unknown>)) {
+                    if (STAMPED.includes(prop)) out.push(`${path}.properties.${prop}`);
+                }
+            }
+            out.push(...stampedPaths(value, `${path}.${key}`));
+        }
+        return out;
+    }
+
+    /** The node at a `$`-rooted dotted path with `[i]` indices, as `stampedPaths` spells it. */
+    function at(doc: unknown, path: string): unknown {
+        const steps = path.slice(1).split(/\.|(?=\[)/).filter(Boolean);
+        let node: any = doc;
+        for (const step of steps) {
+            const index = /^\[(\d+)\]$/.exec(step);
+            node = index ? node?.[Number(index[1])] : node?.[step];
+        }
+        return node;
+    }
+
+    it('control: the pre-strip derivation lists the whole envelope on `object` (root and field entry) and in every `view` arm', () => {
+        const object = preStripDerivation('object') as any;
+        expect(Object.keys(object.properties)).toEqual(expect.arrayContaining(STAMPED));
+        expect(Object.keys(object.properties.fields.additionalProperties.properties)).toEqual(expect.arrayContaining(STAMPED));
+        const view = preStripDerivation('view') as any;
+        const arms = stampedPaths(view).filter((p) => p.endsWith('.properties._lock'));
+        expect(arms.length).toBeGreaterThan(1);
+    });
+
+    it('dark: no served type lists a stamped key in any properties map, at any depth', async () => {
+        const served = await servedSchemas();
+        const offenders: string[] = [];
+        for (const type of SERVED_TYPES) offenders.push(...stampedPaths(served.get(type), type));
+        // ⛔ An entry here is a key the endpoint offers that only the platform writes.
+        expect(offenders).toEqual([]);
+    });
+
+    it('lit: `object` and `view` still serve the keys an author writes beside them', async () => {
+        const served = await servedSchemas();
+        const object = served.get('object') as any;
+        for (const key of ['name', 'label', 'fields', 'enable']) expect(Object.keys(object.properties)).toContain(key);
+        for (const key of ['type', 'label', 'required']) {
+            expect(Object.keys(object.properties.fields.additionalProperties.properties)).toContain(key);
+        }
+        const view = served.get('view') as any;
+        expect((view.anyOf as unknown[]).length).toBe(4);
+    });
+
+    it('over-drop guard: every stamped node the strip took is the envelope\'s own node, at a place the whole envelope is spread', () => {
+        // The envelope node each key derives to on its own: what a removed node
+        // must equal, so a same-named property of another shape is never taken.
+        const envelope = z.toJSONSchema(z.object(MetadataProtectionFields), { unrepresentable: 'any', override: markErasedAuthoringInput }) as any;
+        let measured = 0;
+        const foreign: string[] = [];
+        for (const type of SERVED_TYPES) {
+            for (const io of ['output', 'input'] as const) {
+                const before = preStripDerivation(type, io);
+                if (!before) continue;
+                for (const path of stampedPaths(before, '$')) {
+                    measured += 1;
+                    const key = path.slice(path.lastIndexOf('.') + 1);
+                    const parent = at(before, path.slice(0, path.lastIndexOf('.properties.'))) as any;
+                    const whole = STAMPED.every((k) => k in (parent?.properties ?? {}));
+                    if (!whole || JSON.stringify(parent.properties[key]) !== JSON.stringify(envelope.properties[key])) {
+                        foreign.push(`${type}(${io})${path.slice(1)}`);
+                    }
+                }
+            }
+        }
+        expect(measured, 'the sweep read the envelope somewhere').toBeGreaterThan(0);
+        // ⛔ An entry here is a property named like a stamp that is not the envelope's: it must not be withheld.
+        expect(foreign).toEqual([]);
+    });
+
+    it('the Zod shape still declares the envelope: a served body keeps re-parsing, nothing is removed upstream', () => {
+        const object = getMetadataTypeSchema('object') as z.ZodTypeAny;
+        const parsed = object.safeParse({ name: 'acct', label: 'Account', fields: {}, _packageId: 'com.acme.crm', _lock: 'none' });
+        expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
     });
 });
