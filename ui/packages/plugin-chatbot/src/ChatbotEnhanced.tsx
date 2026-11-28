@@ -372,7 +372,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     const sendTyped = React.useCallback(
       (text: string, files: File[] | undefined) => {
         // Remember the text so a rejected send can restore it (the composer's
-        // own form.reset clears the box optimistically). A fresh attempt also
+        // own submit clears its message field optimistically). A fresh attempt also
         // clears any prior send-failure restore guard.
         lastSubmittedRef.current = text;
         restoredErrorRef.current = null;
@@ -561,9 +561,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     );
 
     // Restore the composer text when a send was REJECTED before reaching the
-    // model (rate-limit / network — `notSent`). The composer's own form.reset
-    // clears the box optimistically and the optimistic user bubble was rolled
-    // back (useObjectChat), so without this the typed message would just vanish.
+    // model (rate-limit / network — `notSent`). The composer's own submit
+    // clears its message field optimistically and the optimistic user bubble
+    // was rolled back (useObjectChat), so without this the typed message would
+    // just vanish.
     // Runs once per failure and never clobbers text the user has since typed.
     React.useEffect(() => {
       if (!error || !isUnsentSendError(error)) return;
