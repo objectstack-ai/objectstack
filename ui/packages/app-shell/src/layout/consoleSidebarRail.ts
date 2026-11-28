@@ -329,13 +329,15 @@ export const SIDEBAR_FLOAT_OPEN_DELAY_MS = 200;
 export const SIDEBAR_FLOAT_CLOSE_DELAY_MS = 150;
 
 /**
- * The left-edge strip drawn while the sidebar is hidden, which floats the
- * menu: 8 px (`w-2`), the strip the sidebar primitive's own `SidebarRail`
- * leaves inside the viewport beside a collapsed `offcanvas` sidebar (its `w-4`
- * strip moved `-right-2` past the panel's edge). Fixed, above the page; the
- * call site places it where it places the sidebar.
+ * The edge strip drawn while the sidebar is hidden, which floats the menu:
+ * 8 px (`w-2`), the strip the sidebar primitive's own `SidebarRail` leaves
+ * inside the viewport beside a collapsed `offcanvas` sidebar (its `w-4` strip
+ * moved `-end-2` past the panel's edge). Fixed, above the page, at the
+ * window's inline start (`start-0`): the left edge, or the right edge in a
+ * right-to-left language, where the primitive draws the panel
+ * (objectstack#37914). The call site places it where it places the sidebar.
  */
-export const SIDEBAR_EDGE_ZONE = 'fixed left-0 z-40 w-2';
+export const SIDEBAR_EDGE_ZONE = 'fixed start-0 z-40 w-2';
 
 /**
  * The frame's class while the menu floats: the sidebar's gap (the in-flow box
@@ -349,18 +351,30 @@ export const RAIL_OVERLAY_FRAME_NO_GAP = '[&>[data-collapsible=offcanvas]>div:fi
 
 /**
  * The panel's classes while the menu floats: a card above the page, 8 px off
- * the window's left, top and bottom edges, with rounded corners, a border and
- * a shadow, and nothing dimmed under it (objectstack#36227, as Attio).
+ * the window's start (left, or right in a right-to-left language), top and
+ * bottom edges, with rounded corners, a border and a shadow, and nothing
+ * dimmed under it (objectstack#36227, as Attio). Logical like the primitive's
+ * own `start-0` (objectstack#37914), which this replaces.
  */
 export const RAIL_OVERLAY_PANEL =
-  'z-40 inset-y-2 left-2 h-auto overflow-hidden rounded-lg border border-sidebar-border shadow-xl';
+  'z-40 inset-y-2 start-2 h-auto overflow-hidden rounded-lg border border-sidebar-border shadow-xl';
 
 /**
  * The panel's classes while the sidebar is hidden: the float's card, parked
- * past the window's left edge by its own width and 2 rem more, so its shadow
+ * past the window's start edge by its own width and 2 rem more, so its shadow
  * does not show at the edge. The card keeps its shape as it slides in and out.
  */
-export const RAIL_HIDDEN_PANEL = `${RAIL_OVERLAY_PANEL} group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1-2rem)]`;
+export const RAIL_HIDDEN_PANEL = `${RAIL_OVERLAY_PANEL} group-data-[state=collapsed]:group-data-[collapsible=offcanvas]:start-[calc(var(--sidebar-width)*-1-2rem)]`;
+
+/**
+ * Whether `el` is laid out right to left: the nearest `dir` above it (the i18n
+ * provider sets it on `<html>`) says `rtl`. The sidebar then sits at the
+ * window's right edge, so a pointer measured in `clientX` reads the other way
+ * round (objectstack#37914).
+ */
+export function isRightToLeft(el: Element | null | undefined): boolean {
+  return el?.closest('[dir]')?.getAttribute('dir') === 'rtl';
+}
 
 /**
  * The frame's class while the reader drags the sidebar's edge: the gap and the
@@ -400,8 +414,12 @@ function pointerOnFloat(root: HTMLElement | null, point: { x: number; y: number 
   if (!panel || !point) return false;
   const box = panel.getBoundingClientRect();
   if (box.width === 0 || box.height === 0) return false;
-  const margin = Math.max(0, box.left);
-  return point.x < box.right && point.y >= box.top - margin && point.y < box.bottom + margin;
+  // The card's margin from the window's start edge: the left one, or the
+  // right one in a right-to-left language (objectstack#37914).
+  const rtl = isRightToLeft(panel);
+  const margin = Math.max(0, rtl ? window.innerWidth - box.right : box.left);
+  const onCardSide = rtl ? point.x >= box.left : point.x < box.right;
+  return onCardSide && point.y >= box.top - margin && point.y < box.bottom + margin;
 }
 
 /**

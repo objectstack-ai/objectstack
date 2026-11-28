@@ -130,9 +130,10 @@ export function EmptyConversation({
             )}
             data-testid="empty-conversation-suggestions"
           >
-            {suggestions.map((suggestion) => (
+            {/* Keyed by position too: an entry may declare the same question twice, and both draw. */}
+            {suggestions.map((suggestion, index) => (
               <Button
-                key={suggestion.text}
+                key={`${index}:${suggestion.text}`}
                 type="button"
                 variant="outline"
                 className={cn(

@@ -25,7 +25,8 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   2. sys_platform_setting                    (source='global')
  *   3. sys_setting WHERE scope='tenant'        (source='tenant')
  *   4. sys_setting WHERE scope='user'          (source='user')
- *   5. manifest specifier.default              (source='default')
+ *   5. deployment-declared default, else
+ *      manifest specifier.default              (source='default')
  *
  * Encryption: rows with `encrypted=true` store ciphertext in `value_enc`
  * and leave `value` null. The plain value is never written to audit log

@@ -4644,6 +4644,17 @@ export const ListView = React.forwardRef<ListViewHandle, ListViewProps>(({
           // grid owns.
           addSpeculative(declaredNameField(objectDef));
 
+          // [objectstack#37891] The object's `highlightFields` (ADR-0085). On
+          // a phone the grid draws each row this fetch hands it as a card
+          // whose amount and subtitle are those fields, in that order, whether
+          // or not a column shows them. Fetched, never drawn as columns; asked
+          // whatever the viewport, like the name field above. Through
+          // `addSpeculative`, like every binding here. `ObjectGrid`'s
+          // `getSelectFields` carries the same arm for the fetch a grouped
+          // grid owns.
+          const highlights = (objectDef as { highlightFields?: unknown } | undefined)?.highlightFields;
+          if (Array.isArray(highlights)) for (const f of highlights) addSpeculative(f);
+
           for (const f of collectPredicateFieldRefs(listViewPredicates({
             conditionalFormatting: schema.conditionalFormatting as unknown[] | undefined,
             /**

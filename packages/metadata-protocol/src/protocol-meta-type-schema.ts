@@ -10,7 +10,9 @@
 // [#17502] The served JSON Schema publishes what an author MAY write, so a
 // property no instance can satisfy — a `retiredKey()` tombstone, rendered
 // `{ not: {} }` — is dropped from it. See the module header for the channels
-// that keep carrying the retirement's prescription.
+// that keep carrying the retirement's prescription. [#35879] So is every key
+// the platform stamps (the ADR-0010 protection envelope): declared so a served
+// body re-parses, never an author's to write.
 import { stripUnauthorableProperties } from './unauthorable-nodes.js';
 // [#19295] The output derivation of a `ZodPipe` erases the arm's own input
 // type, so an authoring arm that accepts a bare string is served as the

@@ -17,7 +17,8 @@ describe('describeUnservedKnowledgeSources — items with no knowledge service (
     const line = describeUnservedKnowledgeSources(['faq'], false)!;
     expect(line).toContain("1 knowledge_source item ('faq')");
     expect(line).toContain("no 'knowledge' service is registered");
-    expect(line).toContain('it is loaded, indexed or searched');
+    expect(line).toContain('it is not loaded, indexed or searched');
+    expect(line).not.toContain('it is loaded');
     expect(line).toContain('@objectstack/service-knowledge');
     expect(line).toContain('or remove the item.');
     // The remedy an author's save on such a deployment is refused with: the token, then a restart.

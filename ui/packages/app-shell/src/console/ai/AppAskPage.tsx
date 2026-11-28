@@ -15,7 +15,12 @@
  * records `metadata.activePackageId`, and the page's address carries
  * `?c=ID` from then on, so a reload restores it. A `?c=` naming a
  * conversation that is not the caller's, or not this app's, opens the home
- * state: no error, and nothing of it is shown.
+ * state: no error, and nothing of it is shown. Only a definite answer does: a
+ * check that fails (the network, a 5xx) keeps `?c=` and offers a retry.
+ *
+ * An app with no package (`_packageId`) has nowhere to keep the page's
+ * conversations, so the page says so instead of drawing a question box that
+ * cannot start one.
  *
  * Below the question box the home state lists this app's recent
  * conversations: of the caller's newest list page, those this page created
@@ -41,7 +46,7 @@ import * as React from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowUp, Plus, Sparkles } from 'lucide-react';
 import { useAuth } from '@object-ui/auth';
-import { Badge, Button, Textarea } from '@object-ui/components';
+import { Badge, Button, Empty, EmptyDescription, EmptyTitle, Textarea } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { resolveNavItemLabel } from '@object-ui/layout';
 import type { NavigationItem } from '@object-ui/types';
@@ -60,7 +65,7 @@ import {
   recentAskPageConversations,
 } from './appAskPageModel.js';
 import { useChatConversation, type HydratedUIMessage } from '../../hooks/useChatConversation.js';
-import { fetchConversation } from '../../hooks/useChatConversation.js';
+import { fetchConversation, type ServerConversation } from '../../hooks/useChatConversation.js';
 import { useAiSurfaceEnabled } from '../../hooks/useAiSurface.js';
 import { useConversationList } from '../../hooks/useConversationList.js';
 import { EmptyConversation, EmptyConversationGreeting, RecentConversationList } from './EmptyConversation.js';
@@ -73,8 +78,17 @@ import { PageHeader } from '../../layout/PageHeader.js';
 
 const EMPTY_INITIAL_MESSAGES: HydratedUIMessage[] = [];
 
-/** What the page knows about the conversation its address names. */
-type RequestedVerdict = { id: string; verdict: 'checking' | 'ours' | 'foreign' };
+/**
+ * What the page knows about the conversation its address names. `failed`: the
+ * check could not be answered (not a 403 or 404), so it is neither. `record`:
+ * the check's read of an `ours` conversation, which the thread hydrates from,
+ * so opening it reads its history once.
+ */
+type RequestedVerdict = {
+  id: string;
+  verdict: 'checking' | 'ours' | 'foreign' | 'failed';
+  record?: ServerConversation;
+};
 
 export function AppAskPage() {
   const { t, language } = useObjectTranslation();
@@ -130,16 +144,20 @@ export function AppAskPage() {
     if (!checking) return;
     let cancelled = false;
     void (async () => {
-      let ours = false;
+      let next: RequestedVerdict = { id: checking, verdict: 'foreign' };
       if (packageId) {
         try {
-          ours = conversationBelongsToAskPage(await fetchConversation(apiBase, checking), packageId);
+          // `null` is the server's definite "gone, or not the caller's" (404, 403).
+          const conversation = await fetchConversation(apiBase, checking);
+          if (conversation && conversationBelongsToAskPage(conversation, packageId)) {
+            next = { id: checking, verdict: 'ours', record: conversation };
+          }
         } catch {
-          ours = false;
+          next = { id: checking, verdict: 'failed' };
         }
       }
       if (cancelled) return;
-      setRequested((prev) => (prev?.id === checking ? { id: checking, verdict: ours ? 'ours' : 'foreign' } : prev));
+      setRequested((prev) => (prev?.id === checking ? next : prev));
     })();
     return () => {
       cancelled = true;
@@ -159,6 +177,10 @@ export function AppAskPage() {
     );
   }, [foreign, setSearchParams]);
   const activeId = requested?.verdict === 'ours' ? requested.id : undefined;
+  const restoreFailed = requested?.verdict === 'failed';
+  const retryRestore = React.useCallback(() => {
+    setRequested((prev) => (prev?.verdict === 'failed' ? { id: prev.id, verdict: 'checking' } : prev));
+  }, []);
 
   // ── The page's thread ───────────────────────────────────────────────────
   // `started`: the first question was asked on the home state, so the pane is
@@ -181,6 +203,7 @@ export function AppAskPage() {
     scope,
     apiBase,
     activeId,
+    activeRecord: requested?.verdict === 'ours' ? requested.record : undefined,
     // The home state is a new question: never the last cached thread.
     forceNew: !activeId,
     createMetadata,
@@ -249,8 +272,35 @@ export function AppAskPage() {
         t={t}
       />
     );
+  } else if (!surface.isLoading && !packageId) {
+    body = (
+      <AskNotice
+        title={t('console.ai.askPage.noPackageTitle', { defaultValue: "This app can't keep conversations here" })}
+        description={t('console.ai.askPage.noPackageDescription', {
+          defaultValue: "This page keeps its conversations with the app's package, and this app isn't part of one.",
+        })}
+        testId="app-ask-page-no-package"
+      />
+    );
   } else if (surface.isLoading || restoring) {
     body = <div className="flex-1" data-testid="app-ask-page-loading" aria-busy="true" />;
+  } else if (restoreFailed) {
+    body = (
+      <AskNotice
+        title={t('console.ai.askPage.restoreFailedTitle', { defaultValue: "Couldn't open this conversation" })}
+        description={t('console.ai.askPage.restoreFailedDescription', {
+          defaultValue: "It couldn't be read just now. Try again, or ask a new question.",
+        })}
+        testId="app-ask-page-restore-failed"
+      >
+        <Button variant="outline" onClick={retryRestore} data-testid="app-ask-page-restore-retry">
+          {t('console.ai.askPage.restoreRetry', { defaultValue: 'Try again' })}
+        </Button>
+        <Button variant="ghost" onClick={startOver} data-testid="app-ask-page-restore-new">
+          {t('console.ai.newConversation', { defaultValue: 'New conversation' })}
+        </Button>
+      </AskNotice>
+    );
   } else if (inConversation) {
     body = (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="app-ask-page-conversation">
@@ -317,6 +367,29 @@ export function AppAskPage() {
 }
 
 function noop() {}
+
+/** A state the page explains in place of its question box: a title, a sentence, and its ways on. */
+function AskNotice({
+  title,
+  description,
+  testId,
+  children,
+}: {
+  title: string;
+  description: string;
+  testId: string;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className="flex flex-1 items-center justify-center p-6" data-testid={testId}>
+      <Empty>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+        {children ? <div className="mt-6 flex flex-col items-center gap-3 sm:flex-row">{children}</div> : null}
+      </Empty>
+    </div>
+  );
+}
 
 interface AskHomeProps {
   heading: React.ReactNode;
@@ -407,7 +480,15 @@ interface RecentAskConversationsProps {
  */
 function RecentAskConversations({ userId, apiBase, packageId, onOpen }: RecentAskConversationsProps) {
   const { t } = useObjectTranslation();
-  const { conversations, isLoading, error } = useConversationList({ userId, apiBase, limit: ASK_RECENT_FETCH_LIMIT });
+  // Only the rows listed here read their missing previews: never one detail
+  // read per untitled row of the whole page.
+  const { conversations, isLoading, error } = useConversationList({
+    userId,
+    apiBase,
+    limit: ASK_RECENT_FETCH_LIMIT,
+    refreshKey: packageId,
+    selectBackfillRows: (rows) => recentAskPageConversations(rows, packageId),
+  });
   const recent = React.useMemo(() => recentAskPageConversations(conversations, packageId), [conversations, packageId]);
   // A list that has not answered, or failed, draws nothing: never an empty state it cannot vouch for.
   if (isLoading || error) return null;
