@@ -28,7 +28,7 @@ import { DRAFT_REVIEW_PART_TYPE } from '@objectstack/spec/ai';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
 import { extractDraftReview, storedAnswerData, uiMessageToChatMessage } from '../mapMessages';
 import { STORED_ANSWER_DATA_PARTS } from '../toolResultParsers';
-import { groupDraftsByPackage } from '../chat/DraftReviewCard';
+import { groupDraftsByPackage } from '../chat/draftReviewGroups';
 
 afterEach(() => {
   cleanup();

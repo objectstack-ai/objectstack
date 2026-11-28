@@ -25,6 +25,7 @@ import { Badge, cn } from '@object-ui/components';
 import { useObjectTranslation } from '@object-ui/i18n';
 import { FileClockIcon } from 'lucide-react';
 import type { DraftReviewItemParsed, DraftReviewListParsed } from '@objectstack/spec/ai';
+import { groupDraftsByPackage } from './draftReviewGroups';
 
 export interface DraftReviewCardProps {
   /** The turn's draft review list, as `extractDraftReview` read it. */
@@ -38,24 +39,6 @@ export interface DraftReviewCardProps {
   /** The anchor href for a review route, e.g. with the router's basename joined. Absent, the path itself. */
   reviewLinkHref?: (path: string) => string;
   className?: string;
-}
-
-/** One package's drafts, in save order, with the package's Changes route. */
-interface PackageGroup {
-  name: string;
-  changes: string;
-  drafts: DraftReviewItemParsed[];
-}
-
-/** Group the rows by package, packages in the order their first draft was saved. */
-export function groupDraftsByPackage(drafts: readonly DraftReviewItemParsed[]): PackageGroup[] {
-  const groups = new Map<string, PackageGroup>();
-  for (const draft of drafts) {
-    const group = groups.get(draft.package);
-    if (group) group.drafts.push(draft);
-    else groups.set(draft.package, { name: draft.package, changes: draft.review.changes, drafts: [draft] });
-  }
-  return [...groups.values()];
 }
 
 /** A plain left click goes through the host's navigation; a modified or middle click keeps the browser's own. */
