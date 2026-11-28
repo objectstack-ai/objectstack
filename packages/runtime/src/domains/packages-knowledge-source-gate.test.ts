@@ -545,5 +545,3 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
         });
     }
 });
-    }
-});
