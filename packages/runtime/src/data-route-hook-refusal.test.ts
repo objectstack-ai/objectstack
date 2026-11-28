@@ -5,7 +5,8 @@
  * write as `RestServer`'s `/data` routes answer it (`mapDataError`): the same
  * status, `code`, `declaredCode`, sentence, `userMessage` (cut at 500
  * characters) and `details.refusals` (whole), whether the hook refused with a
- * code of its own or a registered one.
+ * code of its own or a registered one; and a free-text throw with no code as
+ * those routes' `400 HOOK_ABORTED`.
  *
  * ## The rig
  *
@@ -48,6 +49,8 @@ const CASES = [
     // A registered code.
     { code: 'RESOURCE_CONFLICT', object: 'booking_registered_38232' },
 ] as const;
+/** A hook with no catalogue that throws free text: no code, no status. */
+const UNDECLARED_OBJECT = 'booking_undeclared_38232';
 
 /** A sandboxed hook that refuses every insert with a three-reason list under `code`. */
 function refusingHook(code: string, object: string) {
@@ -104,6 +107,17 @@ beforeAll(async () => {
         } as any, TEST_PACKAGE_ID);
         engine.registerHook('beforeInsert', bind(refusingHook(code, object) as any)!, { object });
     }
+    engine.registry.registerObject({
+        name: UNDECLARED_OBJECT,
+        label: 'Booking',
+        fields: { name: { name: 'name', type: 'text' as const, label: 'Name' } },
+    } as any, TEST_PACKAGE_ID);
+    engine.registerHook('beforeInsert', bind({
+        name: 'refuse_free_text',
+        object: UNDECLARED_OBJECT,
+        events: ['beforeInsert'],
+        body: { language: 'js', source: "throw new Error('This slot is taken.');", capabilities: [] },
+    } as any)!, { object: UNDECLARED_OBJECT });
     await engine.syncSchemas();
     await installDefaultOrganization(engine);
     protocol = new ObjectStackProtocolImplementation(engine as any);
@@ -166,6 +180,20 @@ describe('[#38232] `dispatch()` answers a hook refusal on `/data` as the REST ro
             expect(await engine.find(object, {})).toHaveLength(0);
         });
     }
+
+    it('a hook that throws free text, declaring no code or status: the REST routes\' `400 HOOK_ABORTED` and its sentence', async () => {
+        const result: any = await post(UNDECLARED_OBJECT, { name: 'clash' });
+        const rest = await restAnswer(UNDECLARED_OBJECT, { name: 'clash' });
+        expect(result?.handled).toBe(true);
+        const error = result.response.body.error;
+        expect(rest.status).toBe(400);
+        expect(rest.body.code).toBe('HOOK_ABORTED');
+        expect(result.response.status).toBe(rest.status);
+        expect(error.code).toBe(rest.body.code);
+        expect(error.message).toBe(rest.body.error);
+        expect(error.message).toBe('This slot is taken.');
+        expect(await engine.find(UNDECLARED_OBJECT, {})).toHaveLength(0);
+    });
 
     it('a hook\'s own code travels as `declaredCode` beside the registered `code`', async () => {
         const result: any = await post(CASES[0].object, { name: 'clash' });
