@@ -349,8 +349,9 @@ describe('RelatedList row fetch — the derived-columns boundary (objectui#10186
  * column shows them, so the rows this list reads must carry them. Through the
  * name field's gates: declared, readable, not redacted.
  *
- *   a declared, readable highlighted field no column shows is requested   RED on the base tree
- *   a highlighted field FLS denies is not requested                       GREEN
+ * Directions on the base tree, measured by reverting the fix:
+ *   a declared, readable highlighted field no column shows is requested   RED
+ *   a highlighted field FLS denies is not requested                       RED  (the readable one is missing too)
  *   control: no highlightFields keeps the projection byte-identical      GREEN
  */
 describe('RelatedList row fetch — the child object\'s highlightFields ride along (objectstack#37891)', () => {

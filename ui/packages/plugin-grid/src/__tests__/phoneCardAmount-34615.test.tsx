@@ -273,13 +273,14 @@ describe('the phone card amount slot takes a formula or summary that draws as mo
  * total_price`: on the base tree its card read `1 · 2` with the unit price as
  * the amount, whatever `highlightFields` said.
  *
- * ── Directions on the base tree (predicted before the first run) ─────────
+ * ── Directions on the base tree (measured by reverting the fix) ──────────
  *   amount is the highlighted total, not the unit price                RED
  *   subtitle is the labelled highlighted parts, in order               RED
+ *   a text part is drawn bare                                          RED
  *   a highlighted field no column shows is drawn and fetched           RED
  *   an empty highlighted part is dropped                               RED
+ *   control: a masked highlighted field is neither amount nor part     RED  (its amount half: the base tree shows the unit price)
  *   control: no highlightFields keeps `1 · 2`, unit price, no labels   GREEN
- *   control: a masked highlighted field is neither amount nor part     GREEN
  */
 describe('the phone card follows the object\'s highlightFields (objectstack#37891)', () => {
   const LINE_OBJECT = 'crm_sales_order_line_37891';

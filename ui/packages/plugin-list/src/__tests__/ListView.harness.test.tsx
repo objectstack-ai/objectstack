@@ -3121,7 +3121,8 @@ describe('ListView.nameFieldSelect-13116', () => {
  * that owns its fetch projects through `ObjectGrid`'s `getSelectFields`,
  * pinned in plugin-grid's `phoneCardAmount-34615.test.tsx`.
  *
- *   a highlighted field no column shows is in `$select`, not drawn    RED on the base tree
+ * Directions on the base tree, measured by reverting the fix:
+ *   a highlighted field no column shows is in `$select`, not drawn    RED
  *   control: an object with no highlightFields sends the same select GREEN
  */
 describe('ListView.highlightFieldsSelect-37891', () => {
