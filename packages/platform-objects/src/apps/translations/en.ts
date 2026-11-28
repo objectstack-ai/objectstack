@@ -147,6 +147,7 @@ export const en: TranslationData = {
         nav_settings_storage: { label: 'File Storage' },
         nav_settings_ai: { label: 'AI & Embedder' },
         nav_settings_knowledge: { label: 'Knowledge' },
+        nav_knowledge_sync_states: { label: 'Knowledge Sync Status' },
         nav_settings_lifecycle: { label: 'Data Lifecycle' },
         nav_recycle_bin: { label: 'Recycle Bin' },
         nav_public_forms: { label: 'Public Forms' },

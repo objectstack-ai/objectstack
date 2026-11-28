@@ -4664,6 +4664,111 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "Estado de sincronização de conhecimento",
+    pluralLabel: "Estados de sincronização de conhecimento",
+    description: "Uma linha por fonte de conhecimento: seu último build e suas sincronizações de registros que falharam e ainda não foram reparadas. Gravada apenas pelo serviço de conhecimento.",
+    fields: {
+      id: {
+        label: "Chave da fonte",
+        help: "A chave sob a qual o índice da fonte é mantido no seu armazenamento. Uma linha por fonte."
+      },
+      source: {
+        label: "Fonte",
+        help: "A fonte como os chamadores a nomeiam: NAMESPACE-NAME para a fonte de um pacote; caso contrário, o nome simples."
+      },
+      package_id: {
+        label: "Pacote",
+        help: "O pacote que contém a fonte. Vazio para uma fonte que não pertence a nenhum pacote."
+      },
+      adapter: {
+        label: "Adaptador",
+        help: "O armazenamento onde fica o índice da fonte. Vazio quando a fonte não nomeia nenhum e nenhum pôde ser atribuído."
+      },
+      object: {
+        label: "Objeto",
+        help: "O objeto cujos registros a fonte indexa."
+      },
+      build_id: {
+        label: "ID do build",
+        help: "Identifica o último build. Um build só grava seu progresso e seu fim enquanto este valor ainda o identifica."
+      },
+      build_trigger: {
+        label: "Iniciado por",
+        help: "Quem iniciou o último build: a inicialização do servidor, um recarregamento da fonte, um rebuild de um administrador ou a reconciliação.",
+        options: {
+          boot: "Inicialização",
+          reload: "Recarregamento",
+          operator: "Administrador",
+          reconcile: "Reconciliação"
+        }
+      },
+      build_status: {
+        label: "Status do build",
+        help: "Como o último build terminou. Em qualquer status exceto Concluído, o índice mantém o que tinha e a próxima reconciliação, inicialização ou rebuild constrói novamente. Vazio até o primeiro build.",
+        options: {
+          running: "Em execução",
+          done: "Concluído",
+          failed: "Falhou",
+          lease_lost: "Concessão perdida",
+          timed_out: "Tempo esgotado",
+          interrupted: "Interrompido"
+        }
+      },
+      build_started_at: {
+        label: "Build iniciado em"
+      },
+      build_finished_at: {
+        label: "Build concluído em"
+      },
+      build_discovered: {
+        label: "Linhas lidas",
+        help: "Linhas que o último build leu."
+      },
+      build_indexed: {
+        label: "Documentos gravados",
+        help: "Documentos que o último build gravou no índice (cada um enviado ao provedor de embeddings)."
+      },
+      build_skipped: {
+        label: "Inalterados",
+        help: "Documentos que o índice já tinha inalterados e, portanto, não foram gravados de novo."
+      },
+      build_purged: {
+        label: "Removidos",
+        help: "Documentos removidos porque a linha deles sumiu ou não corresponde mais. Vazio quando o build não removeu nada."
+      },
+      build_failed: {
+        label: "Não indexáveis",
+        help: "Documentos que não podem ser indexados com a divisão da fonte, removidos do índice."
+      },
+      build_message: {
+        label: "Mensagem do build",
+        help: "A frase da plataforma sobre o último build. Nunca o texto próprio de um provedor de embeddings ou de um armazenamento: ele está no log do servidor do nó que executou o build."
+      },
+      failure_count: {
+        label: "Sincronizações com falha",
+        help: "Sincronizações de registros que esgotaram todas as tentativas e aguardam como mensagens mortas na fila de sincronização de registros, ainda não reparadas. Uma reconciliação da fonte que é concluída limpa as que falharam antes de ela começar."
+      },
+      first_failed_at: {
+        label: "Primeira falha em",
+        help: "Quando ocorreu a falha mais antiga contada acima."
+      },
+      last_failed_at: {
+        label: "Última falha em",
+        help: "Quando ocorreu a falha mais recente contada acima."
+      },
+      last_error: {
+        label: "Último erro",
+        help: "A frase da plataforma sobre a falha mais recente: o registro, as tentativas e o tipo de erro. Nunca um valor de campo de um registro, nem o texto próprio do provedor."
+      },
+      created_at: {
+        label: "Criado em"
+      },
+      updated_at: {
+        label: "Atualizado em"
+      }
+    }
+  },
   sys_task: {
     label: "Tarefa",
     pluralLabel: "Tarefas",

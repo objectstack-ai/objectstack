@@ -198,6 +198,7 @@ export const frGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_job.fields.schedule_expression.label": "cd1b52ad1588075e",
   "objects.sys_job.fields.schedule_type.options.cron": "fd48d0e2cd59cab2",
   "objects.sys_job_queue.fields.status.options.dlq": "4aedfea31f7ea528",
+  "objects.sys_knowledge_sync_state.fields.source.label": "8fe786e8e29c8cec",
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata.fields.managed_by.options.package": "1c8c6168730324a3",
   "objects.sys_metadata.fields.source.label": "8fe786e8e29c8cec",

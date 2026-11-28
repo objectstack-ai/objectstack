@@ -4664,6 +4664,111 @@ export const frObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "État de synchronisation des connaissances",
+    pluralLabel: "États de synchronisation des connaissances",
+    description: "Une ligne par source de connaissances : sa dernière construction et ses synchronisations d'enregistrements en échec, pas encore réparées. Écrite uniquement par le service de connaissances.",
+    fields: {
+      id: {
+        label: "Clé de la source",
+        help: "La clé sous laquelle l'index de la source est conservé dans son stockage. Une ligne par source."
+      },
+      source: {
+        label: "Source",
+        help: "La source telle que les appelants la nomment : NAMESPACE-NAME pour la source d'un paquet, le nom seul sinon."
+      },
+      package_id: {
+        label: "Paquet",
+        help: "Le paquet qui contient la source. Vide pour une source qui n'appartient à aucun paquet."
+      },
+      adapter: {
+        label: "Adaptateur",
+        help: "Le stockage où se trouve l'index de la source. Vide quand la source n'en nomme aucun et qu'aucun n'a pu être attribué."
+      },
+      object: {
+        label: "Objet",
+        help: "L'objet dont la source indexe les enregistrements."
+      },
+      build_id: {
+        label: "ID de construction",
+        help: "Désigne la dernière construction. Une construction n'écrit sa progression et sa fin que tant que cette valeur la désigne encore."
+      },
+      build_trigger: {
+        label: "Lancée par",
+        help: "Qui a lancé la dernière construction : le démarrage du serveur, un rechargement de la source, une reconstruction par un administrateur ou le rapprochement.",
+        options: {
+          boot: "Démarrage",
+          reload: "Rechargement",
+          operator: "Administrateur",
+          reconcile: "Rapprochement"
+        }
+      },
+      build_status: {
+        label: "Statut de construction",
+        help: "Comment la dernière construction s'est terminée. Pour tout statut autre que Terminée, l'index garde ce qu'il contenait et le prochain rapprochement, démarrage ou reconstruction construit à nouveau. Vide jusqu'à la première construction.",
+        options: {
+          running: "En cours",
+          done: "Terminée",
+          failed: "Échec",
+          lease_lost: "Bail perdu",
+          timed_out: "Délai dépassé",
+          interrupted: "Interrompue"
+        }
+      },
+      build_started_at: {
+        label: "Construction commencée le"
+      },
+      build_finished_at: {
+        label: "Construction terminée le"
+      },
+      build_discovered: {
+        label: "Lignes lues",
+        help: "Lignes lues par la dernière construction."
+      },
+      build_indexed: {
+        label: "Documents écrits",
+        help: "Documents que la dernière construction a écrits dans l'index (chacun envoyé au fournisseur d'embeddings)."
+      },
+      build_skipped: {
+        label: "Inchangés",
+        help: "Documents que l'index contenait déjà inchangés, donc non réécrits."
+      },
+      build_purged: {
+        label: "Purgés",
+        help: "Documents supprimés parce que leur ligne a disparu ou ne correspond plus. Vide quand la construction n'a rien purgé."
+      },
+      build_failed: {
+        label: "Non indexables",
+        help: "Documents qui ne peuvent pas être indexés avec le découpage de la source, supprimés de l'index."
+      },
+      build_message: {
+        label: "Message de construction",
+        help: "La phrase de la plateforme pour la dernière construction. Jamais le texte propre d'un fournisseur d'embeddings ou d'un stockage : celui-ci se trouve dans le journal du serveur du nœud qui a exécuté la construction."
+      },
+      failure_count: {
+        label: "Synchronisations en échec",
+        help: "Synchronisations d'enregistrements qui ont épuisé toutes leurs tentatives et attendent comme lettres mortes dans la file de synchronisation des enregistrements, pas encore réparées. Un rapprochement de la source qui se termine efface celles qui ont échoué avant son début."
+      },
+      first_failed_at: {
+        label: "Premier échec le",
+        help: "Date du plus ancien échec compté ci-dessus."
+      },
+      last_failed_at: {
+        label: "Dernier échec le",
+        help: "Date du plus récent échec compté ci-dessus."
+      },
+      last_error: {
+        label: "Dernière erreur",
+        help: "La phrase de la plateforme pour l'échec le plus récent : l'enregistrement, les tentatives et le type d'erreur. Jamais une valeur de champ d'un enregistrement, ni le texte propre du fournisseur."
+      },
+      created_at: {
+        label: "Créé le"
+      },
+      updated_at: {
+        label: "Mis à jour le"
+      }
+    }
+  },
   sys_task: {
     label: "Tâche",
     pluralLabel: "Tâches",

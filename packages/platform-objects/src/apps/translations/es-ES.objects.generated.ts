@@ -4664,6 +4664,111 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "Estado de sincronización de conocimiento",
+    pluralLabel: "Estados de sincronización de conocimiento",
+    description: "Una fila por fuente de conocimiento: su última compilación y sus sincronizaciones de registros fallidas y aún no reparadas. Solo la escribe el servicio de conocimiento.",
+    fields: {
+      id: {
+        label: "Clave de la fuente",
+        help: "La clave con la que se guarda el índice de la fuente en su almacén. Una fila por fuente."
+      },
+      source: {
+        label: "Fuente",
+        help: "La fuente tal como la nombran los llamadores: NAMESPACE-NAME para la fuente de un paquete; si no, el nombre sin más."
+      },
+      package_id: {
+        label: "Paquete",
+        help: "El paquete que contiene la fuente. Vacío para una fuente que no pertenece a ningún paquete."
+      },
+      adapter: {
+        label: "Adaptador",
+        help: "El almacén donde está el índice de la fuente. Vacío cuando la fuente no nombra ninguno y no se pudo asignar uno."
+      },
+      object: {
+        label: "Objeto",
+        help: "El objeto cuyos registros indexa la fuente."
+      },
+      build_id: {
+        label: "ID de compilación",
+        help: "Identifica la última compilación. Una compilación solo escribe su progreso y su final mientras este valor la siga identificando."
+      },
+      build_trigger: {
+        label: "Iniciada por",
+        help: "Quién inició la última compilación: el arranque del servidor, una recarga de la fuente, una recompilación de un administrador o la conciliación.",
+        options: {
+          boot: "Arranque",
+          reload: "Recarga",
+          operator: "Administrador",
+          reconcile: "Conciliación"
+        }
+      },
+      build_status: {
+        label: "Estado de compilación",
+        help: "Cómo terminó la última compilación. Con cualquier estado salvo Completada, el índice conserva lo que tenía y la próxima conciliación, arranque o recompilación vuelve a compilar. Vacío hasta la primera compilación.",
+        options: {
+          running: "En curso",
+          done: "Completada",
+          failed: "Fallida",
+          lease_lost: "Concesión perdida",
+          timed_out: "Tiempo agotado",
+          interrupted: "Interrumpida"
+        }
+      },
+      build_started_at: {
+        label: "Compilación iniciada el"
+      },
+      build_finished_at: {
+        label: "Compilación finalizada el"
+      },
+      build_discovered: {
+        label: "Filas leídas",
+        help: "Filas que leyó la última compilación."
+      },
+      build_indexed: {
+        label: "Documentos escritos",
+        help: "Documentos que la última compilación escribió en el índice (cada uno enviado al proveedor de embeddings)."
+      },
+      build_skipped: {
+        label: "Sin cambios",
+        help: "Documentos que el índice ya tenía sin cambios, por lo que no se volvieron a escribir."
+      },
+      build_purged: {
+        label: "Purgados",
+        help: "Documentos eliminados porque su fila ya no existe o ya no coincide. Vacío cuando la compilación no purgó nada."
+      },
+      build_failed: {
+        label: "No indexables",
+        help: "Documentos que no se pueden indexar con la división de la fuente, eliminados del índice."
+      },
+      build_message: {
+        label: "Mensaje de compilación",
+        help: "La frase de la plataforma sobre la última compilación. Nunca el texto propio de un proveedor de embeddings o de un almacén: ese está en el registro del servidor del nodo que ejecutó la compilación."
+      },
+      failure_count: {
+        label: "Sincronizaciones fallidas",
+        help: "Sincronizaciones de registros que agotaron todos sus intentos y esperan como mensajes fallidos en la cola de sincronización de registros, aún no reparadas. Una conciliación de la fuente que se completa borra las que fallaron antes de que empezara."
+      },
+      first_failed_at: {
+        label: "Primer fallo el",
+        help: "Cuándo ocurrió el fallo más antiguo contado arriba."
+      },
+      last_failed_at: {
+        label: "Último fallo el",
+        help: "Cuándo ocurrió el fallo más reciente contado arriba."
+      },
+      last_error: {
+        label: "Último error",
+        help: "La frase de la plataforma sobre el fallo más reciente: el registro, los intentos y el tipo de error. Nunca un valor de campo de un registro, ni el texto propio del proveedor."
+      },
+      created_at: {
+        label: "Creado el"
+      },
+      updated_at: {
+        label: "Actualizado el"
+      }
+    }
+  },
   sys_task: {
     label: "Tarea",
     pluralLabel: "Tareas",

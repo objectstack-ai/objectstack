@@ -484,7 +484,8 @@ describe('the rebuild and index_status settings actions', () => {
     const entry = (after.details as { sources: KnowledgeIndexStatusEntry[] }).sources[0];
     expect(entry).toMatchObject({
       index: { state: 'current', due: false },
-      build: { status: 'done', progress: { discovered: 3, indexed: 3 }, result: { ok: true, indexed: 3 } },
+      build: { status: 'done', trigger: 'operator', counts: { discovered: 3, indexed: 3, skipped: 0, failed: 0 } },
+      failures: { count: 0 },
     });
   });
 

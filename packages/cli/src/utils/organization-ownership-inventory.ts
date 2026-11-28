@@ -775,6 +775,14 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: the lifecycle sweeper's clock state, one row per ` +
       'datastore, written by the sweep under the system context, never by organization',
   },
+  {
+    object: 'sys_knowledge_sync_state',
+    census: PMAIN,
+    fate: 'column-drop',
+    citation:
+      `${CENSUS_MAIN}: systemFields.tenant: false; ${D7}: one row per knowledge source, whose index serves the ` +
+      'whole deployment, written by the knowledge service under the system context, never by organization',
+  },
   { object: 'sys_scim_connection_credential', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; ${D10_SINGLE}`, anchors: [] },
   {
     object: 'sys_flow_credential',

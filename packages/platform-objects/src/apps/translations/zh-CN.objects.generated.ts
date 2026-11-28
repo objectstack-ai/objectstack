@@ -4664,6 +4664,111 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "知识库同步状态",
+    pluralLabel: "知识库同步状态",
+    description: "每个知识源一行:最近一次构建,以及同步失败且尚未修复的记录。仅由知识服务写入。",
+    fields: {
+      id: {
+        label: "知识源键",
+        help: "知识源在其存储中保存索引所用的键。每个知识源一行。"
+      },
+      source: {
+        label: "知识源",
+        help: "调用方使用的知识源名称:包内知识源为 NAMESPACE-NAME,否则为裸名称。"
+      },
+      package_id: {
+        label: "包",
+        help: "持有该知识源的包。不属于任何包的知识源为空。"
+      },
+      adapter: {
+        label: "适配器",
+        help: "知识源索引所在的存储。知识源未指定且无法确定时为空。"
+      },
+      object: {
+        label: "对象",
+        help: "知识源为其记录建立索引的对象。"
+      },
+      build_id: {
+        label: "构建 ID",
+        help: "标识最近一次构建。只有当此值仍指向某次构建时,该构建才会写入进度与结束状态。"
+      },
+      build_trigger: {
+        label: "启动方",
+        help: "最近一次构建由谁启动:服务器启动、知识源重新加载、管理员重建或对账。",
+        options: {
+          boot: "启动",
+          reload: "重新加载",
+          operator: "管理员",
+          reconcile: "对账"
+        }
+      },
+      build_status: {
+        label: "构建状态",
+        help: "最近一次构建如何结束。除「完成」外的任何状态下,索引保留原有内容,下一次对账、启动或重建会再次构建。首次构建前为空。",
+        options: {
+          running: "运行中",
+          done: "完成",
+          failed: "失败",
+          lease_lost: "租约丢失",
+          timed_out: "超时",
+          interrupted: "已中断"
+        }
+      },
+      build_started_at: {
+        label: "构建开始时间"
+      },
+      build_finished_at: {
+        label: "构建结束时间"
+      },
+      build_discovered: {
+        label: "已读取行数",
+        help: "最近一次构建读取的行数。"
+      },
+      build_indexed: {
+        label: "已写入文档",
+        help: "最近一次构建写入索引的文档数(每个都发送给了嵌入服务提供方)。"
+      },
+      build_skipped: {
+        label: "未变更",
+        help: "索引中已存在且未变更、因此未重新写入的文档数。"
+      },
+      build_purged: {
+        label: "已清除",
+        help: "因所在行已删除或不再匹配而被移除的文档数。构建未清除任何内容时为空。"
+      },
+      build_failed: {
+        label: "无法索引",
+        help: "在该知识源的切分规则下无法索引、已从索引中移除的文档数。"
+      },
+      build_message: {
+        label: "构建消息",
+        help: "平台对最近一次构建的说明。绝不是嵌入服务提供方或存储自身的文本:那些内容在运行该构建的节点的服务器日志中。"
+      },
+      failure_count: {
+        label: "失败的同步",
+        help: "已用尽所有重试、作为死信留在记录同步队列中且尚未修复的记录同步。该知识源的一次对账完成后,会清除在其开始前失败的同步。"
+      },
+      first_failed_at: {
+        label: "首次失败时间",
+        help: "上述计数中最早一次失败的时间。"
+      },
+      last_failed_at: {
+        label: "最近失败时间",
+        help: "上述计数中最近一次失败的时间。"
+      },
+      last_error: {
+        label: "最近错误",
+        help: "平台对最近一次失败的说明:记录、尝试次数与错误类型。绝不包含记录的字段值,也绝不包含提供方自身的文本。"
+      },
+      created_at: {
+        label: "创建时间"
+      },
+      updated_at: {
+        label: "更新时间"
+      }
+    }
+  },
   sys_task: {
     label: "任务",
     pluralLabel: "任务",

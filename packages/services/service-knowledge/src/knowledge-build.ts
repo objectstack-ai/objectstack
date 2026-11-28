@@ -165,8 +165,11 @@ export interface KnowledgeBuildProgress {
  * Like `failed`, the last two leave the adapter with what it held, and the
  * next build starts again.
  *
- * Kept in memory, one per source, replaced by the next build: a node answers
- * for the builds it ran, and a restarted node remembers none.
+ * This node's copy, one per source, replaced by the next build. What every
+ * node answers is the source's sync state (`knowledge-sync-state.ts`), which
+ * each build writes when it starts, while it walks and when it ends: one
+ * durable row per source, kept across restarts. A `not-run` record is never
+ * written there.
  */
 export interface KnowledgeBuildRecord {
   sourceId: string;

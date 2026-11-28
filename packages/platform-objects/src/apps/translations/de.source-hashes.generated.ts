@@ -159,6 +159,7 @@ export const deGeneratedSourceHashes: Readonly<Record<string, string>> = {
   "objects.sys_job_queue.fields.status.options.dlq": "4aedfea31f7ea528",
   "objects.sys_job_run.fields.job_name.label": "f5c2d1614986a66d",
   "objects.sys_job_run.fields.status.label": "64a420165247654b",
+  "objects.sys_knowledge_sync_state.fields.adapter.label": "9cefd817308db263",
   "objects.sys_metadata.fields.id.label": "00b0385c9c152888",
   "objects.sys_metadata.fields.name.label": "5274417ff1ccaf01",
   "objects.sys_metadata.fields.namespace.label": "eca03ee21fc17d64",

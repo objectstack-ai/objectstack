@@ -5,6 +5,7 @@ import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysJob, SysJobRun, SysJobQueue } from './audit/index.js';
 import {
+  SysKnowledgeSyncState,
   SysLifecycleState,
   SysMigration,
   SysMigrationJournal,
@@ -51,6 +52,8 @@ const DEPLOYMENT_LEVEL = [
   ['sys_trusted_key', SysTrustedKey],
   // [ADR-0057] The lifecycle sweeper's clock state: one row per datastore.
   ['sys_lifecycle_state', SysLifecycleState],
+  // [ADR-0161] One row per knowledge source, written by the knowledge service.
+  ['sys_knowledge_sync_state', SysKnowledgeSyncState],
 ] as const;
 
 describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-only reads', () => {

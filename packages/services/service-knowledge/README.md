@@ -37,6 +37,21 @@ import { QueueServicePlugin } from '@objectstack/service-queue';
 kernel.use(new QueueServicePlugin());
 ```
 
+Each source keeps one sync-state row in `sys_knowledge_sync_state`, which the
+plugin registers with its manifest: the last build (who started it, how it
+ended, its times and counts, one sentence) and the record syncs that failed
+and are not yet repaired (how many, the first and last time, one sentence
+naming the record and the kind of error, never a field value). Every node
+reads and writes the same row, so `index_status`, `os knowledge status` and
+Setup → Knowledge Sync Status answer the same whichever node is asked, and a
+restart forgets nothing. A build a stopped node left `running` is closed
+`interrupted` by the next boot or the next node that takes the source's build
+lease. A completed reconcile clears the failures recorded before its walk and
+removes their dead letters; the first failure of a source asks for a
+reconcile two minutes later. The row goes when the source is removed. Only the
+service writes it, and only a platform administrator
+(`manage_platform_settings`) reads it.
+
 ```ts
 import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
 import { KnowledgeMemoryPlugin } from '@objectstack/knowledge-memory';

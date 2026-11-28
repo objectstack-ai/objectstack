@@ -111,6 +111,7 @@ export const ar: TranslationData = {
         nav_settings_storage: { label: 'تخزين الملفات' },
         nav_settings_ai: { label: 'الذكاء الاصطناعي والتضمين (Embedder)' },
         nav_settings_knowledge: { label: 'المعرفة' },
+        nav_knowledge_sync_states: { label: 'حالة مزامنة المعرفة' },
         nav_settings_lifecycle: { label: 'دورة حياة البيانات' },
         nav_recycle_bin: { label: 'سلة المحذوفات' },
         nav_public_forms: { label: 'النماذج العامة' },

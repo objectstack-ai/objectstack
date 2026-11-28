@@ -102,6 +102,7 @@ export const esES: TranslationData = {
         nav_settings_storage: { label: 'Almacenamiento de archivos' },
         nav_settings_ai: { label: 'IA y Embedder' },
         nav_settings_knowledge: { label: 'Conocimiento' },
+        nav_knowledge_sync_states: { label: 'Estado de sincronización del conocimiento' },
         nav_settings_lifecycle: { label: 'Ciclo de vida de los datos' },
         nav_recycle_bin: { label: 'Papelera' },
         nav_public_forms: { label: 'Formularios públicos' },

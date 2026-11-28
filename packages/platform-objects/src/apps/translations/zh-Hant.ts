@@ -111,6 +111,7 @@ export const zhHant: TranslationData = {
         nav_settings_storage: { label: '檔案儲存' },
         nav_settings_ai: { label: 'AI 與 Embedder' },
         nav_settings_knowledge: { label: '知識庫' },
+        nav_knowledge_sync_states: { label: '知識庫同步狀態' },
         nav_settings_lifecycle: { label: '資料生命週期' },
         nav_recycle_bin: { label: '回收站' },
         nav_public_forms: { label: '對外表單' },

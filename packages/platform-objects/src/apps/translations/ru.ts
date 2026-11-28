@@ -113,6 +113,7 @@ export const ru: TranslationData = {
         nav_settings_storage: { label: 'Хранилище файлов' },
         nav_settings_ai: { label: 'ИИ и Embedder' },
         nav_settings_knowledge: { label: 'Знания' },
+        nav_knowledge_sync_states: { label: 'Состояние синхронизации знаний' },
         nav_settings_lifecycle: { label: 'Жизненный цикл данных' },
         nav_recycle_bin: { label: 'Корзина' },
         nav_public_forms: { label: 'Публичные формы' },

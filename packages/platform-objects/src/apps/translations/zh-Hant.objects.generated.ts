@@ -4664,6 +4664,111 @@ export const zhHantObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "知識庫同步狀態",
+    pluralLabel: "知識庫同步狀態",
+    description: "每個知識來源一列:最近一次建置,以及同步失敗且尚未修復的記錄。僅由知識服務寫入。",
+    fields: {
+      id: {
+        label: "知識來源鍵",
+        help: "知識來源在其儲存中保存索引所用的鍵。每個知識來源一列。"
+      },
+      source: {
+        label: "知識來源",
+        help: "呼叫方使用的知識來源名稱:套件內的知識來源為 NAMESPACE-NAME,否則為裸名稱。"
+      },
+      package_id: {
+        label: "套件",
+        help: "持有該知識來源的套件。不屬於任何套件的知識來源為空。"
+      },
+      adapter: {
+        label: "轉接器",
+        help: "知識來源索引所在的儲存。知識來源未指定且無法確定時為空。"
+      },
+      object: {
+        label: "物件",
+        help: "知識來源為其記錄建立索引的物件。"
+      },
+      build_id: {
+        label: "建置 ID",
+        help: "標識最近一次建置。只有當此值仍指向某次建置時,該建置才會寫入進度與結束狀態。"
+      },
+      build_trigger: {
+        label: "啟動方",
+        help: "最近一次建置由誰啟動:伺服器啟動、知識來源重新載入、管理員重建或對帳。",
+        options: {
+          boot: "啟動",
+          reload: "重新載入",
+          operator: "管理員",
+          reconcile: "對帳"
+        }
+      },
+      build_status: {
+        label: "建置狀態",
+        help: "最近一次建置如何結束。除「完成」外的任何狀態下,索引保留原有內容,下一次對帳、啟動或重建會再次建置。首次建置前為空。",
+        options: {
+          running: "執行中",
+          done: "完成",
+          failed: "失敗",
+          lease_lost: "租約遺失",
+          timed_out: "逾時",
+          interrupted: "已中斷"
+        }
+      },
+      build_started_at: {
+        label: "建置開始時間"
+      },
+      build_finished_at: {
+        label: "建置結束時間"
+      },
+      build_discovered: {
+        label: "已讀取列數",
+        help: "最近一次建置讀取的列數。"
+      },
+      build_indexed: {
+        label: "已寫入文件",
+        help: "最近一次建置寫入索引的文件數(每個都傳送給了嵌入服務提供者)。"
+      },
+      build_skipped: {
+        label: "未變更",
+        help: "索引中已存在且未變更、因此未重新寫入的文件數。"
+      },
+      build_purged: {
+        label: "已清除",
+        help: "因所在列已刪除或不再符合而被移除的文件數。建置未清除任何內容時為空。"
+      },
+      build_failed: {
+        label: "無法索引",
+        help: "在該知識來源的切分規則下無法索引、已從索引中移除的文件數。"
+      },
+      build_message: {
+        label: "建置訊息",
+        help: "平台對最近一次建置的說明。絕不是嵌入服務提供者或儲存自身的文字:那些內容在執行該建置的節點的伺服器日誌中。"
+      },
+      failure_count: {
+        label: "失敗的同步",
+        help: "已用盡所有重試、作為死信留在記錄同步佇列中且尚未修復的記錄同步。該知識來源的一次對帳完成後,會清除在其開始前失敗的同步。"
+      },
+      first_failed_at: {
+        label: "首次失敗時間",
+        help: "上述計數中最早一次失敗的時間。"
+      },
+      last_failed_at: {
+        label: "最近失敗時間",
+        help: "上述計數中最近一次失敗的時間。"
+      },
+      last_error: {
+        label: "最近錯誤",
+        help: "平台對最近一次失敗的說明:記錄、嘗試次數與錯誤類型。絕不包含記錄的欄位值,也絕不包含提供者自身的文字。"
+      },
+      created_at: {
+        label: "建立時間"
+      },
+      updated_at: {
+        label: "更新時間"
+      }
+    }
+  },
   sys_task: {
     label: "任務",
     pluralLabel: "任務",

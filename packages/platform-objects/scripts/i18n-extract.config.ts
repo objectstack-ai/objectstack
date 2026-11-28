@@ -207,6 +207,7 @@ import {
   SysStandardUnitSetting,
   SysWorkCalendar,
   SysWorkCalendarException,
+  SysKnowledgeSyncState,
 } from '../src/system/index.js';
 
 // The built-in tasks and notes (`work/`): business objects every environment
@@ -372,6 +373,9 @@ const config: ObjectStackDefinition = defineStack({
     SysStandardUnitSetting,
     SysWorkCalendar,
     SysWorkCalendarException,
+    // [ADR-0161] Registered by the knowledge service; its labels are served
+    // from this package's bundles, like `sys_job_queue`'s.
+    SysKnowledgeSyncState,
     SysTask,
     SysNote,
   ] as any,

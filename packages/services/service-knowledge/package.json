@@ -34,6 +34,7 @@
   "dependencies": {
     "@objectstack/core": "workspace:*",
     "@objectstack/embedder-openai": "workspace:*",
+    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-settings": "workspace:*",
     "@objectstack/spec": "workspace:*",
     "@objectstack/types": "workspace:*"
@@ -41,7 +42,6 @@
   "devDependencies": {
     "@objectstack/driver-sql": "workspace:*",
     "@objectstack/objectql": "workspace:*",
-    "@objectstack/platform-objects": "workspace:*",
     "@objectstack/service-queue": "workspace:*",
     "@types/node": "^26.6.5",
     "tsx": "^4.23.15",

@@ -4664,6 +4664,111 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "Wissens-Synchronisierungsstatus",
+    pluralLabel: "Wissens-Synchronisierungsstatus",
+    description: "Eine Zeile pro Wissensquelle: ihr letzter Aufbau und ihre fehlgeschlagenen, noch nicht behobenen Datensatz-Synchronisierungen. Nur vom Wissensdienst geschrieben.",
+    fields: {
+      id: {
+        label: "Quellenschlüssel",
+        help: "Der Schlüssel, unter dem der Index der Quelle in ihrem Speicher liegt. Eine Zeile pro Quelle."
+      },
+      source: {
+        label: "Quelle",
+        help: "Die Quelle, wie Aufrufer sie nennen: NAMESPACE-NAME für die Quelle eines Pakets, sonst der bloße Name."
+      },
+      package_id: {
+        label: "Paket",
+        help: "Das Paket, das die Quelle enthält. Leer für eine Quelle, die zu keinem Paket gehört."
+      },
+      adapter: {
+        label: "Adapter",
+        help: "Der Speicher, in dem der Index der Quelle liegt. Leer, wenn die Quelle keinen nennt und keiner zugeordnet werden konnte."
+      },
+      object: {
+        label: "Objekt",
+        help: "Das Objekt, dessen Datensätze die Quelle indiziert."
+      },
+      build_id: {
+        label: "Aufbau-ID",
+        help: "Bezeichnet den letzten Aufbau. Ein Aufbau schreibt Fortschritt und Ende nur, solange dieser Wert ihn noch bezeichnet."
+      },
+      build_trigger: {
+        label: "Gestartet von",
+        help: "Wer den letzten Aufbau gestartet hat: der Serverstart, ein Neuladen der Quelle, ein Neuaufbau durch einen Administrator oder der Abgleich.",
+        options: {
+          boot: "Serverstart",
+          reload: "Neuladen",
+          operator: "Administrator",
+          reconcile: "Abgleich"
+        }
+      },
+      build_status: {
+        label: "Aufbaustatus",
+        help: "Wie der letzte Aufbau endete. Bei jedem Status außer Fertig behält der Index seinen Inhalt, und der nächste Abgleich, Start oder Neuaufbau baut erneut auf. Leer bis zum ersten Aufbau.",
+        options: {
+          running: "Läuft",
+          done: "Fertig",
+          failed: "Fehlgeschlagen",
+          lease_lost: "Lease verloren",
+          timed_out: "Zeitüberschreitung",
+          interrupted: "Unterbrochen"
+        }
+      },
+      build_started_at: {
+        label: "Aufbau gestartet am"
+      },
+      build_finished_at: {
+        label: "Aufbau beendet am"
+      },
+      build_discovered: {
+        label: "Gelesene Zeilen",
+        help: "Zeilen, die der letzte Aufbau gelesen hat."
+      },
+      build_indexed: {
+        label: "Geschriebene Dokumente",
+        help: "Dokumente, die der letzte Aufbau in den Index geschrieben hat (jedes an den Embedding-Anbieter gesendet)."
+      },
+      build_skipped: {
+        label: "Unverändert",
+        help: "Dokumente, die der Index bereits unverändert enthielt und daher nicht erneut geschrieben wurden."
+      },
+      build_purged: {
+        label: "Entfernt",
+        help: "Dokumente, die entfernt wurden, weil ihre Zeile weg ist oder nicht mehr passt. Leer, wenn der Aufbau nichts entfernt hat."
+      },
+      build_failed: {
+        label: "Nicht indizierbar",
+        help: "Dokumente, die mit der Aufteilung der Quelle nicht indiziert werden können und aus dem Index entfernt wurden."
+      },
+      build_message: {
+        label: "Aufbaumeldung",
+        help: "Der Satz der Plattform zum letzten Aufbau. Nie der eigene Text eines Embedding-Anbieters oder Speichers: Dieser steht im Serverprotokoll des Knotens, der den Aufbau ausgeführt hat."
+      },
+      failure_count: {
+        label: "Fehlgeschlagene Synchronisierungen",
+        help: "Datensatz-Synchronisierungen, die alle Versuche aufgebraucht haben und als Dead Letters in der Datensatz-Synchronisierungswarteschlange liegen, noch nicht behoben. Ein abgeschlossener Abgleich der Quelle löscht die, die vor seinem Beginn fehlschlugen."
+      },
+      first_failed_at: {
+        label: "Erster Fehler am",
+        help: "Wann der älteste oben gezählte Fehler auftrat."
+      },
+      last_failed_at: {
+        label: "Letzter Fehler am",
+        help: "Wann der neueste oben gezählte Fehler auftrat."
+      },
+      last_error: {
+        label: "Letzter Fehler",
+        help: "Der Satz der Plattform zum neuesten Fehler: der Datensatz, die Versuche und die Art des Fehlers. Nie ein Feldwert eines Datensatzes und nie der eigene Text des Anbieters."
+      },
+      created_at: {
+        label: "Erstellt am"
+      },
+      updated_at: {
+        label: "Aktualisiert am"
+      }
+    }
+  },
   sys_task: {
     label: "Aufgabe",
     pluralLabel: "Aufgaben",
