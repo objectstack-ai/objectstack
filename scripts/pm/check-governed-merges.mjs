@@ -1272,8 +1272,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
   // #35612: the split leg — every state with its control, the report, the audit card and the INCOMPLETE banner;
   // 24 → 30 with the review of record 7238665187: S1 (each BREACH row names its leg, both headings name both), N1
-  // (`sweepComplete` and the loop's count), N2 (an unread workflow diff beside the split is NOT MEASURED, and its control).
-  '⚖️ #35612: the sweep lists a `.claude/**` declaration-split landing APART and judges it on the record that verifies it': 30,
+  // (`sweepComplete` and the loop's count), N2 (an unread workflow diff beside the split is NOT MEASURED, and its control);
+  // 30 → 35 with S2 of record 7239017248 (an approval or enqueue clears it first: two cases, two controls, one landing half that does not clear).
+  '⚖️ #35612: the sweep lists a `.claude/**` declaration-split landing APART and judges it on the record that verifies it': 35,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
   // 40 → 44 (#35612, N1 of #35610): a record the queue's record leg refuses — a FAIL, below its tier, or a leg not
   // read — keeps the split at Tier H however its `Rule-change-verified:` line reads; one case pins the words.
@@ -5518,17 +5519,14 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
 }
 
 /**
- * The landing half both seat legs read alike — the arm's (#33603) and the `.claude/**` split's (#35612), after each has
- * read its pull and its tier: the merge that ties a record to THIS commit (S2), the approval leg then the enqueue leg as
- * the queue read them before the merge (S1), and the record threads as they stood at the landing, cut by the guard's
- * author binding (S3, N4, N7). Returns `{ settled }` — the state a leg returns as is (`breach`, `cleared`,
- * `not-measured`) — or what the record leg reads next: `{ landed, pair, unedited, editedAfter, ignoredAuthors, card,
- * cardNote }`. Never throws.
+ * The first half of `readLandingThreads`, which the split leg's unread-input answer also reads (S2 of record
+ * 7239017248): the merge that ties the pull to THIS commit (S2 of #33603), then the approval leg and the enqueue leg
+ * as the queue read them before the merge (S1). Returns `{ settled }` (`breach`, `cleared`, `not-measured`) or
+ * `{ landed }`, the merge time the record threads are cut at. Never throws.
  */
-async function readLandingThreads({ entry, head, headSha, events, readers, fetchers, runGit, attribution, paths, repo }) {
+async function readLandingClearance({ entry, headSha, events, guard, fetchers, attribution }) {
   const why = (error) => String(error?.message ?? error).split('\n')[0];
   const unmeasured = (reason) => ({ state: 'not-measured', reason, headSha });
-  const { guard, recognisers } = readers;
   // S2: the record's head is tied to THIS commit only through the pull's own merge. A pull GitHub says is not
   // merged, or merged as another commit, cannot excuse this one: never `pass`.
   if (!attribution) return { settled: unmeasured('its merge could not be read, so no record can be tied to this commit') };
@@ -5552,6 +5550,24 @@ async function readLandingThreads({ entry, head, headSha, events, readers, fetch
   if (approval.state === 'approved') return { settled: { state: 'cleared', by: 'review', who: approval.approvers, headSha } };
   const enqueue = guard.authorizedEnqueueVerdict(guard.enqueuerFromTimeline(events.filter((e) => before(e?.created_at))));
   if (enqueue.state === 'authorized') return { settled: { state: 'cleared', by: 'enqueue', who: [enqueue.login], headSha } };
+  return { landed };
+}
+
+/**
+ * The landing half both seat legs read alike — the arm's (#33603) and the `.claude/**` split's (#35612), after each has
+ * read its pull and its tier: the merge that ties a record to THIS commit (S2), the approval leg then the enqueue leg as
+ * the queue read them before the merge (S1), and the record threads as they stood at the landing, cut by the guard's
+ * author binding (S3, N4, N7). Returns `{ settled }` — the state a leg returns as is (`breach`, `cleared`,
+ * `not-measured`) — or what the record leg reads next: `{ landed, pair, unedited, editedAfter, ignoredAuthors, card,
+ * cardNote }`. Never throws.
+ */
+async function readLandingThreads({ entry, head, headSha, events, readers, fetchers, runGit, attribution, paths, repo }) {
+  const why = (error) => String(error?.message ?? error).split('\n')[0];
+  const unmeasured = (reason) => ({ state: 'not-measured', reason, headSha });
+  const { guard, recognisers } = readers;
+  const clearance = await readLandingClearance({ entry, headSha, events, guard, fetchers, attribution });
+  if (clearance.settled) return clearance;
+  const { landed } = clearance;
   if (recognisers?.available !== true) return { settled: unmeasured(recognisers?.reason ?? 'the record recognisers were not loaded') };
   // N11: no trusted-author list is a reading that is missing, not a thread with no record in it. Defensive only
   // (#33765 N-c): the guard's `loadRecordRecognisers` answers `available: false` rather than a set without the
@@ -5632,7 +5648,7 @@ function landingBreach({ guard, recognisers, record, unedited, editedAfter, card
  *   `tier-h`        the split, or a row beside it, reads Tier H on what the pull shows (`yes`, no line, a settings or
  *                   hooks path, a constant Tier H row) or the landing crosses the size line: the maintainer's merge.
  *                   A row beside a pending split that is Tier H only on an input the sweep never reads (a workflow
- *                   row's diff) is `not-measured` instead;
+ *                   row's diff) is `not-measured` instead, unless an approval or enqueue settles it `cleared`;
  *   `unbound`       the landed tree's copy of this file predates the split (`ruleChangeSplitBound`), so its queue read
  *                   the row's raw Tier S: listed with the maintainer's merges, unjudged here;
  *   `cleared`       an authorized approval or enqueue before the merge: the maintainer's merge;
@@ -5677,6 +5693,11 @@ export async function readRuleChangeLanding(entry, { paths, repo, readers, fetch
     const unread = besideRows.filter((s) => s?.splitVerdict?.measured === false);
     const splitPending = split.length > 0 && split.every((v) => v.recordStage === LOW_RISK_RECORD_STAGE.pending);
     if (splitPending && unread.length > 0 && unread.length === besideRows.length && !sizeLimbFires(entry.size)) {
+      // S2 of record 7239017248: an authorized approval or enqueue before the merge makes it the maintainer's merge
+      // whatever the queue read for the tier, so it settles `cleared` before the unread input is answered. Only
+      // `cleared` settles here: a BREACH or a failed read on the landing half stays NOT MEASURED on the unread input.
+      const clearance = await readLandingClearance({ entry, headSha, events, guard, fetchers, attribution });
+      if (clearance.settled?.state === 'cleared') return { ...clearance.settled, declared: split.find((v) => v.declared)?.declared ?? null };
       return unmeasured(`${unread.map((s) => `\`${s.glob}\``).join(', ')} beside it is Tier H only on an input this sweep does not read (${unread[0].splitVerdict.reason}), so how its queue read the landing is not known`);
     }
     const reasons = [...split.flatMap((v) => (v.measured ? v.reasons ?? [] : [v.reason])), ...(beside.length > 0 ? [`a Tier H row beside it: ${beside.join(', ')}`] : [])];
@@ -11917,6 +11938,22 @@ async function selfTest() {
       await state({ paths: [CL, WF], body: 'Fixes #69\n\nRule-change: yes\n' }, 'tier-h', /declares `Rule-change: yes`/, 'reasons') === true &&
       await state({ paths: [CL, WF, 'AGENTS.md'] }, 'tier-h', /a Tier H row beside it: .*`AGENTS\.md`/, 'reasons') === true &&
       await state({ paths: [CL, WF], size: { additions: HUMAN_MERGE_LINE_THRESHOLD + 1, deletions: 0 } }, 'tier-h', null, 'reasons') === true);
+    // S2 of record 7239017248: the unread input is answered only after the approval and enqueue legs, so a landing the
+    // maintainer approved or enqueued beside an unread workflow diff is `cleared` — his merge, whatever the queue read.
+    const beside = { paths: [CL, WF], prRows: [] };
+    const approvedBeside = await run({ ...beside, reviews: [APPROVED('os-zhuang')] });
+    assert('⭐ S2-an-authorized-approval-before-the-landing-CLEARS-a-pending-split-beside-an-unread-workflow-diff',
+      approvedBeside?.state === 'cleared' && approvedBeside.by === 'review' && approvedBeside.who?.includes('os-zhuang') && approvedBeside.declared === 'none' && approvedBeside.headSha === HEAD, JSON.stringify(approvedBeside));
+    assert('S2-control-the-same-approval-one-hour-after-the-landing-clears-nothing-it-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, reviews: [APPROVED('os-zhuang', '2026-11-25T06:00:00Z')] }, /`\.github\/workflows\/\*\*` beside it is Tier H only on an input this sweep does not read/) === true);
+    const queuedBeside = await run({ ...beside, events: QUEUED('os-zhuang') });
+    assert('⭐ S2-an-authorized-enqueue-before-the-landing-CLEARS-a-pending-split-beside-an-unread-workflow-diff',
+      queuedBeside?.state === 'cleared' && queuedBeside.by === 'enqueue' && queuedBeside.who?.[0] === 'os-zhuang' && queuedBeside.declared === 'none', JSON.stringify(queuedBeside));
+    assert('S2-control-the-same-enqueue-by-the-seat-relay-clears-nothing-it-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, events: QUEUED('objectstack-fleet[bot]') }, /`\.github\/workflows\/\*\*` beside it is Tier H only on an input this sweep does not read/) === true);
+    assert('S2-a-landing-half-that-does-not-clear-a-breach-or-an-unread-review-thread-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, attribution: { ...LANDING, mergeCommitSha: '7'.repeat(40) } }, /beside it is Tier H only on an input this sweep does not read/) === true &&
+      await unmeasuredSplit({ ...beside, throws: 'reviews' }, /beside it is Tier H only on an input this sweep does not read/) === true);
     // Which landings the leg binds: a tree whose copy of this file predates the split ran the raw row.
     assert('⭐ a-landing-whose-tree-predates-the-split-is-UNBOUND-unjudged-on-the-maintainers-list-and-reads-no-thread',
       await state({ git: gitOf(OLD_TREE), throws: 'comments' }, 'unbound') === true && ruleChangeSplitBound(gitOf(), LANDED) === true && ruleChangeSplitBound(gitOf(OLD_TREE), LANDED) === false);
