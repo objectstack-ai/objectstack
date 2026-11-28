@@ -3145,6 +3145,8 @@ const STUDIO_EN: Record<string, string> = {
   'engine.skillPreview.missingTitle': 'Required by SkillTriggerConditionSchema — this draft will be rejected on save.',
   'engine.toolPreview.openApiConsole': 'Open in API Console',
   'engine.toolPreview.openApiConsoleTitle': 'Open API Console to test invocation',
+  'engine.toolPreview.openApiConsoleNote':
+    'Runs the tool directly, outside a chat. On the hosted cloud a call that needs the server-side model is refused here: try it in a chat.',
   'engine.toolPreview.empty': 'Set name, description, and parameters to see the tool preview.',
   'engine.toolPreview.inputParameters': 'Input Parameters',
   'engine.toolPreview.noParameters': 'This tool takes no input parameters.',
