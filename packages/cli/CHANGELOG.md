@@ -1,5 +1,155 @@
 # @objectstack/cli
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- ab04434: feat(spec): a package's display name per locale — the translation bundle's `packages` group, read by Setup's package list and Studio's package switcher
+  
+  Clause-②: yes (widening) — the translation bundle (`TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema`, `TranslationItemSchema`) accepts a new group `packages`, keyed by `manifest.id`, each row `{ name?, description? }`; a bundle that wrote `packages` was refused as an unknown key before. `@object-ui/i18n` `useObjectLabel()` gains `packageName` and `packageDescription`.
+  Metadata-protocol: added — a new translation group `packages.MANIFEST_ID.name` / `.description`
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A package had one name, the plain-string `manifest.name`, so a zh-CN administrator read every package in Setup's package list, and every package with no app of its own in Studio's package switcher, in English, beside a launcher that already named the same apps in Chinese.
+  
+  A package now names itself per locale in the translation bundle it already ships:
+  
+  ```ts
+  export const zhCN: TranslationData = {
+    packages: { 'com.acme.reporting': { name: '报表', description: '经营报表' } },
+  };
+  ```
+  
+  - The key is the package's `manifest.id`. A key that is not a manifest id — a namespace like `crm`, or a display name — is refused at parse, naming the rule, because a row keyed by one would never render. `package`, and the leaf spellings `label`, `title` and `displayName`, are answered with the declared spelling.
+  - The console draws the translated name where a reader sees a package — Setup's package list (row, detail title, description, search, the installed-apps group) and Studio's package switcher for a package that ships no app — and falls back to `manifest.name`. A package that publishes an app is still named by the app's label in the switcher.
+  - `manifest.name` stays exactly as authored on every wire and in every editor: the translation is a display overlay, so the edit dialog that prefills from the listed manifest never saves a translated name back.
+  - A disabled package keeps its translated name: its bundle is loaded at boot whether or not the package is enabled.
+  - `os i18n extract` scaffolds `packages.MANIFEST_ID.name` / `.description` from the manifest, and `os i18n check` / `os lint` report a locale that leaves them out as `i18n/missing-package` — a warning, like every other missing translation. A stack that declares a non-default locale and has never named its package in it sees two new warnings per locale on upgrade; the ObjectStack examples now name theirs.
+  
+  `MANIFEST_ID_PATTERN` is now declared in `kernel/address-grammar.ts` beside `NAMESPACE_PATTERN`; `kernel/manifest.zod.ts` re-exports it, so every existing import keeps working.
+- dbe0716: feat(knowledge): a knowledge source needs no `adapter` and no `requires: ['knowledge']` — it binds to the deployment's store, and shipping one mounts the service
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310 — `skills/**` teaches the optional `adapter` and the item mount after this lands
+  
+  A `knowledge_source` may leave out `adapter` (ADR-0161 K4), and a stack that ships one in `knowledgeSources` is served the knowledge service and one vector store without listing `knowledge` under `requires` (ADR-0161 K8, item 12). One source written as metadata now builds on SQLite under `os dev` (the `turso` store, a libSQL file), on PostgreSQL (`pgvector`) and on a host that mounts its own store, with no change to the source.
+  
+  - **`@objectstack/spec`.** `KnowledgeSourceSchema.adapter` is optional. Omitted, the source is held by the deployment's adapter: the store the runtime mounted beside the knowledge service, else the only adapter registered. A named adapter is kept as written. `PlatformCapabilityProvider` gains an optional `mountedBy: { collection }`, set on the `knowledge` row of `PLATFORM_CAPABILITY_PROVIDERS` (`knowledgeSources`): a stack holding an item of that collection is served the capability as its token serves it.
+  - **`@objectstack/core`.** `stackItemCapabilities(stack)` answers the tokens a stack's items mount (top level, then each package body), and `resolveServedCapabilities` takes them as `itemTokens`: appended after the declared tokens, read as declared (a provider that cannot be built fails the boot as for `requires`), and reported in a new `byItems` set. `resolveCapabilityArgument('knowledge', …)` now answers `{ deploymentAdapter }`, the adapter id of the store `resolveCapabilityExtras` mounts for the same database.
+  - **`@objectstack/cli` and `@objectstack/verify`.** `os serve` / `os dev` / `os start` and `bootStack` read the item tokens, and hand the knowledge service the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise). `os migrate plan` / `apply` read them too, so an item-only stack's migrate run composes the knowledge service as `os serve` mounts it (init only: no store, build or embedder call).
+  - **`@objectstack/service-knowledge`.** `KnowledgeServicePlugin` and `KnowledgeService` take a `deploymentAdapter` option: the runtime's mark of the store it mounted. It is a service option, not an adapter-contract member, and `registerAdapter` is unchanged: an adapter application code registers is never the deployment's by registering. A source that names no adapter is placed where it is used (`adapterIdFor`, `adapterFor`), so one registered in code before its store started finds it. With several adapters registered and none the deployment's, such a source is refused at registration (both doors) and at its save, `400 VALIDATION_ERROR`, naming the adapters; registered first and left unplaceable by adapters that came later, it answers the same refusal at index and search, and the boot names it once at `error`. With no adapter registered it answers `503 SERVICE_UNAVAILABLE`, naming the deployment's store when one was marked. The `index_status` action reports the adapter a source is placed on.
+  - **`@objectstack/runtime`.** The MCP draft door (`save_metadata_draft`) carries the knowledge service's refusal code through: a source refused `400 VALIDATION_ERROR` arrived over MCP as `SERVICE_UNAVAILABLE` with status 400, and now arrives as `VALIDATION_ERROR`, as on the REST door. A `403` is still `PERMISSION_DENIED`.
+  
+  Unchanged: a source that names an adapter that is not mounted answers `SERVICE_UNAVAILABLE` as before; a host that mounts `KnowledgeServicePlugin` itself keeps its own, gets no store from the runtime and no deployment's mark; without a source or the token nothing is mounted; an item saved at run time on a deployment that mounted no knowledge service is reported at boot exactly as before.
+  
+  What to do: nothing to change, with one behaviour to know. A stack on 19.0.0-next.1 that ships a source without `requires: ['knowledge']` held it inert, with a boot warning; it is now indexed: the service mounts, the boot pass builds the source's index, and its content fields are sent to the configured embedder (ADR-0161 K5: embedding is egress). A source that names `adapter: 'turso'` or `adapter: 'pgvector'` keeps working; drop the key to let the deployment choose, and drop `knowledge` from `requires` in an app that ships its sources.
+
+### Patch Changes
+
+- 39d611d: build(cli): `@objectstack/cli` now declares `@oclif/core` `^5.1.12`, the first release on the 5.1 line that depends on minimatch 11
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The previous `^5.1.2` range admitted `@oclif/core` releases that depend on minimatch 10, which GHSA-g3hv-75wg-m249 (a potential denial of service through glob-part amplification) affects up to 11.0.1. An install that resolves the CLI fresh already picks a newer 5.1 release; the raised floor keeps a lockfile that still holds an older one from satisfying the range. No command, flag or output changes.
+  
+  Nothing to migrate.
+- 463c436: fix(cli)!: `os secret rewrap --apply` without `--yes` in a non-interactive shell exits 1
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no metadata, stored shape or export moves; the remedy is a flag on the caller's command line -->
+  
+  **BREAKING** (an exit status narrows), shipped as `patch`: the change is not to the metadata protocol.
+  
+  - **FROM:** `os secret rewrap --apply` on a database with a version-1 `sys_secret` row to re-wrap, without `--yes`, with stdin not a terminal, text face: nothing opened or written, `Aborted — no row was opened or written.`, exit `0`.
+  - **TO:** nothing opened or written, `Confirmation required. Re-run with --yes to re-wrap. No row was opened or written.`, exit `1`.
+  - **Unchanged:** answering `n` at the `[y/N]` prompt in a terminal still prints `Aborted — …` and exits `0`; `--json` without `--yes` already exited `1` with `confirmation_required`; a run with `--yes` re-wraps as before; a dry run, or an `--apply` run with nothing to re-wrap, asks nothing and keeps the exit status it had (`0` when the run is not otherwise refused; a missing data key or an incomplete reference union still exits `1`).
+  - **The fix for a script:** pass `--yes` to re-wrap; drop `--apply` to get only the dry-run report.
+  
+  This is the rule the `os migrate` commands and `os db orphans --delete` / `os secret orphans --delete` already follow: a run that did not get its confirmation is a refused run, so a script, CI job or cron reading `$?` never takes it for a key rotation that happened.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [1f03dc5]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [73d0240]
+- Updated dependencies [724d6f3]
+- Updated dependencies [58be677]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0bfdee9]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [ecd10e9]
+- Updated dependencies [8d598aa]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+- Updated dependencies [0ea3093]
+- Updated dependencies [c151c49]
+- Updated dependencies [0c190a8]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/platform-objects@19.0.0-next.2
+  - @objectstack/mcp@19.0.0-next.2
+  - @objectstack/service-analytics@19.0.0-next.2
+  - @objectstack/lint@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/metadata-protocol@19.0.0-next.2
+  - @objectstack/service-knowledge@19.0.0-next.2
+  - @objectstack/verify@19.0.0-next.2
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-approvals@19.0.0-next.2
+  - @objectstack/knowledge-pgvector@19.0.0-next.2
+  - @objectstack/plugin-auth@19.0.0-next.2
+  - @objectstack/account@19.0.0-next.2
+  - @objectstack/setup@19.0.0-next.2
+  - @objectstack/client@19.0.0-next.2
+  - @objectstack/cloud-connection@19.0.0-next.2
+  - create-objectstack@19.0.0-next.2
+  - @objectstack/driver-memory@19.0.0-next.2
+  - @objectstack/driver-mongodb@19.0.0-next.2
+  - @objectstack/driver-sql@19.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@19.0.0-next.2
+  - @objectstack/driver-turso@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/objectql@19.0.0-next.2
+  - @objectstack/observability@19.0.0-next.2
+  - @objectstack/plugin-audit@19.0.0-next.2
+  - @objectstack/plugin-email@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/plugin-pinyin-search@19.0.0-next.2
+  - @objectstack/plugin-security@19.0.0-next.2
+  - @objectstack/plugin-sharing@19.0.0-next.2
+  - @objectstack/plugin-webhooks@19.0.0-next.2
+  - @objectstack/rest@19.0.0-next.2
+  - @objectstack/service-automation@19.0.0-next.2
+  - @objectstack/service-cache@19.0.0-next.2
+  - @objectstack/service-datasource@19.0.0-next.2
+  - @objectstack/service-job@19.0.0-next.2
+  - @objectstack/service-mailbox@19.0.0-next.2
+  - @objectstack/service-messaging@19.0.0-next.2
+  - @objectstack/service-package@19.0.0-next.2
+  - @objectstack/service-push@19.0.0-next.2
+  - @objectstack/service-queue@19.0.0-next.2
+  - @objectstack/service-realtime@19.0.0-next.2
+  - @objectstack/service-record-context@19.0.0-next.2
+  - @objectstack/service-settings@19.0.0-next.2
+  - @objectstack/service-sms@19.0.0-next.2
+  - @objectstack/service-storage@19.0.0-next.2
+  - @objectstack/trigger-api@19.0.0-next.2
+  - @objectstack/trigger-record-change@19.0.0-next.2
+  - @objectstack/trigger-schedule@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+  - @objectstack/console@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Minor Changes

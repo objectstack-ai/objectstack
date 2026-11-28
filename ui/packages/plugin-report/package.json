@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-report",
-  "version": "19.0.0-next.1",
+  "version": "19.0.0-next.2",
   "type": "module",
   "main": "dist/index.umd.cjs",
   "module": "dist/index.js",

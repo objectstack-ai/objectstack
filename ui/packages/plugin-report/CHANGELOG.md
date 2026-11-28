@@ -1,5 +1,35 @@
 # @object-ui/plugin-report
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 7c85f5b: fix(plugin-report): a report never draws a new selection over the previous selection's rows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A dataset report's table, matrix and chart answered a new selection, for one render, with the rows of the selection before it, because the query for the new one runs only after that render. Turning 「Compare with previous period」 on drew the comparison series over rows that carry no comparison values, a frame the browser could paint before the chart turned to "Loading chart…". Each outcome now answers only the selection it was queried for, and under any other selection reads as loading. A re-read of the same selection (a data change on the object) still keeps its rows on screen until the new answer lands. Nothing to migrate.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [27ee984]
+- Updated dependencies [8361dfc]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [7e4df28]
+  - @object-ui/i18n@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/fields@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @object-ui/plugin-editor
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- @object-ui/components@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes
