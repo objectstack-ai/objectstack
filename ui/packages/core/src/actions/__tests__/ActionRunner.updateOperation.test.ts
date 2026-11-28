@@ -518,3 +518,104 @@ describe("operation: 'update' — the write's warnings reach the person (objects
     expect(toasts[0].opts?.type).toBe('success');
   });
 });
+
+describe("operation: 'update' — the notice a hook set on the write reaches the person (objectstack#38103)", () => {
+  /** The route's 200 answer, with the data write's `notice` / `warnings` / `droppedFields` when given. */
+  function answeredFetch(extra: { notice?: string; warnings?: unknown[]; droppedFields?: unknown[] }) {
+    return okFetch({
+      success: true,
+      data: {
+        operation: 'update',
+        object: 'tasks',
+        id: 'rec_1',
+        record: { id: 'rec_1', status: 'done' },
+        ...extra,
+      },
+    });
+  }
+  const NOTICE = 'Marking this done notified the requester.';
+  const LATE = {
+    field: 'status',
+    code: 'rule_violation',
+    message: 'This task was closed after its due date.',
+    rule: 'closed_late',
+    severity: 'warning',
+  };
+
+  function wireWithOptions(fetch: ReturnType<typeof okFetch>) {
+    const runner = new ActionRunner({});
+    const toasts: Array<{ message: string; opts?: Parameters<Parameters<ActionRunner['setToastHandler']>[0]>[1] }> = [];
+    runner.setToastHandler((message, opts) => { toasts.push({ message, opts }); });
+    runner.registerHandler('script', createServerActionHandler({ fetch: fetch as unknown as ServerActionFetch }));
+    return { runner, toasts };
+  }
+
+  it('a notice alone rides the success toast as its line, and the toast stays a success', async () => {
+    const { runner, toasts } = wireWithOptions(answeredFetch({ notice: NOTICE }));
+    await runner.execute(updateAction({ successMessage: 'Task done.', params: { recordId: 'rec_1' } as never }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].message).toBe('Task done.');
+    expect(toasts[0].opts?.type).toBe('success');
+    expect(toasts[0].opts?.description).toBe(NOTICE);
+  });
+
+  it('with warnings too, the notice leads the lines of the one warning toast', async () => {
+    const { runner, toasts } = wireWithOptions(answeredFetch({ notice: NOTICE, warnings: [LATE] }));
+    await runner.execute(updateAction({ params: { recordId: 'rec_1' } as never }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.type).toBe('warning');
+    expect(toasts[0].opts?.description).toBe(`${NOTICE}\n${LATE.message}`);
+  });
+
+  it('keeps the Undo affordance on the success toast that carries the notice', async () => {
+    const { runner, toasts } = wireWithOptions(answeredFetch({ notice: NOTICE }));
+    await runner.execute(updateAction({
+      undoable: true,
+      params: { recordId: 'rec_1', _rowRecord: { id: 'rec_1', status: 'todo' } } as never,
+    }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.description).toBe(NOTICE);
+    expect(toasts[0].opts?.undo).toBeDefined();
+  });
+
+  it('an author who turned the success toast off still has the hook\'s words shown, as an info toast', async () => {
+    const { runner, toasts } = wireWithOptions(answeredFetch({ notice: NOTICE }));
+    await runner.execute(updateAction({
+      toast: { showOnSuccess: false },
+      params: { recordId: 'rec_1' } as never,
+    } as never));
+
+    expect(toasts).toEqual([{ message: NOTICE, opts: { type: 'info', duration: undefined } }]);
+  });
+
+  it('the stripped fields are not this toast\'s: a `droppedFields` answer alone is a plain success here', async () => {
+    // The host announces them on the record save's own stripped-fields toast
+    // (app-shell `withAnnouncedUpdateDroppedFields`), never folded into this one.
+    const { runner, toasts } = wireWithOptions(answeredFetch({
+      droppedFields: [{ object: 'tasks', fields: ['closed_on'], reason: 'readonly' }],
+    }));
+    await runner.execute(updateAction({ params: { recordId: 'rec_1' } as never }));
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts?.type).toBe('success');
+    expect(toasts[0].opts && 'description' in toasts[0].opts).toBe(false);
+  });
+
+  it('reverse pin: a script action WITHOUT `operation` never reads its answer\'s `notice` key', async () => {
+    const { runner, toasts } = wireWithOptions(answeredFetch({ notice: NOTICE }));
+    await runner.execute({
+      type: 'script',
+      name: 'recalc',
+      label: 'Recalc',
+      objectName: 'tasks',
+      target: 'recalc',
+      successMessage: 'Done.',
+    } as ActionDef);
+
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].opts && 'description' in toasts[0].opts).toBe(false);
+  });
+});
