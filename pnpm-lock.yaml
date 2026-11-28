@@ -3250,6 +3250,9 @@ importers:
       '@objectstack/embedder-openai':
         specifier: workspace:*
         version: link:../../plugins/embedder-openai
+      '@objectstack/platform-objects':
+        specifier: workspace:*
+        version: link:../../platform-objects
       '@objectstack/service-settings':
         specifier: workspace:*
         version: link:../service-settings
@@ -3266,9 +3269,6 @@ importers:
       '@objectstack/objectql':
         specifier: workspace:*
         version: link:../../objectql
-      '@objectstack/platform-objects':
-        specifier: workspace:*
-        version: link:../../platform-objects
       '@objectstack/service-queue':
         specifier: workspace:*
         version: link:../service-queue

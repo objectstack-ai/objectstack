@@ -9,12 +9,18 @@
  *   way `search_knowledge` lists it (`NAMESPACE-NAME` for a package's source,
  *   the bare name otherwise; a bare name one source has is read too). Starts one complete build of
  *   that source (`KnowledgeService.rebuildSource`, trigger `operator`) in the
- *   background and answers at once with the build's record; a build of the
- *   source already running on the node that answers is refused, not doubled.
+ *   background and answers once the build has taken the source's lease and
+ *   its start is recorded, with the build's record; a build of the source
+ *   already running on the node that answers is refused, not doubled, and a
+ *   build that does not start (another node holds the source's build) is
+ *   refused naming why.
  * - `index_status` — payload `{}` or `{ "source": "ID" }`. Answers, per
  *   source, what its adapter holds against what the service expects
- *   (`readIndexState`) and the last build this node ran (`buildRecord`):
- *   its progress while it runs, its result once it ended.
+ *   (`readIndexState`), and the source's sync state (`syncStateOf`): its last
+ *   build, with its counts while it runs and once it ended, and its record
+ *   syncs that failed and are not yet repaired. Beside the sources, the
+ *   record-sync messages waiting on the queue (`pendingRecordSyncs`, every
+ *   source's together).
  *
  * Both run through the settings action door (`POST /api/settings/knowledge/ACTION`),
  * which gates an HTTP caller on the namespace's write permission,
@@ -22,14 +28,18 @@
  * `os knowledge status` are their command-line callers.
  *
  * A payload key other than `source` is refused, so a misspelt key is never
- * read as "every source". A build record lives on the node that ran the
- * build; behind a load balancer `index_status` answers for the node that
- * took the request, while the adapter's state it reads is the store's own.
+ * read as "every source". The sync state is one durable record per source
+ * (`sys_knowledge_sync_state`, `knowledge-sync-state.ts`), so every node
+ * answers the same and a restart forgets nothing. The index state is the
+ * store's own: the same on every node when the store is shared, per process
+ * on the `memory` adapter.
  */
 
 import type { SettingsActionHandler } from '@objectstack/service-settings';
 import type { KnowledgeBuildRecord, KnowledgeIndexReading } from './knowledge-build.js';
 import type { KnowledgeService, KnowledgeSourceDescription } from './knowledge-service.js';
+import type { KnowledgeStoredBuild, KnowledgeSyncFailures } from './knowledge-sync-state.js';
+import { KNOWLEDGE_RECORD_SYNC_QUEUE } from './knowledge-record-sync-queue.js';
 
 /** The `knowledge` settings action that starts a rebuild of one source. */
 export const KNOWLEDGE_REBUILD_ACTION = 'rebuild';
@@ -40,7 +50,14 @@ export const KNOWLEDGE_INDEX_STATUS_ACTION = 'index_status';
 /** The part of `KnowledgeService` the two actions use. */
 export type KnowledgeBuildActionsService = Pick<
   KnowledgeService,
-  'describeSources' | 'describeSource' | 'readIndexState' | 'rebuildSource' | 'buildRecord' | 'boundAdapterId'
+  | 'describeSources'
+  | 'describeSource'
+  | 'readIndexState'
+  | 'rebuildSource'
+  | 'buildRecord'
+  | 'boundAdapterId'
+  | 'syncStateOf'
+  | 'pendingRecordSyncs'
 >;
 
 /** One source in an `index_status` answer. */
@@ -57,8 +74,21 @@ export interface KnowledgeIndexStatusEntry {
   packageId?: string;
   /** What the adapter holds against what the service expects. */
   index: KnowledgeIndexReading;
-  /** The last build this node ran of the source, or `null`. */
-  build: KnowledgeBuildRecord | null;
+  /** The source's last build, from its sync state (the same on every node), or `null` when none ran. */
+  build: KnowledgeStoredBuild | null;
+  /** The source's record syncs that failed and are not yet repaired; `null` when its sync state could not be read. */
+  failures: KnowledgeSyncFailures | null;
+  /** Why the sync state could not be read; absent when it was. */
+  syncStateError?: string;
+}
+
+/** The record-sync queue in an `index_status` answer. */
+export interface KnowledgeIndexStatusQueue {
+  queue: string;
+  /** Messages waiting, every source's together (`getQueueSize`); absent when the queue could not count them. */
+  pending?: number;
+  /** Why the count could not be read; absent when it was. */
+  error?: string;
 }
 
 /** The payload keys both actions read. */
@@ -129,9 +159,22 @@ export function knowledgeRebuildActionHandler(service: KnowledgeBuildActionsServ
       };
     }
     // Started, not awaited: a complete build can outlast the request. The
-    // promise answers a record and never rejects for a registered source.
-    void service.rebuildSource(source.id, { trigger: 'operator' }).catch(() => undefined);
-    const build = service.buildRecord(source.id) ?? null;
+    // answer waits only until the build took the source's lease and its start
+    // is recorded (or it ended without walking); the build promise answers a
+    // record and never rejects for a registered source.
+    const build = await new Promise<KnowledgeBuildRecord>((resolve) => {
+      service
+        .rebuildSource(source.id, { trigger: 'operator', onStarted: resolve })
+        .then(resolve, () => undefined);
+    });
+    if (build.status === 'not-run') {
+      return {
+        ok: false,
+        severity: 'warning',
+        message: `Rebuild of source '${source.id}' was not started: ${build.message ?? 'no reason given'}`,
+        details: { source: source.id, build },
+      };
+    }
     return {
       ok: true,
       severity: 'info',
@@ -166,16 +209,45 @@ export function knowledgeIndexStatusActionHandler(service: KnowledgeBuildActions
         ...(adapter === undefined ? {} : { adapter }),
         ...(source.packageId === undefined ? {} : { packageId: source.packageId }),
         index: await service.readIndexState(source.id),
-        build: service.buildRecord(source.id) ?? null,
+        ...(await readSyncState(service, source.id)),
       });
     }
+    const queue = await readQueue(service);
     const due = sources.filter((s) => s.index.due).length;
     const running = sources.filter((s) => s.build?.status === 'running').length;
+    const failing = sources.filter((s) => (s.failures?.count ?? 0) > 0).length;
+    const pending = queue?.pending === undefined ? '' : `, ${queue.pending} record sync(s) waiting`;
     return {
       ok: true,
       severity: 'info',
-      message: `${sources.length} source(s): ${due} need a build, ${running} building on this node.`,
-      details: { sources },
+      message: `${sources.length} source(s): ${due} need a build, ${running} building, ${failing} with failed syncs${pending}.`,
+      details: { sources, ...(queue === undefined ? {} : { queue }) },
     };
   };
+}
+
+/** A source's sync state for an `index_status` entry; a read that fails is named, never thrown. */
+async function readSyncState(
+  service: KnowledgeBuildActionsService,
+  sourceId: string,
+): Promise<Pick<KnowledgeIndexStatusEntry, 'build' | 'failures' | 'syncStateError'>> {
+  try {
+    return await service.syncStateOf(sourceId);
+  } catch (err) {
+    return {
+      build: null,
+      failures: null,
+      syncStateError: `the source's sync state could not be read (${err instanceof Error ? err.message : String(err)}).`,
+    };
+  }
+}
+
+/** The record-sync queue for an `index_status` answer; `undefined` while syncs run inline. */
+async function readQueue(service: KnowledgeBuildActionsService): Promise<KnowledgeIndexStatusQueue | undefined> {
+  try {
+    const pending = await service.pendingRecordSyncs();
+    return pending === undefined ? undefined : { queue: KNOWLEDGE_RECORD_SYNC_QUEUE, pending };
+  } catch (err) {
+    return { queue: KNOWLEDGE_RECORD_SYNC_QUEUE, error: err instanceof Error ? err.message : String(err) };
+  }
 }

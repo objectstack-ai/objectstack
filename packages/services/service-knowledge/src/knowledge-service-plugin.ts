@@ -46,6 +46,8 @@ import {
 import { KnowledgeSourceLoader } from './knowledge-source-loader.js';
 import { KNOWLEDGE_SOURCE_TYPE } from './knowledge-source-registry.js';
 import { contributeKnowledgeSettings } from './knowledge-settings-contribution.js';
+import { SysKnowledgeSyncState } from '@objectstack/platform-objects/system';
+import { KNOWLEDGE_SYNC_STATE_OBJECT, ObjectStoreKnowledgeSyncState, type KnowledgeSyncStateEngine } from './knowledge-sync-state.js';
 import { UnknownKeyError, UnknownNamespaceError } from '@objectstack/service-settings';
 
 /**
@@ -556,9 +558,26 @@ export class KnowledgeServicePlugin implements Plugin {
 
     this.logger = logger;
     this.dataEngineBound = engine !== undefined;
+    // [ADR-0161] Each source's sync state, one durable row per source in
+    // `sys_knowledge_sync_state`, registered here with its Setup entry so it
+    // exists only where this service is mounted.
+    const syncStateRegistered = registerSyncStateObject(ctx, this.version);
+    const syncState =
+      syncStateRegistered && engine !== undefined
+        ? new ObjectStoreKnowledgeSyncState(engine as unknown as KnowledgeSyncStateEngine)
+        : undefined;
+    if (!syncState) {
+      ctx.logger.warn?.(
+        `KnowledgeServicePlugin: ${KNOWLEDGE_SYNC_STATE_OBJECT} ${
+          syncStateRegistered ? 'is registered, but no data engine is bound to it' : 'was not registered (no manifest service)'
+        }, so each source's last build is kept in this process only and its failed syncs are not counted: index_status ` +
+          'answers for this node, and a restart forgets it. Compose the ObjectQL engine and the manifest service before this plugin.',
+      );
+    }
     this.service = new KnowledgeService({
       dataEngine: engine,
       logger,
+      ...(syncState === undefined ? {} : { syncState }),
       defaultTopK: this.options.defaultTopK,
       ...(this.options.deploymentAdapter === undefined ? {} : { deploymentAdapter: this.options.deploymentAdapter }),
       // The field gate's `security` service, resolved per search so plugin
@@ -673,6 +692,16 @@ export class KnowledgeServicePlugin implements Plugin {
       // in its own `kernel:ready` handler (the install-local rehydrate) is
       // listed only now, and the first build below must see its sources.
       await this.reconcileSources(ctx, 'boot');
+      // [ADR-0161] The sync state: a build a stopped node left `running` is
+      // closed `interrupted` (where its lease is free), and every registered
+      // source gets its row, so Setup lists it built or not. Sources that
+      // arrive later get theirs as they register.
+      if (this.service) {
+        const service = this.service;
+        await service.closeInterruptedBuilds();
+        await service.recordSources();
+        this.unsubscribes.push(service.onSourcesChanged(() => { void service.recordSources(); }));
+      }
       await this.provideEmbedder(ctx);
       // [ADR-0161 K7] The first build: every source a build is due for is
       // built once, in the background — after the embedder is provided,
@@ -850,6 +879,8 @@ export class KnowledgeServicePlugin implements Plugin {
         await service.processRecordSync(message.data);
       } catch (err) {
         if (message.attempts >= retry.maxAttempts) {
+          // [ADR-0161] One failure per dead letter, never one per attempt.
+          await service.recordSyncFailure(message.data, err, { attempt: message.attempts, maxAttempts: retry.maxAttempts });
           const named = readRecordSyncMessage(message.data);
           const report =
             `KnowledgeServicePlugin: the sync of record '${named?.recordId ?? '?'}' of source '${named?.source ?? '?'}' ` +
@@ -863,6 +894,7 @@ export class KnowledgeServicePlugin implements Plugin {
       }
     });
     this.syncQueue = queue;
+    service.useRecordSyncQueue(queue);
     service.routeRecordSyncs((message) =>
       queue.publish(KNOWLEDGE_RECORD_SYNC_QUEUE, message, recordSyncPublishOptions(message, retry)),
     );
@@ -1261,6 +1293,7 @@ export class KnowledgeServicePlugin implements Plugin {
     }
     const syncQueue = this.syncQueue;
     this.syncQueue = undefined;
+    this.service?.useRecordSyncQueue(undefined);
     if (syncQueue) {
       // Messages already published stay in the queue, for the next start.
       try {
@@ -1376,4 +1409,57 @@ function packageNamespaceOf(ctx: PluginContext, packageId: string): string | und
     return undefined;
   }
   return typeof namespace === 'string' && namespace !== '' ? namespace : undefined;
+}
+
+/** The Setup bundle the sync-state object and its entry register under. */
+export const KNOWLEDGE_SYNC_STATE_BUNDLE_ID = 'com.objectstack.service.knowledge.sync-state';
+
+/**
+ * The Setup entry listing `sys_knowledge_sync_state`: one row per source, with
+ * its last build and its failed syncs, in the generic object list and record
+ * page. Beside the Knowledge settings entry, behind the same capability. A
+ * factory: the nav fold pushes contributed items into the merged tree by
+ * reference.
+ */
+export function knowledgeSyncStateNavItem(): Record<string, unknown> {
+  return {
+    id: 'nav_knowledge_sync_states',
+    type: 'object',
+    label: 'Knowledge Sync Status',
+    objectName: KNOWLEDGE_SYNC_STATE_OBJECT,
+    icon: 'activity',
+    requiresObject: KNOWLEDGE_SYNC_STATE_OBJECT,
+    requiredPermissions: ['manage_platform_settings'],
+  };
+}
+
+/**
+ * Register `sys_knowledge_sync_state` and its Setup entry on the manifest
+ * service, as the queue plugin registers `sys_job_queue`. Answers whether it
+ * was registered: no manifest service (a lean kernel, a test host) registers
+ * nothing, and the service then keeps its builds in memory only.
+ */
+function registerSyncStateObject(ctx: PluginContext, version: string): boolean {
+  let manifest: { register?(m: unknown): void } | undefined;
+  try {
+    manifest = ctx.getService<{ register?(m: unknown): void }>('manifest');
+  } catch {
+    return false;
+  }
+  if (typeof manifest?.register !== 'function') return false;
+  manifest.register({
+    id: KNOWLEDGE_SYNC_STATE_BUNDLE_ID,
+    namespace: 'sys',
+    version,
+    type: 'plugin',
+    scope: 'system',
+    name: 'Knowledge Service — sync state',
+    description: 'Registers sys_knowledge_sync_state (one row per knowledge source: last build, failed syncs) and its Setup entry.',
+    objects: [SysKnowledgeSyncState],
+    navigationContributions: [
+      // After the Knowledge settings entry (priority 110, same group).
+      { app: 'setup', group: 'group_configuration', priority: 111, items: [knowledgeSyncStateNavItem()] },
+    ],
+  });
+  return true;
 }

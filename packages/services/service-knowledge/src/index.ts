@@ -64,8 +64,21 @@ export {
   knowledgeIndexStatusActionHandler,
   knowledgeRebuildActionHandler,
 } from './knowledge-build-actions.js';
-export type { KnowledgeIndexStatusEntry } from './knowledge-build-actions.js';
-export { KnowledgeServicePlugin } from './knowledge-service-plugin.js';
+export type { KnowledgeIndexStatusEntry, KnowledgeIndexStatusQueue } from './knowledge-build-actions.js';
+export { KNOWLEDGE_SYNC_STATE_OBJECT, ObjectStoreKnowledgeSyncState } from './knowledge-sync-state.js';
+export type {
+  KnowledgeStoredBuild,
+  KnowledgeStoredBuildStatus,
+  KnowledgeSyncFailures,
+  KnowledgeSyncState,
+  KnowledgeSyncStateStore,
+} from './knowledge-sync-state.js';
+export type { KnowledgeRecordSyncQueueView } from './knowledge-service.js';
+export {
+  KnowledgeServicePlugin,
+  KNOWLEDGE_SYNC_STATE_BUNDLE_ID,
+  knowledgeSyncStateNavItem,
+} from './knowledge-service-plugin.js';
 export type { KnowledgeServicePluginOptions } from './knowledge-service-plugin.js';
 export {
   contributeKnowledgeSettings,
