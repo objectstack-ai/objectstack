@@ -152,9 +152,9 @@ export interface UseChatConversationReturn {
   /**
    * objectstack#37861 — the id of the row this hook's own create minted last
    * (a first send, through `ensureConversation`), `undefined` before any. It
-   * tells a host the conversation its first send created from one it resolved
-   * or was handed: a thread a send made during the resolve joins, a history
-   * row opened while the create was on the wire.
+   * is never cleared: a host that reads it as "the row this send created"
+   * compares it with the value it saw when the send was made, since a thread
+   * an earlier send created can be resolved again or opened from history.
    */
   createdConversationId: string | undefined;
   isLoading: boolean;

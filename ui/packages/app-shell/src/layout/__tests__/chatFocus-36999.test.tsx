@@ -445,6 +445,65 @@ describe('the console dock — a conversation opened again restores its own focu
     expect(pageChip()).toBeInTheDocument();
   });
 
+  it('a thread this dock created, resolved again while a send waits, keeps its own ×', async () => {
+    mountDock();
+    await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
+    fireEvent.click(removeButton()!);
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+
+    page.open({ agent: 'ask', fresh: true });
+    await composerReady();
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1'));
+    const read = gate();
+    state.holdRead['conv-1'] = read.wait;
+    page.open({ agent: 'ask', conversationId: 'conv-1' });
+    await composerReady();
+
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('asked during the resolve');
+    });
+    await act(async () => {
+      read.open();
+    });
+    await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
+    expect(state.minted).toBe(1);
+    expect(state.sent[before].context).not.toHaveProperty('focus');
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+  });
+
+  it("a thread this dock created, opened from history while a later send's create is on the wire, keeps its own ×", async () => {
+    mountDock();
+    await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
+    fireEvent.click(removeButton()!);
+
+    page.open({ agent: 'ask', fresh: true });
+    await composerReady();
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1'));
+    const create = gate();
+    state.holdCreate = create.wait;
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('second thread');
+    });
+    await waitFor(() => expect(state.createAttempts).toBe(2));
+
+    page.open({ agent: 'ask', conversationId: 'conv-1' });
+    await waitFor(() => expect(pageChip()).toBeInTheDocument());
+    await act(async () => {
+      create.open();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+    expect(state.sent.slice(before).map((body) => body.context?.focus)).not.toContainEqual([ACCOUNT_1]);
+    await composerReady();
+    expect(await send('and now?')).not.toHaveProperty('focus');
+  });
+
   it("a history row opened while the first send's create is on the wire keeps its own focus", async () => {
     window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
     const create = gate();
