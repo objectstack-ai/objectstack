@@ -1169,7 +1169,7 @@
  * reject with a 422 is refused locally with the reason.
  */
 
-import { createCipheriv, createDecipheriv, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, createPrivateKey, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, randomBytes } from 'node:crypto';
 
 import { GOVERNED_REPOS, HUMAN_MERGE_LINE_THRESHOLD } from '../check-governed-merges.mjs';
 
@@ -2697,6 +2697,118 @@ export function advisoryReadParts(sealed) {
   return parts;
 }
 
+// The paged read (header: "One page a stroke") — every read seals ONE page of exactly the channel's size.
+
+/** The exact plaintext size of every sealed page: the largest the run's notices carry, 29,939 bytes — the listing's size. */
+export const ADVISORY_READ_PAGE_BYTES = (ADVISORY_READ_MAX_SEALED_CHARS * 3) / 4 - ADVISORY_READ_SEAL_OVERHEAD;
+/** The most pages one answer is read in — over it the read is REFUSED, nothing emitted (header: the limit is unverified). */
+export const ADVISORY_READ_MAX_PAGES = 64;
+const PAGE_DIGITS = 3;
+const OFFSET_DIGITS = 9;
+const LENGTH_DIGITS = 5;
+const pageHeader = ({ page, pages, offset, length, bytes, sha256 }) =>
+  `fleet-write advisory_read page=${String(page).padStart(PAGE_DIGITS, '0')}/${String(pages).padStart(PAGE_DIGITS, '0')} ` +
+  `offset=${String(offset).padStart(OFFSET_DIGITS, '0')} length=${String(length).padStart(LENGTH_DIGITS, '0')} ` +
+  `bytes=${String(bytes).padStart(OFFSET_DIGITS, '0')} sha256=${sha256}\n`;
+/** A page's first line, fixed-width: its number and the count, its span of the answer, the answer's size and digest. */
+export const ADVISORY_READ_PAGE_HEADER_SHAPE = new RegExp(
+  `^fleet-write advisory_read page=(\\d{${PAGE_DIGITS}})/(\\d{${PAGE_DIGITS}}) offset=(\\d{${OFFSET_DIGITS}}) length=(\\d{${LENGTH_DIGITS}}) ` +
+    `bytes=(\\d{${OFFSET_DIGITS}}) sha256=([0-9a-f]{64})\\n`,
+);
+/** The header's size — one size, whatever its numbers. */
+export const ADVISORY_READ_PAGE_HEADER_BYTES = Buffer.byteLength(pageHeader({ page: 0, pages: 0, offset: 0, length: 0, bytes: 0, sha256: '0'.repeat(64) }), 'utf8');
+/** The most bytes of the answer one page carries: the page less its header — fewer when a character would straddle its end. */
+export const ADVISORY_READ_PAGE_CHUNK_BYTES = ADVISORY_READ_PAGE_BYTES - ADVISORY_READ_PAGE_HEADER_BYTES;
+
+/**
+ * The answer's pages, as spans of its UTF-8 bytes: `[{ offset, length }]`, contiguous from 0 to its end, each at most
+ * `ADVISORY_READ_PAGE_CHUNK_BYTES` and ending on a character's boundary, so every page is UTF-8 on its own. Pure.
+ */
+export function advisoryReadPageSpans(answer) {
+  const bytes = Buffer.isBuffer(answer) ? answer : Buffer.from(String(answer), 'utf8');
+  const spans = [];
+  let offset = 0;
+  do {
+    let end = Math.min(offset + ADVISORY_READ_PAGE_CHUNK_BYTES, bytes.length);
+    // A continuation byte (10xxxxxx) starts no character: step back to the character it belongs to.
+    while (end < bytes.length && end > offset && (bytes[end] & 0xc0) === 0x80) end -= 1;
+    spans.push({ offset, length: end - offset });
+    offset = end;
+  } while (offset < bytes.length);
+  return spans;
+}
+
+/**
+ * Page `page` (from 1) of `answer` (`advisoryReadPlaintext`'s text), as the relay seals it: the header, that span of the
+ * answer, then trailing spaces to exactly `ADVISORY_READ_PAGE_BYTES`. A page past the last is the header and the pad
+ * alone (`length=0`), so a read past the end lands exactly as any other. Null when the answer needs more than
+ * `ADVISORY_READ_MAX_PAGES` pages, or `page` is not one of 1..`ADVISORY_READ_MAX_PAGES`. Pure.
+ */
+export function advisoryReadPage(answer, page) {
+  if (!Number.isInteger(page) || page < 1 || page > ADVISORY_READ_MAX_PAGES) return null;
+  const bytes = Buffer.from(String(answer), 'utf8');
+  const spans = advisoryReadPageSpans(bytes);
+  if (spans.length > ADVISORY_READ_MAX_PAGES) return null;
+  const span = spans[page - 1] ?? { offset: bytes.length, length: 0 };
+  const sha256 = createHash('sha256').update(bytes).digest('hex');
+  const head = pageHeader({ page, pages: spans.length, offset: span.offset, length: span.length, bytes: bytes.length, sha256 });
+  return head + bytes.subarray(span.offset, span.offset + span.length).toString('utf8') + ' '.repeat(ADVISORY_READ_PAGE_CHUNK_BYTES - span.length);
+}
+
+/**
+ * An opened page as `{ page, pages, offset, length, bytes, sha256, chunk }` — `chunk` its span's bytes — or null for
+ * anything that is not exactly one page `advisoryReadPage` writes: another size, a header out of shape or out of
+ * range, a span past the answer, a page past the last that carries bytes, or a pad that is not spaces. Pure.
+ */
+export function advisoryReadPageOf(text) {
+  if (typeof text !== 'string') return null;
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length !== ADVISORY_READ_PAGE_BYTES) return null;
+  const m = ADVISORY_READ_PAGE_HEADER_SHAPE.exec(text);
+  if (!m) return null;
+  const [page, pages, offset, length, bytes] = m.slice(1, 6).map(Number);
+  const sha256 = m[6];
+  if (page < 1 || page > ADVISORY_READ_MAX_PAGES || pages < 1 || pages > ADVISORY_READ_MAX_PAGES) return null;
+  if (length > ADVISORY_READ_PAGE_CHUNK_BYTES || offset + length > bytes) return null;
+  if (page > pages && (length !== 0 || offset !== bytes)) return null;
+  const at = ADVISORY_READ_PAGE_HEADER_BYTES;
+  if (!buf.subarray(at + length).every((b) => b === 0x20)) return null;
+  return { page, pages, offset, length, bytes, sha256, chunk: Buffer.from(buf.subarray(at, at + length)) };
+}
+
+/** Why a set of opened pages is not one answer — the fixed sentences, which carry nothing of it. */
+export const ADVISORY_READ_PAGES_DISAGREE = 'its pages disagree on the answer they cut — the advisory changed between them, so re-send the read';
+export const ADVISORY_READ_PAGES_MISSING = 'its pages are not each of 1..n exactly once';
+export const ADVISORY_READ_PAGES_TORN = 'its pages do not join end to end into the answer they name — its size or digest does not hold';
+
+/**
+ * Pages 1..n of one answer (`advisoryReadPageOf`'s, any order) joined back into it: `{ plaintext }` — byte for byte the
+ * answer the relay cut, its size and SHA-256 checked — or `{ why }`, one of the fixed sentences above. Pure.
+ */
+export function advisoryReadAssemble(pages) {
+  const list = Array.isArray(pages) ? pages.filter((p) => p && typeof p === 'object') : [];
+  if (list.length === 0 || list.length !== pages.length) return { why: ADVISORY_READ_PAGES_MISSING };
+  const [{ pages: n, bytes, sha256 }] = list;
+  if (list.some((p) => p.pages !== n || p.bytes !== bytes || p.sha256 !== sha256)) return { why: ADVISORY_READ_PAGES_DISAGREE };
+  const byPage = new Map(list.map((p) => [p.page, p]));
+  if (list.length !== n || byPage.size !== n || !Array.from({ length: n }, (_, k) => byPage.has(k + 1)).every(Boolean)) return { why: ADVISORY_READ_PAGES_MISSING };
+  const ordered = Array.from({ length: n }, (_, k) => byPage.get(k + 1));
+  let at = 0;
+  for (const p of ordered) {
+    if (p.offset !== at || p.chunk.length !== p.length || (p.length === 0 && bytes !== 0)) return { why: ADVISORY_READ_PAGES_TORN };
+    at += p.length;
+  }
+  const joined = Buffer.concat(ordered.map((p) => p.chunk));
+  if (at !== bytes || createHash('sha256').update(joined).digest('hex') !== sha256) return { why: ADVISORY_READ_PAGES_TORN };
+  try {
+    return { plaintext: new TextDecoder('utf-8', { fatal: true }).decode(joined) };
+  } catch {
+    return { why: ADVISORY_READ_PAGES_TORN };
+  } finally {
+    joined.fill(0);
+  }
+}
+
 /**
  * The sender gates a read may be held to (header) — the row's `senderGate` is a key of this table. One, by the
  * maintainer's ruling: `target-write`, the gate every stroke already passed, write, maintain or admin on the
@@ -2769,18 +2881,21 @@ export const ADVISORY_READ_UNREACHED =
   'advisory or sender was judged and nothing was sealed or emitted — re-send the read with a fresh key';
 export const ADVISORY_READ_UNREACHED_STATUS = 'not reached';
 
-/** What a read too large for the channel prints: the counts, and nothing of the answer. Pure. */
-export function advisoryReadOverCapText({ plaintextBytes, sealedChars }) {
-  return (
-    `the sealed answer is ${sealedChars} character(s) (${plaintextBytes} byte(s) of the answer), over the ${ADVISORY_READ_MAX_SEALED_CHARS} the run's ` +
-    `notices carry (${ADVISORY_READ_MAX_PARTS} of ${ADVISORY_READ_PART_CHARS}) — nothing was emitted; ⛔ the text never leaves another way, put the reading to the maintainer`
-  );
-}
+/**
+ * What a read too large for its pages prints — the limit alone, ⛔ never a count: no line but the ciphertext varies with
+ * the answer's size (header), so the refusal is one sentence for every answer over it.
+ */
+export const ADVISORY_READ_OVER_CAP =
+  `the answer needs more than the ${ADVISORY_READ_MAX_PAGES} pages a read is cut into (${ADVISORY_READ_PAGE_CHUNK_BYTES} bytes of it a page) — nothing was ` +
+  'emitted; ⛔ the text never leaves another way, put the reading to the maintainer';
 
-/** The row a landed read prints: counts alone — ⛔ no id, no state, no field. Pure. */
-export function advisoryReadLandedText({ plaintextBytes, sealedChars, parts }) {
-  return `sealed ${plaintextBytes} byte(s) of the answer to the seat's one-time key — ${sealedChars} character(s) in ${parts} notice part(s), which only that seat's process opens`;
-}
+/**
+ * The row a landed read prints — one sentence for every page of every answer: ⛔ no id, no state, no field, no page
+ * number and no count but the channel's own, which is the same on every read.
+ */
+export const ADVISORY_READ_LANDED =
+  `sealed one page of the answer to the seat's one-time key — ${ADVISORY_READ_MAX_SEALED_CHARS} character(s) in ${ADVISORY_READ_MAX_PARTS} notice part(s), ` +
+  "which only that seat's process opens";
 
 // ---------------------------------------------------------------------------
 // `advisory_list` (header: "The one row that LISTS advisories") — the states, the walk, the cursor, the projection,
@@ -3588,6 +3703,8 @@ export const FIELDS = Object.freeze({
   advisory_state: Object.freeze({ kind: 'enum', values: ADVISORY_SETTABLE_STATES, quiet: true, named: ADVISORY_REFUSED_STATES }),
   // The seat's one-time public key for ONE read (header: "The one row that READS an advisory") — its own kind.
   public_key: Object.freeze({ kind: 'x25519' }),
+  // The page of ONE read's answer (header: "One page a stroke") — 1..ADVISORY_READ_MAX_PAGES, quiet like every advisory key.
+  page: Object.freeze({ kind: 'int', max: ADVISORY_READ_MAX_PAGES, quiet: true }),
   // A note sealed to the relay's committed key (header: "The one row that APPENDS to an advisory") — its own kind, ciphertext alone.
   sealed_note: Object.freeze({ kind: 'sealed' }),
   // The dequeue's cause and the seat's evidence for it (header: "The one row that takes a pull OUT of the merge queue").
@@ -4150,9 +4267,10 @@ export const OPS = Object.freeze({
     grant: 'read',
     senderGate: 'target-write',
     required: Object.freeze(['ghsa_id', 'public_key']),
-    optional: Object.freeze([]),
+    // The page this stroke seals (header: "One page a stroke"), from 1; absent is page 1. The seat's door sets it.
+    optional: Object.freeze(['page']),
     alone: true,
-    requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRead: { ghsaId: a.ghsa_id, publicKey: a.public_key } }],
+    requests: (a, repo) => [{ verb: 'GET', path: `/repos/${repo}/security-advisories/${a.ghsa_id}`, advisoryRead: { ghsaId: a.ghsa_id, publicKey: a.public_key, page: a.page ?? 1 } }],
   }),
   // The one row that LISTS advisories — see the header. The collection's GET for each of ADVISORY_LIST_STATES, walked
   // by the executor page by page on the platform's own cursor, nothing written; each advisory projected to

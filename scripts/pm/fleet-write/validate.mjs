@@ -331,8 +331,19 @@ import {
   advisoryReadFenceFailures,
   advisoryReadFenceText,
   advisoryReadKeyFailure,
-  advisoryReadLandedText,
-  advisoryReadOverCapText,
+  ADVISORY_READ_LANDED,
+  ADVISORY_READ_MAX_PAGES,
+  ADVISORY_READ_OVER_CAP,
+  ADVISORY_READ_PAGE_BYTES,
+  ADVISORY_READ_PAGE_CHUNK_BYTES,
+  ADVISORY_READ_PAGE_HEADER_BYTES,
+  ADVISORY_READ_PAGES_DISAGREE,
+  ADVISORY_READ_PAGES_MISSING,
+  ADVISORY_READ_PAGES_TORN,
+  advisoryReadAssemble,
+  advisoryReadPage,
+  advisoryReadPageOf,
+  advisoryReadPageSpans,
   advisoryReadParts,
   advisoryReadPlaintext,
   openAdvisoryRead,
@@ -425,7 +436,10 @@ export function readEventPayload(env = process.env, read = (p) => readFileSync(p
 export function validateField(name, value, spec, where) {
   const at = `${where}.${name}`;
   if (spec.kind === 'int') {
-    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${quote(value)}`;
+    // ⛔ A quiet int never echoes the value (`FIELDS`): it is described by its type and size. `max` caps it (a read's page).
+    const got = spec.quiet ? `${describeQuietly(value)} — not echoed` : quote(value);
+    if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) return `${at} must be a positive integer (a JSON number), got ${got}`;
+    if (spec.max !== undefined && value > spec.max) return `${at} must be at most ${spec.max}, got ${got}`;
     return null;
   }
   if (spec.kind === 'str') {

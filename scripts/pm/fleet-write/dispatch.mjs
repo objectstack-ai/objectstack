@@ -635,6 +635,8 @@ import {
   TRANSPORT_ENV,
   advisoryListDisplay,
   advisoryReadAad,
+  advisoryReadAssemble,
+  advisoryReadPageOf,
   advisorySealAad,
   advisoryNoteDigest,
   ADVISORY_NOTE_STAMP_SHAPE,
@@ -1955,6 +1957,12 @@ export function armAdvisoryReads(actions, { generate = () => generateKeyPairSync
       );
       return a;
     }
+    if (Object.hasOwn(a, 'page')) {
+      refused.push(
+        `fleet-write/dispatch: REFUSED — actions[${i}].page is set in the actions file: this door reads an ${a.op} page by page itself, each page its own stroke with its own one-time key, and joins them before anything is printed, so a page from a file is refused, not used. Drop the key; the door pages the read.`,
+      );
+      return a;
+    }
     const pair = generate();
     keys.set(i + 1, pair.privateKey);
     return { ...a, public_key: pair.publicKey.export({ format: 'der', type: 'spki' }).toString('base64') };
@@ -2018,19 +2026,74 @@ export function openRunAdvisoryReads(payload, parts, keys = new Map()) {
     } catch (e) {
       return shut(e.message);
     }
-    let fields = null;
-    try {
-      const json = JSON.parse(plaintext);
-      if (json !== null && typeof json === 'object' && !Array.isArray(json)) fields = Object.keys(json);
-    } catch {
-      fields = null;
+    if (r.op === 'advisory_read') {
+      // ONE page of the answer (`ops.mjs`, "One page a stroke"): the page this read asked for, or nothing.
+      const page = advisoryReadPageOf(plaintext);
+      if (page === null) return shut('the opened answer is not one page of a read — the relay and this door disagree on the page');
+      if (page.page !== (payload.actions[r.action - 1].page ?? 1)) return shut('the opened page is not the page this read asked for');
+      if (page.page === 1 && page.pages === 1) {
+        const whole = advisoryReadAssemble([page]);
+        if (whole.why) return shut(whole.why);
+        return { action: r.action, op: r.op, state: 'opened', plaintext: whole.plaintext, bytes: page.bytes, fields: advisoryReadFieldsOf(whole.plaintext), parts: r.parts, pages: 1, page, why: '' };
+      }
+      // A page of a longer answer: opened, and the door's paging (`pageAdvisoryRead`) joins it — no text here yet.
+      return { action: r.action, op: r.op, state: 'opened', plaintext: null, bytes: page.bytes, fields: null, parts: r.parts, pages: page.pages, page, why: '' };
     }
-    return { action: r.action, op: r.op, state: 'opened', plaintext, bytes: Buffer.byteLength(plaintext, 'utf8'), fields, parts: r.parts, why: '' };
+    return { action: r.action, op: r.op, state: 'opened', plaintext, bytes: Buffer.byteLength(plaintext, 'utf8'), fields: advisoryReadFieldsOf(plaintext), parts: r.parts, why: '' };
   });
+}
+
+/** An opened answer's top-level field names, or null when it is no JSON object. Pure. */
+function advisoryReadFieldsOf(plaintext) {
+  try {
+    const json = JSON.parse(plaintext);
+    return json !== null && typeof json === 'object' && !Array.isArray(json) ? Object.keys(json) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The rest of a paged read (`ops.mjs`, "One page a stroke"), after its first stroke `first` (sent as `payload`) opened
+ * page 1 of n > 1:
+ * pages 2..n, each its OWN stroke — a fresh request id from `requestIdOf`, a fresh one-time key from `arm` (never the
+ * first one's), the same advisory and `page: k` — sent through `send(payload, keys)` (`sendFleetWrite`'s answer), each
+ * opened under its own key, then all joined by `advisoryReadAssemble` and checked against the size and digest every
+ * page names. Returns the stroke result to report: `first` itself for any other stroke; on success `first` with its
+ * read's row holding the WHOLE answer (`pages`, `parts` summed, `requests` every stroke's id); on a page that did not
+ * land or open, that stroke's own result with the read UNVERIFIED and no text; on pages that do not join, `first`
+ * UNVERIFIED with the fixed sentence. ⛔ Nothing here prints the text. Never throws on an answer.
+ */
+export async function pageAdvisoryRead(first, { payload, session, send, arm = (actions) => armAdvisoryReads(actions), requestIdOf = () => newRequestId(), log = () => {} }) {
+  const row = (first?.reads ?? []).find((r) => r.op === 'advisory_read' && r.state === 'opened' && r.plaintext === null && r.page);
+  if (!first?.ok || !row || !payload) return first;
+  const n = row.page.pages;
+  const action = payload.actions[row.action - 1];
+  const pages = [row.page];
+  const requests = [payload.request_id];
+  const shut = (result, why) => ({ ...result, state: result.ok ? 'unverified' : result.state, ok: false, reads: [{ ...row, state: 'unverified', plaintext: null, fields: null, why }], detail: result.ok ? `conclusion success, but UNVERIFIED — action ${row.action} (advisory_read): ${why}` : result.detail });
+  for (let k = 2; k <= n; k++) {
+    const armed = arm([{ op: 'advisory_read', ghsa_id: action.ghsa_id }]);
+    const requestId = requestIdOf();
+    const packed = packRequest({ repo: payload.repo, session, actions: [{ ...armed.actions[0], page: k }], requestId });
+    if (!packed.ok) return shut(first, `page ${k} of ${n} could not be packed (${packed.errors.join('; ')})`);
+    log(`fleet-write: action ${row.action} advisory_read — page ${k} of ${n}, its own stroke (request ${requestId}) under a fresh one-time key.`);
+    const next = await send(packed.payload, armed.keys);
+    requests.push(requestId);
+    const got = (next?.reads ?? [])[0];
+    if (!next?.ok || !got?.page) return shut({ ...first, ...next }, `page ${k} of ${n} did not land and open (${got?.why || next?.detail || next?.state || 'no answer'}) — nothing of the read is printed; re-send the whole read`);
+    pages.push(got.page);
+  }
+  const whole = advisoryReadAssemble(pages);
+  if (whole.why) return shut(first, whole.why);
+  return { ...first, reads: (first.reads ?? []).map((r) => (r === row ? { ...row, plaintext: whole.plaintext, fields: advisoryReadFieldsOf(whole.plaintext), parts: row.parts * n, pages: n, requests } : r)) };
 }
 
 /** The line a read's outcome earns on stderr — counts and field names, ⛔ never the text. Pure. */
 export function advisoryReadLine(row, { runId = '?', reveal = false } = {}) {
+  if (row.state === 'opened' && row.plaintext === null && row.page) {
+    return `fleet-write: run ${runId}'s notices carry action ${row.action} ${row.op}'s page ${row.page.page} of ${row.page.pages} in ${row.parts} part(s) — opened with this process's one-time key: ${row.page.length} byte(s) of the answer's ${row.bytes}. The door reads the other page(s), each its own stroke, before anything is printed.`;
+  }
   if (row.state === 'opened') {
     return `fleet-write: run ${runId}'s notices carry action ${row.action} ${row.op}'s sealed answer in ${row.parts} part(s) — opened with this process's one-time key: ${row.bytes} byte(s), fields ${(row.fields ?? []).join(', ') || 'none'}. ${reveal ? 'The text follows on stdout.' : "Not printed: pass --reveal to print it to this process's stdout (never a file)."}`;
   }
@@ -5175,10 +5238,12 @@ export async function main(argv, deps = {}) {
     if (rearmed !== null) return rearmed;
   }
   const tool = 'scripts/pm/fleet-write/dispatch.mjs';
-  const result = await sendFleetWrite(packed.payload, { token, advisoryReadKeys: armed.keys, advisoryNotes: noting.notes, reveal: opts.reveal, ...(deps.send ?? {}) });
+  const sendOne = (payload, keys) => sendFleetWrite(payload, { token, advisoryReadKeys: keys, advisoryNotes: noting.notes, reveal: opts.reveal, ...(deps.send ?? {}) });
+  // A read longer than one page: the door reads the rest, each page its own stroke and key, and joins them (header).
+  const result = await pageAdvisoryRead(await sendOne(packed.payload, armed.keys), { payload: packed.payload, session, send: sendOne, log: (l) => console.error(l) });
   // ⛔ The opened text reaches THIS process's stdout, and only on --reveal — never stderr, a log, a file or --json.
   // A listing's opened text is padded to the channel's size: its display alone trims the pad (`advisoryListDisplay`).
-  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened') console.log(r.op === 'advisory_list' ? advisoryListDisplay(r.plaintext) : r.plaintext);
+  if (opts.reveal) for (const r of result.reads ?? []) if (r.state === 'opened' && typeof r.plaintext === 'string') console.log(r.op === 'advisory_list' ? advisoryListDisplay(r.plaintext) : r.plaintext);
   if (!result.ok && (result.state === 'no-run' || result.state === 'timeout')) console.error(unconfirmedText(result, tool));
   if (result.notStored) console.error(notStoredText(result, tool));
   if (result.state === 'unverified') console.error(unverifiedText(result, tool));
@@ -5195,7 +5260,7 @@ export async function main(argv, deps = {}) {
         annotations: (result.annotations?.rows ?? []).map((a) => ({ action: a.action, op: a.op, number: a.number, url: a.url })),
         advisories: (result.annotations?.advisories ?? []).map((a) => ({ action: a.action, op: a.op, ghsa_id: a.ghsaId })),
         // A read's outcome, its counts and field names alone — ⛔ never its text, which --reveal alone prints, above.
-        advisory_reads: (result.reads ?? []).map((r) => ({ action: r.action, op: r.op, state: r.state, bytes: r.bytes, fields: r.fields, parts: r.parts, why: r.why || null })),
+        advisory_reads: (result.reads ?? []).map((r) => ({ action: r.action, op: r.op, state: r.state, bytes: r.bytes, fields: r.fields, parts: r.parts, ...(r.op === 'advisory_read' ? { pages: r.pages ?? null, requests: r.requests ?? [packed.payload.request_id] } : {}), why: r.why || null })),
         // A note's read-back, its byte count alone — ⛔ never its text, which never left the file it was read from.
         advisory_notes: (result.notes ?? []).map((r) => ({ action: r.action, op: r.op, state: r.state, bytes: r.bytes, why: r.why || null })),
         runs: (result.runs?.rows ?? []).map((r) => ({ action: r.action, op: r.op, workflow: r.workflow, verdict: r.verdict, class: r.cls, candidates: r.candidates ?? 0, run: r.run ? { id: r.run.id, url: r.run.url, status: r.run.status, conclusion: r.run.conclusion, created_at: r.run.created_at, actor: r.run.actor } : null })),

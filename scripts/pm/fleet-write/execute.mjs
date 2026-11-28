@@ -701,6 +701,8 @@ import {
   ADVISORY_OPEN_STATES,
   ADVISORY_READ_ACCESS_REMEDY,
   ADVISORY_READ_FIELDS,
+  ADVISORY_READ_LANDED,
+  ADVISORY_READ_OVER_CAP,
   ADVISORY_READ_SEAL_FAILED,
   ADVISORY_READ_UNREACHED,
   ADVISORY_READ_UNREACHED_STATUS,
@@ -767,8 +769,7 @@ import {
   advisoryReadCall,
   advisoryReadFenceFailures,
   advisoryReadFenceText,
-  advisoryReadLandedText,
-  advisoryReadOverCapText,
+  advisoryReadPage,
   advisoryReadParts,
   advisoryReadPlaintext,
   openAdvisoryRead,
@@ -1967,7 +1968,7 @@ export function confirmAdvisory(req, answer, pre) {
  * that throws, a gate the table does not know); the CLI passes neither. Never throws.
  */
 export async function advisoryReadAction(req, { payload, index, api, t, seal = sealAdvisoryRead, senderGate = OPS.advisory_read.senderGate }) {
-  const { ghsaId, publicKey } = req.advisoryRead;
+  const { ghsaId, publicKey, page = 1 } = req.advisoryRead;
   const r = await rest(api, req.path, { method: 'GET' }, t);
   // Status 0 is `rest`'s word for a call that threw before any answer: the platform judged nothing, so the row names no
   // HTTP status and no grant remedy — and ⛔ never the exception's message, which can carry the path and so the id.
@@ -1978,20 +1979,22 @@ export async function advisoryReadAction(req, { payload, index, api, t, seal = s
     const why = `REFUSED at the relay's fence on the advisory the action names, nothing sealed or emitted — ${advisoryReadFenceText(failures)}${refused ? `${advisoryPlatformText(r.detail)}; ${ADVISORY_READ_ACCESS_REMEDY}` : ''}`;
     return { ok: false, status: r.status, why, notes: [] };
   }
-  const plaintext = advisoryReadPlaintext(r.json);
+  // ONE page of the answer (header: "One page a stroke"), padded to the channel's full size: every landed read is the
+  // same ten parts and the same row, whatever the answer's size or the page asked for. Over the page cap: nothing sealed.
+  const plaintext = advisoryReadPage(advisoryReadPlaintext(r.json), page);
+  if (plaintext === null) return { ok: false, status: r.status, why: ADVISORY_READ_OVER_CAP, notes: [] };
   let sealed;
   try {
     sealed = seal({ plaintext, publicKey, aad: advisorySealAad({ requestId: payload.request_id, action: index, op: 'advisory_read', ghsaId }) });
   } catch {
     return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
   }
-  const plaintextBytes = Buffer.byteLength(plaintext, 'utf8');
-  const sealedChars = typeof sealed === 'string' ? sealed.length : 0;
-  if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed)) return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
+  // A sealed page is exactly the channel's size; anything else is no seal of one, and nothing of it is emitted.
+  if (typeof sealed !== 'string' || !/^[A-Za-z0-9_-]+$/.test(sealed) || sealed.length !== ADVISORY_READ_MAX_SEALED_CHARS) return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
   const parts = advisoryReadParts(sealed);
-  if (!parts) return { ok: false, status: r.status, why: advisoryReadOverCapText({ plaintextBytes, sealedChars }), notes: [] };
+  if (!parts || parts.length !== ADVISORY_READ_MAX_PARTS) return { ok: false, status: r.status, why: ADVISORY_READ_SEAL_FAILED, notes: [] };
   const notes = parts.map((chunk, k) => ({ action: index, op: 'advisory_read', part: k + 1, of: parts.length, sealed: chunk }));
-  return { ok: true, status: r.status, result: advisoryReadLandedText({ plaintextBytes, sealedChars, parts: parts.length }), notes };
+  return { ok: true, status: r.status, result: ADVISORY_READ_LANDED, notes };
 }
 
 /**
