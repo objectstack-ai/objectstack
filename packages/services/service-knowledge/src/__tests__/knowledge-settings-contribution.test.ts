@@ -178,13 +178,17 @@ describe('embedderSettings: false keeps the embedder section off the ai page', a
     expect(await mounted.settings.runAction('ai', 'test_embedder', {})).not.toEqual(offAnswer);
   });
 
-  it('the knowledge page, its test button and its Setup entry are offered as before', async () => {
+  it('the knowledge page, its actions and its Setup entry are offered as before', async () => {
     expect(off.settings.listManifests().map((m) => m.namespace)).toContain('knowledge');
     expect(off.settings.getManifest('knowledge')).toEqual(mounted.settings.getManifest('knowledge'));
-    const knowledgeValues = await namespaceValues(off.settings, 'knowledge');
-    expect(await off.settings.runAction('knowledge', 'test', {})).toEqual(
-      await knowledgeTestActionHandler({ namespace: 'knowledge', actionId: 'test', values: knowledgeValues, payload: {}, ctx: {} }),
-    );
+    // Test connection is not this service's: `@objectstack/knowledge-turso`
+    // contributes it with the Turso fields, and pins it beside this option.
+    // Here `knowledge/test` answers as on the default mount, which answers it
+    // as an undeclared action (judged by that control, never by message text).
+    const offTest = await off.settings.runAction('knowledge', 'test', {});
+    expect(offTest).toEqual(await mounted.settings.runAction('knowledge', 'test', {}));
+    const undeclared = await off.settings.runAction('knowledge', 'never_declared', {});
+    expect({ ok: offTest.ok, severity: offTest.severity }).toEqual({ ok: undeclared.ok, severity: undeclared.severity });
     expect(knowledgeEntries(off.registered)).toHaveLength(1);
   });
 

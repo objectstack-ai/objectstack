@@ -36,7 +36,7 @@ import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import { KNOWLEDGE_SERVICE } from '@objectstack/spec/contracts';
-import { KnowledgeServicePlugin } from '@objectstack/service-knowledge';
+import { KnowledgeServicePlugin, type KnowledgeServicePluginOptions } from '@objectstack/service-knowledge';
 import {
   SettingsServicePlugin,
   registerSettingsRoutes,
@@ -106,7 +106,7 @@ class SavesStoreUrl implements Plugin {
 
 type Mount = 'no-turso' | 'turso-from-settings' | 'turso-own-url';
 
-async function boot(mount: Mount, extra: Plugin[] = []) {
+async function boot(mount: Mount, extra: Plugin[] = [], knowledgeOptions: KnowledgeServicePluginOptions = {}) {
   const root = mkdtempSync(join(tmpdir(), 'knowledge-turso-settings-'));
   dirs.push(root);
   const i18n = new RecordingI18nPlugin();
@@ -117,7 +117,7 @@ async function boot(mount: Mount, extra: Plugin[] = []) {
   // service, whose init() registers the page this plugin adds to.
   if (mount === 'turso-from-settings') kernel.use(new KnowledgeTursoPlugin({ urlFromSettings: true, projectRoot: root, env: {} }));
   if (mount === 'turso-own-url') kernel.use(new KnowledgeTursoPlugin({ url: ':memory:', urlFromSettings: true, projectRoot: root, env: {} }));
-  kernel.use(new KnowledgeServicePlugin({ enableEventSync: false, buildAtBoot: false }));
+  kernel.use(new KnowledgeServicePlugin({ enableEventSync: false, buildAtBoot: false, ...knowledgeOptions }));
   kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
   for (const p of extra) kernel.use(p);
   await kernel.bootstrap();
@@ -267,6 +267,30 @@ describe('the Knowledge page with knowledge-turso reading its URL from settings'
   it('loads the group\'s copy into the i18n service, in every locale the settings bundle ships', () => {
     const locales = loadedTursoCopy(i18n.loaded).map(([locale]) => locale).sort();
     expect(locales).toEqual(Object.keys(settingsBuiltinTranslations).sort());
+  });
+});
+
+/**
+ * `embedderSettings: false` on the knowledge service keeps the embedder
+ * section off the `ai` page; the Knowledge page this store adds to is not
+ * that section, so its group and its Test connection are offered as before.
+ */
+describe('knowledge-turso beside a knowledge service mounted with embedderSettings: false', async () => {
+  const { settings, http } = await boot('turso-from-settings', [], { embedderSettings: false });
+  const asBefore = await boot('turso-from-settings');
+
+  it('carries the Turso group, its two fields and their Test connection, as with the default mount', () => {
+    expect(idsOf(settings).slice(0, TURSO_IDS.length)).toEqual(TURSO_IDS);
+    expect(settings.getManifest('knowledge')).toEqual(asBefore.settings.getManifest('knowledge'));
+  });
+
+  it('answers Test connection with the Turso check, where an undeclared action is refused', async () => {
+    const { answer, control } = await postBesideUndeclared(http, 'test', { values: { turso_url: 'file:./sent.db' } });
+    expect(control.status).toBe(400);
+    expect(answer.status).toBe(200);
+    expect(answer.body?.data?.ok).toBe(true);
+    // The Turso check's own answer: it names the URL it was sent.
+    expect(String(answer.body?.data?.message)).toContain('file:./sent.db');
   });
 });
 
