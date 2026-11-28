@@ -511,6 +511,16 @@
  * PASS (`recordLeg`, `ruleChangeRecordReasons`) — so no reader prints Tier S
  * over a record the queue refuses.
  *
+ * The post-merge sweep reads the split too (#35612, `readRuleChangeLanding`):
+ * a merged `.claude/**` pull whose body declares a seat value is read again
+ * with the queue guard's own readers on the landed commit, the way the arm leg
+ * reads a skills landing below. One whose record verifies the declaration is a
+ * seat landing, listed APART from the maintainer's merges; one whose record did
+ * not is a ⛔ `breach`. A `yes`, no line, a settings or hooks path, a Tier H row
+ * beside it, an authorized approval or enqueue, a landed tree older than the
+ * split, and every read that failed keep the landing on the maintainer's list —
+ * ⛔ no landing is ever hidden, and an unread one makes the sweep INCOMPLETE.
+ *
  * Published `skills/**` stays a Tier H ROW: the 2026-09-18 seat did not propose
  * moving it, and no row moved since. What moved on 2026-11-14 is a READING on
  * the two catalog rows (section "The low-risk skills arm" below).
@@ -1254,11 +1264,17 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 74 → 95 with the arm's record stage: sixteen pins on the two conjuncts and the stage's three states, five on `--pr`;
   // 95 → 100 with every other card the pull names (`others`): labelled, unread, not said to be read, each its own
   // reason, and one on `--pr`.
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 100,
+  // 100 → 103 (#35612): the record must stand on the queue's record leg, its control (the queue leg defers), and `--pr`.
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 103,
   // 51 → 66 with the record stage as the sweep reads it at the landing: ten pins, and five on which landings it binds;
   // 66 → 71 with the other cards as they stood at the landing (four pins) and the stage's two NOT MEASURED reads.
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
   '⭐ the weekly audit card: every reading the job files on, both ways (#33814)': 54,
+  // #35612: the split leg — every state with its control, the report, the audit card and the INCOMPLETE banner;
+  // 24 → 30 with the review of record 7238665187: S1 (each BREACH row names its leg, both headings name both), N1
+  // (`sweepComplete` and the loop's count), N2 (an unread workflow diff beside the split is NOT MEASURED, and its control);
+  // 30 → 35 with S2 of record 7239017248 (an approval or enqueue clears it first: two cases, two controls, one landing half that does not clear).
+  '⚖️ #35612: the sweep lists a `.claude/**` declaration-split landing APART and judges it on the record that verifies it': 35,
   '⚖️ #33539: the ADR leg of the low-risk arm — an add-only note lands Tier S, any other ADR change stays H': 52,
   // 40 → 44 (#35612, N1 of #35610): a record the queue's record leg refuses — a FAIL, below its tier, or a leg not
   // read — keeps the split at Tier H however its `Rule-change-verified:` line reads; one case pins the words.
@@ -1274,8 +1290,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
 // Raised 36 → 37 with the low-risk skills arm battery (#33501), 37 → 38 with its post-merge leg (#33603),
 // 38 → 39 with the weekly audit card's battery (#33814), 39 → 40 with the arm's ADR leg (#33539),
 // 40 → 41 with the guard-instrument rows and the `.claude/**` declaration split (#35321), 41 → 42 with the
-// stdin-carrying git reader.
-const SELF_TEST_BATTERY_FLOOR = 42;
+// stdin-carrying git reader, 42 → 43 with the sweep's `.claude/**` split leg (#35612).
+const SELF_TEST_BATTERY_FLOOR = 43;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2928,7 +2944,7 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   let recordStage = LOW_RISK_RECORD_STAGE.notReached;
   if (handed) {
     recordStage = LOW_RISK_RECORD_STAGE.read;
-    reasons.push(...lowRiskRecordStageReasons(reading.record ?? null, reading.cardLabels ?? null));
+    reasons.push(...lowRiskRecordStageReasons(reading.record ?? null, reading.cardLabels ?? null, { legDeferred: reading.recordLeg === RULE_CHANGE_RECORD_LEG_DEFERRED }));
   } else if (reasons.length === 0) {
     recordStage = LOW_RISK_RECORD_STAGE.pending;
     reasons.push(LOW_RISK_RECORD_STAGE_PENDING_REASON);
@@ -2969,13 +2985,21 @@ export const LOW_RISK_RECORD_STAGE_PENDING_REASON =
  * or `{ measured: false, reason }` — no derivable card included, since a label on a card nobody
  * could name cannot be ruled out. The conjunct holds only when each card's labels were read and none is
  * `security`, and its timeline was read and never removed one: the PR's own rule, on every card it names.
+ *
+ * And the record must be one the queue's record leg CLEARS (#35612, the N1 shape of #35610 on this arm): its
+ * `recordLeg` (`{ state, reason }`, built by the guard's `lowRiskRecordStage` with `recordVerdict` then
+ * `recordPassVerdict` on the same comment) reads `stands`, so a FAIL, a record below its face's tier, an unreadable
+ * leg or a leg not read is a reason. With the carry rule above (`carried`, `lowRiskCarryRefusal`) that is the
+ * queue's `lowRiskRecordVerdict`, so `--pr` and the relay cannot read the arm Tier S over a record the queue
+ * refuses. ⛔ One caller may skip it — `legDeferred`, the queue leg, whose own record leg runs that verdict next
+ * (`RULE_CHANGE_RECORD_LEG_DEFERRED` on its reading) and so keeps its refusal kinds as they were.
  */
-export function lowRiskRecordStageReasons(record, cardLabels) {
-  return [...lowRiskRecordLineReasons(record), ...lowRiskCardLabelReasons(cardLabels)];
+export function lowRiskRecordStageReasons(record, cardLabels, { legDeferred = false } = {}) {
+  return [...lowRiskRecordLineReasons(record, legDeferred), ...lowRiskCardLabelReasons(cardLabels)];
 }
 
-/** The record stage's first conjunct: the review of record on this head reads `Security-touching: no`. Pure. */
-function lowRiskRecordLineReasons(record) {
+/** The record stage's first conjunct: the review of record on this head stands on the record leg and reads `Security-touching: no`. Pure. */
+function lowRiskRecordLineReasons(record, legDeferred = false) {
   const key = LOW_RISK_RECORD_LINE.split(':')[0];
   if (!record || record.measured !== true) {
     return [`its contract-review record was not read (${record?.reason ?? 'no reading'}), so no \`${LOW_RISK_RECORD_LINE}\` line is established`];
@@ -2989,6 +3013,7 @@ function lowRiskRecordLineReasons(record) {
   const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
   const line = record.securityTouching;
   if (record.carried && record.carried.ok !== true) reasons.push(`${which} ${record.carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
+  if (!legDeferred) reasons.push(...recordLegReasons(record.recordLeg, which));
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${key}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${key}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
   else if (line.value !== 'no') reasons.push(`${which} reads \`${key}: ${String(line.value)}\``);
@@ -3182,6 +3207,19 @@ export const RULE_CHANGE_RECORD_STAGE_PENDING_REASON =
   `its contract-review record was not read, so no \`${RULE_CHANGE_VERIFIED_KEY}:\` line is established`;
 
 /**
+ * Why the queue's record leg on the same comment (`recordLeg`, `{ state, reason }`) keeps a record stage at Tier H,
+ * or [] when it `stands`: the one wording both record stages print — the split's and the low-risk arm's. Pure.
+ */
+function recordLegReasons(leg, which) {
+  if (leg?.state === 'stands') return [];
+  const said = leg?.reason ? `: ${leg.reason}` : '';
+  if (!leg) return [`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`];
+  if (leg.state === 'not-pass') return [`${which} does not read a clean PASS${said}`];
+  if (leg.state === 'below-tier') return [`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`];
+  return [`${which} does not stand on the queue's record leg (${leg.state})${said}`];
+}
+
+/**
  * Why the record keeps the split at Tier H, or [] — the split's last conjunct. Pure.
  *
  * `record` is the reading the low-risk arm's record stage already takes (`lowRiskRecordStage`, the queue guard),
@@ -3208,14 +3246,7 @@ export function ruleChangeRecordReasons(record, declared) {
   const carried = record.ruleChangeCarried;
   if (carried && carried.ok !== true) reasons.push(`${which} ${carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
   // The queue's record leg on the same comment: ⛔ a caller that hands no leg reading gets no Tier S (N1 of #35610).
-  const leg = record.recordLeg;
-  if (leg?.state !== 'stands') {
-    const said = leg?.reason ? `: ${leg.reason}` : '';
-    if (!leg) reasons.push(`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`);
-    else if (leg.state === 'not-pass') reasons.push(`${which} does not read a clean PASS${said}`);
-    else if (leg.state === 'below-tier') reasons.push(`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`);
-    else reasons.push(`${which} does not stand on the queue's record leg (${leg.state})${said}`);
-  }
+  reasons.push(...recordLegReasons(record.recordLeg, which));
   const line = record.ruleChangeVerified;
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${RULE_CHANGE_VERIFIED_KEY}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${RULE_CHANGE_VERIFIED_KEY}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
@@ -5345,7 +5376,7 @@ export function pullSizeFrom(head) {
 export const ARM_READER_SOURCE = './check-governed-queue-guard.mjs';
 
 /** The guard exports the arm leg reads with. A missing one is NOT MEASURED, never a second parser here. */
-export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'ignoredAuthorLines', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'lowRiskRecordStagePending', 'lowRiskRecordStage', 'readCardLabels', 'namedCardsOf', 'readLowRiskRecordStage', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader', 'makeLabelReader']);
+export const ARM_READER_EXPORTS = Object.freeze(['decomposeGovernedWork', 'readLowRiskTier', 'landsOnLowRiskArm', 'recordAuthorTrusted', 'ignoredAuthorLines', 'authorizedApprovalVerdict', 'enqueuerFromTimeline', 'authorizedEnqueueVerdict', 'loadRecordRecognisers', 'recordVerdict', 'lowRiskRecordVerdict', 'ruleChangeRecordVerdict', 'lowRiskRecordStagePending', 'lowRiskRecordStage', 'readCardLabels', 'namedCardsOf', 'readLowRiskRecordStage', 'makePullReader', 'makeReviewReader', 'makeCommentReader', 'makeTimelineReader', 'makeLabelReader']);
 
 /** Load the guard's readers and the record recognisers once per run. Never throws: a failed load is the reason. */
 export async function loadArmReaders(load = (specifier) => import(specifier)) {
@@ -5443,66 +5474,9 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     return { state: 'tier-h', headSha, reasons };
   }
   if (sizeLimbFires(entry.size)) return { state: 'tier-h', headSha, reasons: [`the landed diff crosses the ${HUMAN_MERGE_LINE_THRESHOLD}-line human-merge line`] };
-  // S2: the record's head is tied to THIS commit only through the pull's own merge. A pull GitHub says is not
-  // merged, or merged as another commit, cannot excuse this one: never `pass`.
-  if (!attribution) return unmeasured('its merge could not be read, so no record can be tied to this commit');
-  const landed = Date.parse(attribution.mergedAt ?? '');
-  if (attribution.mergedAt == null || Number.isNaN(landed)) {
-    return { state: 'breach', headSha, reason: `#${entry.pr} is not merged (no \`merged_at\`), so no record on it covers this commit` };
-  }
-  const merged = String(attribution.mergeCommitSha ?? '').toLowerCase();
-  if (merged !== String(entry.sha ?? '').toLowerCase()) {
-    return { state: 'breach', headSha, reason: `#${entry.pr} landed as ${merged ? merged.slice(0, 12) : '(no merge_commit_sha)'}, not as this commit, so its record does not cover it` };
-  }
-  const before = (at) => Date.parse(at ?? '') < landed;
-  // S1, the approval leg then the enqueue leg, each as the queue read them before the merge.
-  let reviews;
-  try {
-    reviews = await fetchers.fetchReviews(entry.pr);
-  } catch (error) {
-    return unmeasured(`its reviews could not be read (${why(error)})`);
-  }
-  const approval = guard.authorizedApprovalVerdict(reviewsAsLanded(reviews.filter((r) => before(r?.submitted_at)), events, landed), headSha);
-  if (approval.state === 'approved') return { state: 'cleared', by: 'review', who: approval.approvers, headSha };
-  const enqueue = guard.authorizedEnqueueVerdict(guard.enqueuerFromTimeline(events.filter((e) => before(e?.created_at))));
-  if (enqueue.state === 'authorized') return { state: 'cleared', by: 'enqueue', who: [enqueue.login], headSha };
-  if (recognisers?.available !== true) return unmeasured(recognisers?.reason ?? 'the record recognisers were not loaded');
-  // N11: no trusted-author list is a reading that is missing, not a thread with no record in it. Defensive only
-  // (#33765 N-c): the guard's `loadRecordRecognisers` answers `available: false` rather than a set without the
-  // list, and a list it builds always holds the relay's login, so only a hand-built recogniser set reaches here.
-  if (!Array.isArray(recognisers.trustedAuthors) || recognisers.trustedAuthors.length === 0) {
-    return unmeasured('the record recognisers carry no trusted-author list, so no comment can be read as a record');
-  }
-  const card = recognisers.deliveredCard(head);
-  let baseRef = null;
-  try {
-    baseRef = String(runGit(['rev-parse', '--verify', `${entry.sha}^1`])).trim() || null;
-  } catch { /* a carried record then reads unreadable, never stands */ }
-  const pair = { pr: entry.pr, card: card.card, headSha, runGit, baseRef, paths: work.paths, repo };
-  // The same threads with the rows edited after the landing put back: what the record leg would have read had
-  // nobody edited them. Only ever read to NAME a dropped row (N9, N10), never to decide a state.
-  const unedited = { ...pair };
-  const editedAfter = new Map();
-  const ignoredAuthors = [];
-  for (const thread of recognisers.threads) {
-    const number = pair[thread.number];
-    try {
-      const rows = number === null || number === undefined ? [] : await fetchers.fetchComments(number);
-      // The guard's AUTHOR binding (#33687, #33711 S3) first: a row its author does not earn is dropped, as the queue
-      // drops it, so it can neither be the record nor shadow one. Then a row counts only when it existed, unedited
-      // since, when the commit landed; a missing time never counts. A trusted row edited after it is noted (N7).
-      const existedAt = (r) => Date.parse(r?.created_at ?? '') <= landed;
-      const trusted = rows.filter((r) => guard.recordAuthorTrusted(r, recognisers.trustedAuthors));
-      for (const r of rows) if (!trusted.includes(r) && existedAt(r)) ignoredAuthors.push(String(r?.user?.login ?? '(unreadable author)'));
-      const existed = trusted.filter(existedAt);
-      pair[thread.rows] = existed.filter((r) => Date.parse(r?.updated_at ?? r?.created_at ?? '') <= landed);
-      unedited[thread.rows] = existed;
-      for (const r of existed) if (!pair[thread.rows].includes(r) && r?.id != null) editedAfter.set(r.id, `${thread.where} comment ${r.id}`);
-    } catch (error) {
-      return unmeasured(`${thread.where} #${number}'s comment thread could not be read (${why(error)})`);
-    }
-  }
-  const cardNote = card.card === null ? `no card thread searched — ${card.reason}` : `card #${card.card}`;
+  const landing = await readLandingThreads({ entry, head, headSha, events, readers, fetchers, runGit, attribution, paths: work.paths, repo });
+  if (landing.settled) return landing.settled;
+  const { landed, pair, unedited, editedAfter, ignoredAuthors, card, cardNote } = landing;
   const record = guard.lowRiskRecordVerdict(guard.recordVerdict({ pair, recognisers, cardNote }), pair, recognisers);
   if (record.state === 'unreadable') return unmeasured(record.reason);
   const found = { where: record.where ?? null, id: record.id ?? null, at: record.at ?? null, cardNote };
@@ -5541,6 +5515,101 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
     const stageReasons = work.surfaces.find((s) => s?.lowRiskVerdict)?.lowRiskVerdict?.reasons ?? [];
     return { state: 'breach', stage: true, headSha, reason: stageReasons.join('; ') || 'no reason recorded', record: found, ...(ignored.length > 0 ? { ignored } : {}) };
   }
+  return landingBreach({ guard, recognisers, record, unedited, editedAfter, cardNote, headSha, found, ignored });
+}
+
+/**
+ * The first half of `readLandingThreads`, which the split leg's unread-input answer also reads (S2 of record
+ * 7239017248): the merge that ties the pull to THIS commit (S2 of #33603), then the approval leg and the enqueue leg
+ * as the queue read them before the merge (S1). Returns `{ settled }` (`breach`, `cleared`, `not-measured`) or
+ * `{ landed }`, the merge time the record threads are cut at. Never throws.
+ */
+async function readLandingClearance({ entry, headSha, events, guard, fetchers, attribution }) {
+  const why = (error) => String(error?.message ?? error).split('\n')[0];
+  const unmeasured = (reason) => ({ state: 'not-measured', reason, headSha });
+  // S2: the record's head is tied to THIS commit only through the pull's own merge. A pull GitHub says is not
+  // merged, or merged as another commit, cannot excuse this one: never `pass`.
+  if (!attribution) return { settled: unmeasured('its merge could not be read, so no record can be tied to this commit') };
+  const landed = Date.parse(attribution.mergedAt ?? '');
+  if (attribution.mergedAt == null || Number.isNaN(landed)) {
+    return { settled: { state: 'breach', headSha, reason: `#${entry.pr} is not merged (no \`merged_at\`), so no record on it covers this commit` } };
+  }
+  const merged = String(attribution.mergeCommitSha ?? '').toLowerCase();
+  if (merged !== String(entry.sha ?? '').toLowerCase()) {
+    return { settled: { state: 'breach', headSha, reason: `#${entry.pr} landed as ${merged ? merged.slice(0, 12) : '(no merge_commit_sha)'}, not as this commit, so its record does not cover it` } };
+  }
+  const before = (at) => Date.parse(at ?? '') < landed;
+  // S1, the approval leg then the enqueue leg, each as the queue read them before the merge.
+  let reviews;
+  try {
+    reviews = await fetchers.fetchReviews(entry.pr);
+  } catch (error) {
+    return { settled: unmeasured(`its reviews could not be read (${why(error)})`) };
+  }
+  const approval = guard.authorizedApprovalVerdict(reviewsAsLanded(reviews.filter((r) => before(r?.submitted_at)), events, landed), headSha);
+  if (approval.state === 'approved') return { settled: { state: 'cleared', by: 'review', who: approval.approvers, headSha } };
+  const enqueue = guard.authorizedEnqueueVerdict(guard.enqueuerFromTimeline(events.filter((e) => before(e?.created_at))));
+  if (enqueue.state === 'authorized') return { settled: { state: 'cleared', by: 'enqueue', who: [enqueue.login], headSha } };
+  return { landed };
+}
+
+/**
+ * The landing half both seat legs read alike — the arm's (#33603) and the `.claude/**` split's (#35612), after each has
+ * read its pull and its tier: the merge that ties a record to THIS commit (S2), the approval leg then the enqueue leg as
+ * the queue read them before the merge (S1), and the record threads as they stood at the landing, cut by the guard's
+ * author binding (S3, N4, N7). Returns `{ settled }` — the state a leg returns as is (`breach`, `cleared`,
+ * `not-measured`) — or what the record leg reads next: `{ landed, pair, unedited, editedAfter, ignoredAuthors, card,
+ * cardNote }`. Never throws.
+ */
+async function readLandingThreads({ entry, head, headSha, events, readers, fetchers, runGit, attribution, paths, repo }) {
+  const why = (error) => String(error?.message ?? error).split('\n')[0];
+  const unmeasured = (reason) => ({ state: 'not-measured', reason, headSha });
+  const { guard, recognisers } = readers;
+  const clearance = await readLandingClearance({ entry, headSha, events, guard, fetchers, attribution });
+  if (clearance.settled) return clearance;
+  const { landed } = clearance;
+  if (recognisers?.available !== true) return { settled: unmeasured(recognisers?.reason ?? 'the record recognisers were not loaded') };
+  // N11: no trusted-author list is a reading that is missing, not a thread with no record in it. Defensive only
+  // (#33765 N-c): the guard's `loadRecordRecognisers` answers `available: false` rather than a set without the
+  // list, and a list it builds always holds the relay's login, so only a hand-built recogniser set reaches here.
+  if (!Array.isArray(recognisers.trustedAuthors) || recognisers.trustedAuthors.length === 0) {
+    return { settled: unmeasured('the record recognisers carry no trusted-author list, so no comment can be read as a record') };
+  }
+  const card = recognisers.deliveredCard(head);
+  let baseRef = null;
+  try {
+    baseRef = String(runGit(['rev-parse', '--verify', `${entry.sha}^1`])).trim() || null;
+  } catch { /* a carried record then reads unreadable, never stands */ }
+  const pair = { pr: entry.pr, card: card.card, headSha, runGit, baseRef, paths, repo };
+  // The same threads with the rows edited after the landing put back: what the record leg would have read had
+  // nobody edited them. Only ever read to NAME a dropped row (N9, N10), never to decide a state.
+  const unedited = { ...pair };
+  const editedAfter = new Map();
+  const ignoredAuthors = [];
+  for (const thread of recognisers.threads) {
+    const number = pair[thread.number];
+    try {
+      const rows = number === null || number === undefined ? [] : await fetchers.fetchComments(number);
+      // The guard's AUTHOR binding (#33687, #33711 S3) first: a row its author does not earn is dropped, as the queue
+      // drops it, so it can neither be the record nor shadow one. Then a row counts only when it existed, unedited
+      // since, when the commit landed; a missing time never counts. A trusted row edited after it is noted (N7).
+      const existedAt = (r) => Date.parse(r?.created_at ?? '') <= landed;
+      const trusted = rows.filter((r) => guard.recordAuthorTrusted(r, recognisers.trustedAuthors));
+      for (const r of rows) if (!trusted.includes(r) && existedAt(r)) ignoredAuthors.push(String(r?.user?.login ?? '(unreadable author)'));
+      const existed = trusted.filter(existedAt);
+      pair[thread.rows] = existed.filter((r) => Date.parse(r?.updated_at ?? r?.created_at ?? '') <= landed);
+      unedited[thread.rows] = existed;
+      for (const r of existed) if (!pair[thread.rows].includes(r) && r?.id != null) editedAfter.set(r.id, `${thread.where} comment ${r.id}`);
+    } catch (error) {
+      return { settled: unmeasured(`${thread.where} #${number}'s comment thread could not be read (${why(error)})`) };
+    }
+  }
+  const cardNote = card.card === null ? `no card thread searched — ${card.reason}` : `card #${card.card}`;
+  return { landed, pair, unedited, editedAfter, ignoredAuthors, card, cardNote };
+}
+
+/** A seat landing's BREACH on a record that does not stand, the edit named where one dropped it (N9, N10). Pure but for `pair.runGit`. */
+function landingBreach({ guard, recognisers, record, unedited, editedAfter, cardNote, headSha, found, ignored, notPass = 'its record does not read PASS', ...more }) {
   // N9, N10: the edit is named on every BREACH reason, and only for the row the record leg would have read.
   let edited = '';
   if (editedAfter.size > 0) {
@@ -5563,8 +5632,108 @@ export async function readArmLanding(entry, { paths, repo, readers, fetchers, ru
   const reason = (record.state === 'absent' ? `no \`## Contract review\` record on its head (${record.readSummary})`
     : record.state === 'below-tier' ? 'its record does not stand at the tier its face owes'
       : record.state === 'unsigned' ? 'its record names no reviewer'
-        : `its record does not read PASS (${record.verdictReason ?? record.state})`) + edited;
-  return { state: 'breach', headSha, reason, record: found, ...(ignored.length > 0 ? { ignored } : {}) };
+        : `${notPass} (${record.verdictReason ?? record.state})`) + edited;
+  return { state: 'breach', headSha, reason, record: found, ...more, ...(ignored.length > 0 ? { ignored } : {}) };
+}
+
+/**
+ * The split leg (#35612): a `.claude/**` landing the declaration split put at Tier S is a SEAT landing, listed apart
+ * from the maintainer's merges, and it stands only on a same-head at-tier PASS record whose `Rule-change-verified:`
+ * line reads the value the body declares. ⭐ ONE reader, the queue's: `readLowRiskTier` (the register's
+ * `applyRuleChangeSplit` on the pull's body) and then `recordVerdict` → `ruleChangeRecordVerdict` on the rows as they
+ * stood at the landing (`readLandingThreads`, the arm leg's own landing half: the merge that ties the record to this
+ * commit, the approval and enqueue legs before `merged_at`, the author binding, the edits after it).
+ *
+ * ⛔ It never hides a landing — when in doubt the entry stays on the maintainer's list:
+ *   `tier-h`        the split, or a row beside it, reads Tier H on what the pull shows (`yes`, no line, a settings or
+ *                   hooks path, a constant Tier H row) or the landing crosses the size line: the maintainer's merge.
+ *                   A row beside a pending split that is Tier H only on an input the sweep never reads (a workflow
+ *                   row's diff) is `not-measured` instead, unless an approval or enqueue settles it `cleared`;
+ *   `unbound`       the landed tree's copy of this file predates the split (`ruleChangeSplitBound`), so its queue read
+ *                   the row's raw Tier S: listed with the maintainer's merges, unjudged here;
+ *   `cleared`       an authorized approval or enqueue before the merge: the maintainer's merge;
+ *   `not-measured`  a read failed: listed with the maintainer's merges, and the sweep is INCOMPLETE;
+ *   `pass`          a seat landing on a record that verifies the declaration — listed APART;
+ *   `breach`        a seat landing whose record did not verify, or whose pull did not land as this commit — listed
+ *                   APART, ⛔ the violation signal.
+ * An entry that also hits a low-risk row is the arm leg's (the arm reads a `.claude/**` path beside it Tier H), so it
+ * is read once. The body is the pull's NOW, as on the arm leg: an edit after the landing is not seen. Never throws.
+ */
+export async function readRuleChangeLanding(entry, { paths, repo, readers, fetchers, runGit, attribution = null }) {
+  const surfaces = entry?.surfaces ?? [];
+  if (!entry || entry.pr == null || !surfaces.some((s) => s?.ruleChangeVerdict) || surfaces.some((s) => s?.lowRiskVerdict)) return null;
+  const why = (error) => String(error?.message ?? error).split('\n')[0];
+  let headSha = null;
+  const unmeasured = (reason) => ({ state: 'not-measured', reason, headSha });
+  if (readers?.available !== true) return unmeasured(readers?.reason ?? 'the queue guard readers were not loaded');
+  const { guard, recognisers } = readers;
+  const [work] = guard.decomposeGovernedWork([{ pr: entry.pr, sha: entry.sha, subject: entry.subject, paths }], repo).governed;
+  if (!work) return null;
+  let pull;
+  let events;
+  try {
+    pull = await fetchers.fetchPull(entry.pr);
+    headSha = pull.sha;
+    events = await fetchers.fetchTimeline(entry.pr);
+  } catch (error) {
+    return unmeasured(`${pull ? 'its timeline' : 'its pull request'} could not be read (${why(error)})`);
+  }
+  const head = { number: entry.pr, body: pull.body, labels: pull.labels, fork: pull.fork, head: { ref: pull.headRef } };
+  // The first read hands in no record, so the split is never Tier S here: `pending` says the body declares a seat
+  // value and every other row is Tier S; anything else is Tier H on what the pull shows.
+  guard.readLowRiskTier(work, repo, head, { timeline: { measured: true, reason: null, events }, runGit });
+  const split = work.surfaces.filter((s) => s?.ruleChangeVerdict).map((s) => s.ruleChangeVerdict);
+  if (!ruleChangeRecordStagePending(work.surfaces)) {
+    const besideRows = work.surfaces.filter((s) => !s?.ruleChangeVerdict && s?.tier !== GOVERNED_TIER_S);
+    const beside = besideRows.map((s) => `\`${s.glob}\``);
+    // N2 of record 7238665187: a row beside the split that is Tier H only because the sweep never reads its input
+    // (the workflows split's diff) says nothing about how the queue read the landing — the queue reads that diff. With
+    // the split itself pending and no measured fact against the landing (another Tier H row, the size line), that is
+    // NOT MEASURED, as the arm leg answers an unread input (`armUnreadInputs`); a measured fact settles Tier H.
+    const unread = besideRows.filter((s) => s?.splitVerdict?.measured === false);
+    const splitPending = split.length > 0 && split.every((v) => v.recordStage === LOW_RISK_RECORD_STAGE.pending);
+    if (splitPending && unread.length > 0 && unread.length === besideRows.length && !sizeLimbFires(entry.size)) {
+      // S2 of record 7239017248: an authorized approval or enqueue before the merge makes it the maintainer's merge
+      // whatever the queue read for the tier, so it settles `cleared` before the unread input is answered. Only
+      // `cleared` settles here: a BREACH or a failed read on the landing half stays NOT MEASURED on the unread input.
+      const clearance = await readLandingClearance({ entry, headSha, events, guard, fetchers, attribution });
+      if (clearance.settled?.state === 'cleared') return { ...clearance.settled, declared: split.find((v) => v.declared)?.declared ?? null };
+      return unmeasured(`${unread.map((s) => `\`${s.glob}\``).join(', ')} beside it is Tier H only on an input this sweep does not read (${unread[0].splitVerdict.reason}), so how its queue read the landing is not known`);
+    }
+    const reasons = [...split.flatMap((v) => (v.measured ? v.reasons ?? [] : [v.reason])), ...(beside.length > 0 ? [`a Tier H row beside it: ${beside.join(', ')}`] : [])];
+    return { state: 'tier-h', headSha, reasons: reasons.filter(Boolean) };
+  }
+  const declared = split.find((v) => v.declared)?.declared ?? null;
+  if (sizeLimbFires(entry.size)) return { state: 'tier-h', headSha, declared, reasons: [`the landed diff crosses the ${HUMAN_MERGE_LINE_THRESHOLD}-line human-merge line`] };
+  const bound = ruleChangeSplitBound(runGit, entry.sha);
+  if (bound === null) return unmeasured(`its landed tree's \`${ARM_RULE_PATH}\` could not be read, so whether its queue read the declaration split is not known`);
+  if (bound === false) return { state: 'unbound', headSha, declared };
+  const landing = await readLandingThreads({ entry, head, headSha, events, readers, fetchers, runGit, attribution, paths: work.paths, repo });
+  if (landing.settled) return { ...landing.settled, declared };
+  const { pair, unedited, editedAfter, ignoredAuthors, cardNote } = landing;
+  const record = guard.ruleChangeRecordVerdict(guard.recordVerdict({ pair, recognisers, cardNote }), pair, recognisers, declared);
+  if (record.state === 'unreadable') return { ...unmeasured(record.reason), declared };
+  const found = { where: record.where ?? null, id: record.id ?? null, at: record.at ?? null, cardNote };
+  const ignored = guard.ignoredAuthorLines({ ignoredAuthors }).map((line) => line.trim());
+  if (record.state === 'stands') return { state: 'pass', headSha, declared, record: found, ...(ignored.length > 0 ? { ignored } : {}) };
+  return landingBreach({ guard, recognisers, record, unedited, editedAfter, cardNote, headSha, found, ignored, declared, notPass: 'its record does not verify the declaration' });
+}
+
+/** The split's own declaration, at a line start: a tree whose copy of this file has it ran the split in its queue. */
+export const RULE_CHANGE_SPLIT_DECLARED = /^export function applyRuleChangeSplit\(/m;
+
+/**
+ * Did the queue that judged this landing read the `.claude/**` declaration split? The rule its queue applied is the
+ * one in the landed commit's tree (`armRecordStageBound`'s reasoning): `true` its copy of this file declares the
+ * split, `false` it predates it — the row's raw Tier S landed on a plain record then — and `null` the tree could not
+ * be read: NOT MEASURED, never a guess. Pure but for `runGit`.
+ */
+export function ruleChangeSplitBound(runGit, sha) {
+  try {
+    return RULE_CHANGE_SPLIT_DECLARED.test(String(runGit(['cat-file', '-p', `${sha}:${ARM_RULE_PATH}`])));
+  } catch {
+    return null;
+  }
 }
 
 /** This file, as a tree names it: where a landed commit keeps the rule its queue ran. */
@@ -5755,6 +5924,39 @@ export function armCell(entry) {
   const unread = (a.unread ?? []).length > 0 ? `; settled without the unread ${a.unread.join('; ')}` : '';
   return `\n      low-risk arm: Tier H${head} — ${reasons.slice(0, 2).join('; ') || 'no reason recorded'}${reasons.length > 2 ? ` (+${reasons.length - 2} more)` : ''}${unread}`;
 }
+
+/** The `.claude/**` declaration split's cell under a sweep row (`readRuleChangeLanding`), or ''. Pure. */
+export function ruleChangeCell(entry) {
+  const r = entry?.ruleChange;
+  if (!r) return '';
+  const head = r.headSha ? ` on head ${String(r.headSha).slice(0, 12)}` : '';
+  const ignored = (r.ignored ?? []).map((line) => `\n         ${line}`).join('');
+  const said = r.declared ? ` on \`${RULE_CHANGE_KEY}: ${r.declared}\`` : '';
+  const lead = '`.claude/**` declaration split';
+  if (r.state === 'pass') return `\n      ✅ ${lead} landing${head}${said}: verified by the same-head at-tier PASS record ${r.record?.where ?? ''} comment ${r.record?.id ?? '(no id)'}${ignored}`;
+  if (r.state === 'breach') return `\n      ⛔ BREACH — ${lead} landing${head}${said} WITHOUT a same-head at-tier PASS record that verifies it: ${r.reason}${ignored}`;
+  if (r.state === 'cleared') return `\n      ${lead}${said}${head}: cleared by an authorized ${r.by === 'review' ? 'approval' : 'enqueue'} (${(r.who ?? []).join(', ')}) before the record was read — the maintainer's merge`;
+  if (r.state === 'not-measured') return `\n      ⚠️  ${lead} NOT MEASURED${head} — ${r.reason}; listed here, unjudged`;
+  if (r.state === 'unbound') return `\n      ${lead}${said}${head}: its landed tree predates the split, so its queue read the row's raw Tier S — unjudged here, listed with the maintainer's merges`;
+  const reasons = r.reasons ?? [];
+  return `\n      ${lead}: Tier H${head} — ${reasons.slice(0, 2).join('; ') || 'no reason recorded'}${reasons.length > 2 ? ` (+${reasons.length - 2} more)` : ''}`;
+}
+
+/** The seat leg a sweep entry was read on — the low-risk arm's or the declaration split's (never both), or null. Pure. */
+export function seatLegOf(entry) {
+  return entry?.arm ?? entry?.ruleChange ?? null;
+}
+
+/** The name of the seat leg a sweep entry was read on, as the audit card prints it on each of its rows. Pure. */
+export function seatLegName(entry) {
+  return entry?.arm ? 'low-risk skills arm' : entry?.ruleChange ? '`.claude/**` declaration split' : 'no seat leg';
+}
+
+/**
+ * What the audit's BREACH list holds, as both of its headings print it (the run summary and the card): seat landings on
+ * EITHER leg, each row naming its own (S1 of record 7238665187) — never the arm alone, since #35612 files the split's too.
+ */
+export const AUDIT_BREACH_WHAT = "seat landing(s) whose record does not clear the leg it landed on — each row names its leg: the low-risk skills arm, or the `.claude/**` declaration split";
 
 /**
  * The per-run NAMED fallback lines (#9619): one line per repo+reason group
@@ -6009,12 +6211,16 @@ export function renderReport({ window, repos, scanned, entries, lookups, sweepCo
   // Listed APART (#33603): a seat landing through the low-risk arm is not the maintainer's to recognise.
   const armLandings = entries.filter((e) => e.arm?.state === 'pass' || e.arm?.state === 'breach');
   const breaches = armLandings.filter((e) => e.arm.state === 'breach').length;
+  // Listed APART (#35612): a `.claude/**` landing the declaration split put at Tier S is a seat landing too.
+  const splitLandings = entries.filter((e) => e.ruleChange?.state === 'pass' || e.ruleChange?.state === 'breach');
+  const splitBreaches = splitLandings.filter((e) => e.ruleChange.state === 'breach').length;
   const head =
     `governed-merges sweep: ${entries.length - oversizedOnly.length} governed merge(s)` +
     (oversizedOnly.length > 0 ? ` and ${oversizedOnly.length} oversized landing(s) with no governed path` : '') +
     ` since ${window.requestedIso} ` +
     `across ${audited.length}/${repos.length} governed repo(s)\n` +
     (armLandings.length > 0 ? `  of which ${armLandings.length} landed through the low-risk skills arm, ${breaches} of them ⛔ BREACH (no same-head at-tier PASS record, or a record stage at Tier H)\n` : '') +
+    (splitLandings.length > 0 ? `  of which ${splitLandings.length} landed through the \`.claude/**\` declaration split, ${splitBreaches} of them ⛔ BREACH (no same-head at-tier PASS record that verifies the declaration)\n` : '') +
     `  scanned ${scanned} mainline commit(s); ${lookups} API lookup(s).\n` +
     (sweepCode ? `${describeSweepCode(sweepCode)}\n` : '') +
     describeWindow(window);
@@ -6057,15 +6263,24 @@ export function renderReport({ window, repos, scanned, entries, lookups, sweepCo
       e.surfaces.length === 0
         ? '      surfaces: (none — listed on SIZE alone)'
         : `      surfaces: ${surfaces}\n${files.map((f) => `        - ${f}`).join('\n')}`;
-    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}${sizeCell(e)}${armCell(e)}\n${surfaceBlock}${registerCell(e)}`;
+    return `  • ${e.repoSlug ? `${e.repoSlug} ` : ''}${prName} — ${e.subject}\n      commit ${e.sha.slice(0, 9)} @ ${e.date}; ${who}${sizeCell(e)}${armCell(e)}${ruleChangeCell(e)}\n${surfaceBlock}${registerCell(e)}`;
   };
-  const lines = entries.filter((e) => !armLandings.includes(e)).map(row);
+  const lines = entries.filter((e) => !armLandings.includes(e) && !splitLandings.includes(e)).map(row);
   if (armLandings.length > 0) {
     lines.push(
       `  Low-risk skills arm landings (${LOW_RISK_ARM_RULING}): the arm reads them Tier S, so they land on the`,
       "  seat's own review and are NOT the maintainer's to recognise, whoever merged_by names. Each stands only on a",
       '  same-head at-tier PASS record the queue could read; a ⛔ BREACH row is the violation signal — file it as an incident.',
       ...armLandings.map(row),
+    );
+  }
+  if (splitLandings.length > 0) {
+    lines.push(
+      `  \`.claude/**\` declaration-split landings (${RULE_CHANGE_RULING}): the PR body declares no rule change and the`,
+      "  split reads them Tier S, so they land on the seat's own review and are NOT the maintainer's to recognise. Each stands",
+      "  only on a same-head at-tier PASS record whose `Rule-change-verified:` line reads the declared value; a ⛔ BREACH row",
+      '  is the violation signal — file it as an incident.',
+      ...splitLandings.map(row),
     );
   }
 
@@ -6140,9 +6355,10 @@ export function auditRowName(e) {
 
 /** What this run read for an entry, in the words a carried row's mark quotes. */
 function auditReadingOf(e) {
-  switch (e?.arm?.state) {
+  switch (seatLegOf(e)?.state) {
     case 'breach': return 'BREACH';
-    case 'not-measured': return 'NOT MEASURED on the low-risk arm';
+    case 'not-measured': return e?.arm ? 'NOT MEASURED on the low-risk arm' : 'NOT MEASURED on the `.claude/**` declaration split';
+    case 'unbound': return "a `.claude/**` landing older than the declaration split, the maintainer's merge";
     case 'pass': return 'a landing on a same-head at-tier PASS record';
     case 'cleared': return 'cleared by an authorized approval or enqueue';
     case 'tier-h': return "Tier H, the maintainer's merge";
@@ -6181,13 +6397,15 @@ export function readAuditSweep({ exit = '', raw = '', stderr = '' } = {}) {
     }
     for (const e of sweep.entries) {
       const key = auditRowKey(e);
-      if (!(key in readings) || e?.arm?.state === 'breach') readings[key] = auditReadingOf(e);
-      if (e?.arm?.state === 'breach') {
+      // The seat leg the entry was read on: the low-risk arm's (#33603) or the declaration split's (#35612).
+      const leg = seatLegOf(e);
+      if (!(key in readings) || leg?.state === 'breach') readings[key] = auditReadingOf(e);
+      if (leg?.state === 'breach') {
         const who = e.attribution ? `merged_by ${auditClean(e.attribution.mergedBy ?? '(none)')} at ${auditClean(e.attribution.mergedAt ?? '(unknown)')}` : 'merge attribution unavailable';
-        const head = e.arm.headSha ? ` on head \`${String(e.arm.headSha).slice(0, 12)}\`` : '';
-        breaches.push({ key, line: `${auditRowName(e)} — ${auditClean(e.subject)} — commit \`${String(e.sha ?? '').slice(0, 12)}\`; ${who}${head}: ${auditClean(e.arm.reason)}` });
+        const head = leg.headSha ? ` on head \`${String(leg.headSha).slice(0, 12)}\`` : '';
+        breaches.push({ key, line: `${auditRowName(e)} — ${seatLegName(e)} BREACH — ${auditClean(e.subject)} — commit \`${String(e.sha ?? '').slice(0, 12)}\`; ${who}${head}: ${auditClean(leg.reason)}` });
       }
-      if (e?.arm?.state === 'not-measured') unread.push(`${auditRowName(e)} low-risk arm NOT MEASURED: ${auditClean(e.arm.reason)}`);
+      if (leg?.state === 'not-measured') unread.push(`${auditRowName(e)} ${e.arm ? 'low-risk arm' : '`.claude/**` declaration split'} NOT MEASURED: ${auditClean(leg.reason)}`);
       if (e?.attributionError) unread.push(`${auditRowName(e)} attribution unavailable: ${auditClean(e.attributionError)}`);
       if (e?.pr == null) {
         unread.push(`${auditRowName(e)} NOT MEASURED — ${auditClean(e.subject)}: a governed landing with no pull request, so no merge, review or record could be read for it. A re-run reads it the same way: rule on it in a comment; it leaves this card when it leaves the 7-day window`);
@@ -6224,7 +6442,7 @@ export function renderAuditRunSummary(findings) {
   const lines = [];
   if (breaches.length > 0) {
     const n = Math.min(AUDIT_CARD.breachCap, breaches.length);
-    lines.push(`${AUDIT_CARD.breachHeading} — ${breaches.length} low-risk skills arm landing(s) without a same-head at-tier PASS record`, '', ...breaches.slice(0, n).map((b) => `- ${b.line}`));
+    lines.push(`${AUDIT_CARD.breachHeading} — ${breaches.length} ${AUDIT_BREACH_WHAT}`, '', ...breaches.slice(0, n).map((b) => `- ${b.line}`));
     if (n < breaches.length) lines.push(`… and ${breaches.length - n} more — see the run log`);
     lines.push('');
   }
@@ -6428,7 +6646,7 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
     const overflow = dropped.length;
     const droppedCarried = dropped.filter((r) => !r.live).length;
     const breachLines = breachRows.length === 0 ? [] : [
-      `${AUDIT_CARD.breachHeading} — ${shown.length} low-risk skills arm landing(s) without a same-head at-tier PASS record on this card (${liveShown} read by this run, ${shown.length - liveShown} carried from earlier runs)${overflow > 0 ? `; ${overflow} more did not fit` : ''}`,
+      `${AUDIT_CARD.breachHeading} — ${shown.length} ${AUDIT_BREACH_WHAT}; on this card (${liveShown} read by this run, ${shown.length - liveShown} carried from earlier runs)${overflow > 0 ? `; ${overflow} more did not fit` : ''}`,
       '',
       ...shown.map((r) => r.md),
       // Review S3: a carried row that does not fit is in no run's reading any more, so only this run's are in the
@@ -6446,8 +6664,10 @@ export function composeAuditCard({ findings, existing = null, ruling = { ruled: 
       `_Swept ${sweptAt.toISOString()} · ${auditSweptExpectation(meta?.schedule, sweptAt)} · [run log](${meta?.runUrl}) · commit \`${meta?.sha}\` · trigger \`${meta?.event}\` · sweep exit ${meta?.exit || '(not recorded)'} · verdict \`${meta?.verdict}\` · ${meta?.counts}._`,
       '',
       'This card is for the maintainer: the weekly post-merge governed audit (AGENTS.md Prime Directive 14, the',
-      'compensating control for seat-landed governed merges) found a low-risk skills arm landing with no same-head',
-      'at-tier PASS record, or could not read the whole week. A seat landing without its record is a seat violation,',
+      'compensating control for seat-landed governed merges) found a seat landing with no same-head at-tier PASS',
+      'record that clears the leg it landed on — the low-risk skills arm, or the `.claude/**` declaration split, whose',
+      'record must also verify the declared `Rule-change:` value — or could not read the whole week. Each BREACH row',
+      'names its leg. A seat landing without its record is a seat violation,',
       'filed and rolled back, and no seat judges it. ⛔ No seat dispatches this card. The audit files nothing on a',
       'clean week and closes nothing, so a `Swept` line past its `next by` deadline means the audit died OR the',
       'week was clean; the Actions run list tells the two apart. Ruling: option 0, recorded on #33717.',
@@ -6901,7 +7121,15 @@ function rearmProxyOrNull(args, what, whatLower) {
  * @param {(banner: string) => void} emit  where the banner goes; stderr in the sweep
  * @returns {number} EXIT_INCOMPLETE — the classification the banner announces
  */
-function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm, armUnmeasured = 0 }, emit = console.error) {
+/**
+ * Did the sweep read its whole window — the `complete` its JSON carries and the exit-0 condition? Every unread
+ * input makes it false: an attribution, a repository, a window edge, an arm reading, a split reading (#35612). Pure.
+ */
+export function sweepComplete({ attributionFailed = false, unaudited = [], edged = [], armUnmeasured = 0, splitUnmeasured = 0 } = {}) {
+  return !attributionFailed && unaudited.length === 0 && edged.length === 0 && armUnmeasured === 0 && splitUnmeasured === 0;
+}
+
+function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm, armUnmeasured = 0, splitUnmeasured = 0 }, emit = console.error) {
   const why = [];
   // The footer names WHICH precondition failed per repo (#13836): two
   // footers minutes apart used to differ only by a slug list, so a repo
@@ -6911,6 +7139,7 @@ function reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm, arm
   if (edged.length > 0) why.push(`${edged.length} governed repo(s) at the WINDOW EDGE (${edged.map((r) => r.slug).join(', ')}) — the boundary could not be proven`);
   if (attributionFailed) why.push('at least one entry has no merged_by reading on any channel');
   if (armUnmeasured > 0) why.push(`${armUnmeasured} skills landing(s) whose low-risk arm reading or record could not be read — listed with the maintainer's merges, unjudged`);
+  if (splitUnmeasured > 0) why.push(`${splitUnmeasured} \`.claude/**\` landing(s) whose declaration-split reading or record could not be read — listed with the maintainer's merges, unjudged`);
   emit(
     `\n⚠️  sweep INCOMPLETE — ${why.join('; ')}. The list above is printed, but it must not read as\n` +
       `    clean (#4690): "does the maintainer recognise every entry" cannot be answered over repos that\n` +
@@ -7280,10 +7509,14 @@ async function main() {
 
   // The arm leg (#33603): each skills landing read with the queue guard's own readers, over the channel that
   // attributed it, so a seat landing is listed apart and judged on its record.
+  // The split leg (#35612) beside it: each `.claude/**` landing read the same way, judged on the record that
+  // verifies its declaration. An entry with a low-risk row is the arm's, so no entry is read on both.
   let armUnmeasured = 0;
+  let splitUnmeasured = 0;
   const armCandidates = entries.filter((e) => e.pr != null && (e.surfaces ?? []).some((s) => s?.lowRiskVerdict));
-  const armReaders = armCandidates.length > 0 ? await loadArmReaders() : null;
-  for (const entry of armCandidates) {
+  const splitCandidates = entries.filter((e) => e.pr != null && !armCandidates.includes(e) && (e.surfaces ?? []).some((s) => s?.ruleChangeVerdict));
+  const armReaders = armCandidates.length + splitCandidates.length > 0 ? await loadArmReaders() : null;
+  for (const entry of [...armCandidates, ...splitCandidates]) {
     const token = entry.attributionChannel === 'env-token' ? process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null : null;
     const api = { apiUrl: ctx.apiUrl, slug: entry.repoSlug ?? GOVERNED_REPOS[0].slug, token };
     const counted = (read) => async (n) => {
@@ -7294,13 +7527,16 @@ async function main() {
       ? { fetchPull: counted(armReaders.guard.makePullReader(api)), fetchReviews: counted(armReaders.guard.makeReviewReader(api)), fetchTimeline: counted(armReaders.guard.makeTimelineReader(api)), fetchComments: counted(armReaders.guard.makeCommentReader(api)), fetchLabels: counted(armReaders.guard.makeLabelReader(api)) }
       : null;
     const root = repoById.get(entry.repoId)?.path;
-    entry.arm = await readArmLanding(entry, { paths: pathsBySha.get(entry.sha) ?? [], repo: entry.repoId, readers: armReaders, fetchers, runGit: checkoutGitReader(root), attribution: entry.attribution ?? null });
+    const leg = { paths: pathsBySha.get(entry.sha) ?? [], repo: entry.repoId, readers: armReaders, fetchers, runGit: checkoutGitReader(root), attribution: entry.attribution ?? null };
+    if (armCandidates.includes(entry)) entry.arm = await readArmLanding(entry, leg);
+    else entry.ruleChange = await readRuleChangeLanding(entry, leg);
     if (entry.arm?.state === 'not-measured') armUnmeasured += 1;
+    if (entry.ruleChange?.state === 'not-measured') splitUnmeasured += 1;
   }
 
   const unaudited = repos.filter((r) => r.status !== 'audited');
   const edged = repos.filter((r) => r.status === 'audited' && r.windowIncomplete);
-  const complete = !attributionFailed && unaudited.length === 0 && edged.length === 0 && armUnmeasured === 0;
+  const complete = sweepComplete({ attributionFailed, unaudited, edged, armUnmeasured, splitUnmeasured });
   const sweepCode = readSweepCode();
 
   if (args.includes('--json')) {
@@ -7360,7 +7596,7 @@ async function main() {
       flagSupported: process.allowedNodeEnvironmentFlags.has(PROXY_FLAG),
       guard: PROXY_REARM_GUARD,
     });
-    return reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm, armUnmeasured });
+    return reportSweepIncomplete({ unaudited, edged, attributionFailed, rearm, armUnmeasured, splitUnmeasured });
   }
   return EXIT_SWEPT;
 }
@@ -7759,7 +7995,7 @@ async function selfTest() {
     // The arm's RECORD STAGE, read and favourable: a record on this head whose one line reads `no`, and a card that
     // never carried `security`. Every reading below carries it, so a row that pins Tier S pins it on the whole
     // conjunction, and the record-stage rows further down each drop one piece.
-    const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, ...over });
+    const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, recordLeg: { state: 'stands', reason: null }, ...over });
     // `others`: every OTHER card the pull names, each read like the first; none here unless a row says so.
     const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] }, ...over });
     const read = (paths, over = {}) => ({
@@ -7849,6 +8085,22 @@ async function selfTest() {
       recordH(stageRecord({ carried: { from: 'd'.repeat(40), ok: false } }), /over hops that could not be read$/) === true &&
       recordH(stageRecord({ carried: { from: 'd'.repeat(40) } }), /over hops that could not be read$/) === true &&
       stageTier({ record: stageRecord({ carried: { from: 'd'.repeat(40), ok: true, reason: null } }) }) === GOVERNED_TIER_S);
+    // #35612 (the N1 shape of #35610 on this arm): the record must be one the queue's record leg CLEARS. A FAIL, a
+    // record below its face's tier, an unreadable leg or a leg nobody read is Tier H however its line reads `no`.
+    assert('⛔ RECORD-LEG a-record-the-queue-record-leg-refuses-FAIL-below-tier-unreadable-or-unread-is-Tier-H-though-its-line-reads-no',
+      recordH(stageRecord({ recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }), /^its contract-review record \(PR comment 9001\) does not read a clean PASS: it reads FAIL$/) === true &&
+      recordH(stageRecord({ recordLeg: { state: 'below-tier', reason: null } }), /^its contract-review record \(PR comment 9001\) does not stand at its face's tier \(its `Served-tier:` line\)$/) === true &&
+      recordH(stageRecord({ recordLeg: { state: 'unreadable', reason: 'the hops could not be diffed' } }), /does not stand on the queue's record leg \(unreadable\): the hops could not be diffed$/) === true &&
+      recordH(stageRecord({ recordLeg: undefined }), /^its contract-review record \(PR comment 9001\) was not read by the queue's record leg, so whether it stands/) === true &&
+      [{ state: 'Stands' }, 'stands', {}, null].every((recordLeg) => stageTier({ record: stageRecord({ recordLeg }) }) === GOVERNED_TIER_H));
+    // The control, one step away: the same record whose leg stands is Tier S; and the queue leg, which says its own
+    // record leg runs next (`RULE_CHANGE_RECORD_LEG_DEFERRED`), is not held to the conjunct twice.
+    assert('RECORD-LEG-CONTROL a-leg-that-stands-is-Tier-S-and-the-queue-leg-deferring-to-its-own-record-leg-skips-the-conjunct',
+      stageTier({ record: stageRecord({ recordLeg: { state: 'stands', reason: null } }) }) === GOVERNED_TIER_S &&
+      stageTier({ record: stageRecord({ recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }), recordLeg: RULE_CHANGE_RECORD_LEG_DEFERRED }) === GOVERNED_TIER_S &&
+      lowRiskRecordStageReasons(stageRecord({ recordLeg: undefined }), stageCard(), { legDeferred: true }).length === 0 &&
+      lowRiskRecordStageReasons(stageRecord({ recordLeg: undefined }), stageCard()).length === 1 &&
+      stageTier({ record: stageRecord({ recordLeg: { state: 'not-pass', reason: 'x' }, securityTouching: { state: 'read', value: 'yes' } }), recordLeg: RULE_CHANGE_RECORD_LEG_DEFERRED }) === GOVERNED_TIER_H);
     // ⛔ Fail closed on SHAPE: only a measured record FOUND on this head whose line was READ as exactly `no` passes,
     // so no stand-in, partial or mistyped reading — whatever built it — can read `no`.
     assert('⛔ RECORD-LINE no-reading-short-of-a-measured-found-record-whose-line-was-READ-as-no-passes-whatever-its-shape',
@@ -7977,6 +8229,13 @@ async function selfTest() {
           await prH({ rows: [] }, /^no contract-review record names this head/) === true &&
           await prH({ rows: [review(LOW_RISK_RECORD_LINE, { user: { login: 'some-commenter' } })] }, /^no contract-review record names this head/) === true &&
           await prH({ rows: [review(), review(null, { id: 702, created_at: '2026-11-15T04:30:00Z' })] }, /\(PR comment 702\) carries no `Security-touching:` line/) === true);
+        // #35612: `--pr` reads the record leg off the same comment (the guard's `lowRiskRecordStage`), so a record whose
+        // line reads `no` but which the queue's record leg refuses — a FAIL, below its tier — no longer prints Tier S.
+        const refused = (over) => review(LOW_RISK_RECORD_LINE, over);
+        assert('⛔ --pr-RECORD-LEG a-FAIL-or-below-tier-record-reading-no-is-Tier-H-as-the-queue-record-leg-reads-it',
+          await prH({ rows: [refused({ body: refused().body.replace('**VERDICT: PASS**', '**VERDICT: FAIL**') })] }, /^its contract-review record \(PR comment 700\) does not read a clean PASS: it reads FAIL$/) === true &&
+          await prH({ rows: [refused({ body: refused().body.replace(`Served-tier: \`${AT_TIER}\``, 'Served-tier: `TIER_DEFAULT`') })] }, /^its contract-review record \(PR comment 700\) does not stand at its face's tier/) === true &&
+          await prTier({ rows: [refused()] }) === GOVERNED_TIER_S);
         assert('⛔ --pr-CARD-LABEL a-card-carrying-security-one-that-had-it-removed-or-a-PR-naming-no-card-reads-Tier-H',
           await prH({ labels: ['docs', 'security'] }, /^its card #69 carries the `security` label$/) === true &&
           await prH({ events: [{ event: 'unlabeled', label: { name: 'security' } }] }, /^the timeline of its card #69 shows the `security` label removed$/) === true &&
@@ -11017,7 +11276,7 @@ async function selfTest() {
       changesets: { measured: true, reason: null, files: paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text: CS_TEXT })) },
       catalogFiles: { measured: true, reason: null, files: catalog },
       // The arm's record stage, read and favourable (the skills battery pins each piece of it).
-      record: { measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' } },
+      record: { measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, recordLeg: { state: 'stands', reason: null } },
       cardLabels: { measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } },
       ...over,
     });
@@ -11577,6 +11836,192 @@ async function selfTest() {
     assert('⛔ structural-neither-dispatch-awaits-at-module-scope-or-the-lazy-guard-import-deadlocks', !/^\s*process\.exitCode = await main\(\);$/m.test(own) && !/^\s*if \(\(await selfTest\(\)\)/m.test(own) && /^\s*main\(\)\.then\(/m.test(own) && /^\s*selfTest\(\)\.then\(/m.test(own));
   }
 
+  // ── ⚖️ #35612: the sweep's split leg — a `.claude/**` landing on a declared `none` or `ruled` is a SEAT landing ──
+  //
+  // Before this leg every merged `.claude/**` pull read Tier H (no reading of the body), so it sat on the maintainer's
+  // recognition list whether it landed on a verified record or not. The leg reads the body and the record as the
+  // queue did: a verified landing is listed APART, one whose record did not verify is a ⛔ BREACH, and every other
+  // shape — and every unread one — stays on the maintainer's list. Each state is pinned with its control.
+  battery('⚖️ #35612: the sweep lists a `.claude/**` declaration-split landing APART and judges it on the record that verifies it');
+  {
+    const readers = await loadArmReaders();
+    const { CONTRACT_REVIEW_TIER_NAME: TIER_NAME } = await import('./record-recognisers.mjs');
+    const OS = GOVERNED_REPOS.find((r) => r.id === 'objectstack');
+    const CL = '.claude/skills/pm-dispatch/SKILL.md';
+    const LANDED = '1'.repeat(40);
+    const HEAD = '2'.repeat(40);
+    const NONE = 'Fixes #69\n\nRule-change: none\n';
+    const MERGED_AT = '2026-11-25T05:00:00Z';
+    // This file as a landed tree holds it: with the split declared, and as it read before the split.
+    const SPLIT_TREE = '/** the register */\nexport function applyRuleChangeSplit(matched, repo, reading = null) {}\n';
+    const OLD_TREE = "/** the register, before the split */\n// 'export function applyRuleChangeSplit(' only quoted\n";
+    const gitOf = (tree = SPLIT_TREE) => (args) => {
+      if (args[0] === 'diff-tree') return `:100644 100644 ${'3'.repeat(40)} ${'4'.repeat(40)} M\0${CL}\0`;
+      if (args[0] === 'rev-parse') return `${'5'.repeat(40)}\n`;
+      if (args[0] === 'cat-file' && args[2] === `${LANDED}:${ARM_RULE_PATH}`) { if (tree === null) throw new Error('fatal: bad object'); return tree; }
+      throw new Error(`fatal: unexpected git ${args.join(' ')}`);
+    };
+    const RELAY = readers.recognisers?.trustedAuthors?.[0] ?? '(relay unread)';
+    // The record a split landing stands on carries `Rule-change-verified:` (`line: null` leaves it out).
+    const record = ({ head = HEAD, tier = TIER_NAME, verdict = '**VERDICT: PASS**', at = '2026-11-25T04:00:00Z', id = 800, by = RELAY, line = 'Rule-change-verified: none' } = {}) => ({
+      id, created_at: at, user: { login: by },
+      body: ['## Contract review', '', `Served-tier: \`${tier}\``, `Head-sha: \`${head}\``, 'Reviewed-by: `session_01SEAT`', 'Security-touching: no', ...(line === null ? [] : [line]), '', verdict].join('\n'),
+    });
+    const entryOf = (paths = [CL], size = null) => classifyCommit({ sha: LANDED, date: '2026-11-25T04:30:00Z', subject: 'chore(pm): a dispatch step (#71)' }, paths, OS, size);
+    const LANDING = { mergedAt: MERGED_AT, mergeCommitSha: LANDED };
+    const run = async ({ prRows = [record()], cardRows = [], body = NONE, throws = null, paths = [CL], size = null, rd = readers, attribution = LANDING, reviews = [], events = [], git = gitOf(), entry = null } = {}) => readRuleChangeLanding(entry ?? entryOf(paths, size), {
+      paths, repo: 'objectstack', readers: rd, runGit: git, attribution,
+      fetchers: {
+        fetchPull: async () => { if (throws === 'pull') throw new Error('HTTP 502'); return { sha: HEAD, body, labels: [], fork: { measured: true, isFork: false, headRepo: 'o/r', baseRepo: 'o/r' }, headRef: 'claude/issue-69-x' }; },
+        fetchReviews: async () => { if (throws === 'reviews') throw new Error('HTTP 502'); return reviews; },
+        fetchTimeline: async () => { if (throws === 'timeline') throw new Error('HTTP 502'); return events; },
+        fetchComments: async (n) => { if (throws === 'comments') throw new Error('HTTP 502'); return n === 71 ? prRows : n === 69 ? cardRows : []; },
+      },
+    });
+    const state = async (over, want, re = null, key = 'reason') => {
+      const v = await run(over);
+      const said = Array.isArray(v?.[key]) ? v[key].join(' | ') : v?.[key];
+      return v?.state === want && (re === null || re.test(String(said ?? ''))) ? true : JSON.stringify(v);
+    };
+
+    const unmeasuredSplit = (over, re) => state(over, 'not-measured', re);
+    assert('the-sweep-entry-for-a-claude-landing-carries-the-split-NOT-MEASURED-at-Tier-H-the-reading-the-leg-starts-from',
+      entryOf().surfaces.some((s) => s.ruleChangeVerdict?.measured === false) && ARM_READER_EXPORTS.includes('ruleChangeRecordVerdict') && typeof readers.guard?.ruleChangeRecordVerdict === 'function');
+    const pass = await run();
+    assert('⭐ a-landing-declaring-none-on-a-same-head-at-tier-PASS-record-that-verifies-none-is-PASS', pass?.state === 'pass' && pass.declared === 'none' && pass.record.where === 'PR' && pass.record.id === 800 && pass.headSha === HEAD, JSON.stringify(pass));
+    assert('⭐ ruled-with-its-Ruling-ref-verified-ruled-is-PASS-and-the-record-may-sit-on-the-card',
+      await state({ body: 'Fixes #69\n\nRule-change: ruled\nRuling-ref: 「照抄」 the maintainer, project chat, 2026-11-25T03:00Z\n', prRows: [record({ line: 'Rule-change-verified: ruled' })] }, 'pass') === true &&
+      (await run({ prRows: [], cardRows: [record({ id: 801 })] }))?.record?.where === 'card');
+    // ⛔ The record did not verify: each a BREACH, listed apart — never hidden, never read as the maintainer's merge.
+    assert('⛔ a-PASS-record-with-NO-Rule-change-verified-line-is-a-BREACH', await state({ prRows: [record({ line: null })] }, 'breach', /does not verify the declaration .*carries no `Rule-change-verified:` line/) === true);
+    assert('⛔ a-record-verifying-yes-or-the-other-value-is-a-BREACH',
+      await state({ prRows: [record({ line: 'Rule-change-verified: yes' })] }, 'breach', /reads `Rule-change-verified: yes`, and the PR body declares `Rule-change: none`/) === true &&
+      await state({ prRows: [record({ line: 'Rule-change-verified: ruled' })] }, 'breach', /reads `Rule-change-verified: ruled`/) === true);
+    assert('⛔ a-FAIL-record-or-one-below-its-tier-is-a-BREACH-whatever-its-line-reads',
+      await state({ prRows: [record({ verdict: '**VERDICT: FAIL**' })] }, 'breach', /reads FAIL/) === true &&
+      await state({ prRows: [record({ tier: 'TIER_DEFAULT' })] }, 'breach', /does not stand at the tier its face owes/) === true);
+    assert('⛔ no-record-a-record-on-another-head-or-one-posted-after-the-landing-is-a-BREACH',
+      await state({ prRows: [] }, 'breach', /no `## Contract review` record on its head/) === true &&
+      await state({ prRows: [record({ head: '6'.repeat(40) })] }, 'breach', /no `## Contract review` record on its head/) === true &&
+      await state({ prRows: [record({ at: '2026-11-25T06:00:00Z' })] }, 'breach', /no `## Contract review` record on its head/) === true &&
+      await state({ prRows: [{ ...record(), updated_at: '2026-11-25T06:00:00Z' }] }, 'breach', /PR comment 800 was edited after the landing/) === true &&
+      await state({ prRows: [record({ by: 'some-commenter' })] }, 'breach', /no `## Contract review` record on its head/) === true);
+    assert('⛔ a-pull-that-landed-as-ANOTHER-commit-or-not-at-all-is-never-PASS',
+      await state({ attribution: { ...LANDING, mergeCommitSha: '7'.repeat(40) } }, 'breach', /landed as 777777777777, not as this commit/) === true &&
+      await state({ attribution: { ...LANDING, mergedAt: null } }, 'breach', /is not merged/) === true);
+    // The guard's order: an authorized approval, then an authorized enqueue, then the record — the maintainer's merge.
+    const APPROVED = (login, at = '2026-11-25T04:10:00Z') => ({ id: 1, state: 'APPROVED', user: { login }, commit_id: HEAD, submitted_at: at });
+    const QUEUED = (login) => [{ event: 'added_to_merge_queue', actor: { login }, created_at: '2026-11-25T04:40:00Z' }, { event: 'merged', actor: { login }, created_at: MERGED_AT }];
+    assert('⭐ an-authorized-approval-or-enqueue-before-the-landing-CLEARS-it-the-maintainers-merge-with-the-declaration-named',
+      await state({ prRows: [], reviews: [APPROVED('os-zhuang')] }, 'cleared') === true && (await run({ prRows: [], events: QUEUED('os-zhuang') }))?.by === 'enqueue' &&
+      (await run({ prRows: [], reviews: [APPROVED('os-zhuang')] }))?.declared === 'none');
+    assert('control-a-seat-enqueue-or-a-late-approval-clears-nothing-the-record-decides',
+      await state({ events: QUEUED('objectstack-fleet[bot]') }, 'pass') === true &&
+      await state({ prRows: [], reviews: [APPROVED('os-zhuang', '2026-11-25T06:00:00Z')] }, 'breach', /no `## Contract review` record/) === true);
+    // Tier H on what the pull shows: the maintainer's merge, with the split's own reasons.
+    assert('⭐ a-body-declaring-yes-no-line-or-a-doubled-line-stays-on-the-maintainers-list-Tier-H',
+      await state({ body: 'Fixes #69\n\nRule-change: yes\n' }, 'tier-h', /declares `Rule-change: yes`/, 'reasons') === true &&
+      await state({ body: 'Fixes #69\n' }, 'tier-h', /carries no `Rule-change:` line/, 'reasons') === true &&
+      await state({ body: 'Rule-change: none\nRule-change: none\n' }, 'tier-h', /2 `Rule-change:` lines/, 'reasons') === true &&
+      await state({ body: 'Fixes #69\n\nRule-change: ruled\n' }, 'tier-h', /carries no `Ruling-ref:` line/, 'reasons') === true);
+    assert('⭐ a-settings-or-hooks-path-or-a-Tier-H-row-beside-it-stays-Tier-H-whatever-the-body-declares',
+      await state({ paths: [CL, '.claude/settings.json'] }, 'tier-h', /harness permission set/, 'reasons') === true &&
+      await state({ paths: ['.claude/hooks/guard.sh'] }, 'tier-h', /a harness hook/, 'reasons') === true &&
+      await state({ paths: [CL, 'AGENTS.md'] }, 'tier-h', /a Tier H row beside it: `AGENTS\.md`/, 'reasons') === true);
+    assert('⛔ a-landing-over-the-size-line-was-the-maintainers', await state({ size: { additions: HUMAN_MERGE_LINE_THRESHOLD + 1, deletions: 0 } }, 'tier-h', /human-merge line/, 'reasons') === true);
+    // N2 of record 7238665187: a workflow row beside a pending split is Tier H here only because the sweep reads no
+    // workflow diff — the queue does — so the landing is NOT MEASURED; a measured fact beside it settles Tier H.
+    const WF = '.github/workflows/lint.yml';
+    assert('⛔ N2-a-workflow-row-beside-a-pending-split-is-NOT-MEASURED-the-sweep-reads-no-workflow-diff',
+      await unmeasuredSplit({ paths: [CL, WF] }, /`\.github\/workflows\/\*\*` beside it is Tier H only on an input this sweep does not read/) === true);
+    assert('N2-control-a-measured-fact-beside-it-settles-Tier-H-a-yes-body-another-Tier-H-row-or-the-size-line',
+      await state({ paths: [CL, WF], body: 'Fixes #69\n\nRule-change: yes\n' }, 'tier-h', /declares `Rule-change: yes`/, 'reasons') === true &&
+      await state({ paths: [CL, WF, 'AGENTS.md'] }, 'tier-h', /a Tier H row beside it: .*`AGENTS\.md`/, 'reasons') === true &&
+      await state({ paths: [CL, WF], size: { additions: HUMAN_MERGE_LINE_THRESHOLD + 1, deletions: 0 } }, 'tier-h', null, 'reasons') === true);
+    // S2 of record 7239017248: the unread input is answered only after the approval and enqueue legs, so a landing the
+    // maintainer approved or enqueued beside an unread workflow diff is `cleared` — his merge, whatever the queue read.
+    const beside = { paths: [CL, WF], prRows: [] };
+    const approvedBeside = await run({ ...beside, reviews: [APPROVED('os-zhuang')] });
+    assert('⭐ S2-an-authorized-approval-before-the-landing-CLEARS-a-pending-split-beside-an-unread-workflow-diff',
+      approvedBeside?.state === 'cleared' && approvedBeside.by === 'review' && approvedBeside.who?.includes('os-zhuang') && approvedBeside.declared === 'none' && approvedBeside.headSha === HEAD, JSON.stringify(approvedBeside));
+    assert('S2-control-the-same-approval-one-hour-after-the-landing-clears-nothing-it-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, reviews: [APPROVED('os-zhuang', '2026-11-25T06:00:00Z')] }, /`\.github\/workflows\/\*\*` beside it is Tier H only on an input this sweep does not read/) === true);
+    const queuedBeside = await run({ ...beside, events: QUEUED('os-zhuang') });
+    assert('⭐ S2-an-authorized-enqueue-before-the-landing-CLEARS-a-pending-split-beside-an-unread-workflow-diff',
+      queuedBeside?.state === 'cleared' && queuedBeside.by === 'enqueue' && queuedBeside.who?.[0] === 'os-zhuang' && queuedBeside.declared === 'none', JSON.stringify(queuedBeside));
+    assert('S2-control-the-same-enqueue-by-the-seat-relay-clears-nothing-it-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, events: QUEUED('objectstack-fleet[bot]') }, /`\.github\/workflows\/\*\*` beside it is Tier H only on an input this sweep does not read/) === true);
+    assert('S2-a-landing-half-that-does-not-clear-a-breach-or-an-unread-review-thread-stays-NOT-MEASURED-on-the-unread-diff',
+      await unmeasuredSplit({ ...beside, attribution: { ...LANDING, mergeCommitSha: '7'.repeat(40) } }, /beside it is Tier H only on an input this sweep does not read/) === true &&
+      await unmeasuredSplit({ ...beside, throws: 'reviews' }, /beside it is Tier H only on an input this sweep does not read/) === true);
+    // Which landings the leg binds: a tree whose copy of this file predates the split ran the raw row.
+    assert('⭐ a-landing-whose-tree-predates-the-split-is-UNBOUND-unjudged-on-the-maintainers-list-and-reads-no-thread',
+      await state({ git: gitOf(OLD_TREE), throws: 'comments' }, 'unbound') === true && ruleChangeSplitBound(gitOf(), LANDED) === true && ruleChangeSplitBound(gitOf(OLD_TREE), LANDED) === false);
+    const unmeasured = (over, re) => state(over, 'not-measured', re);
+    assert('⛔ every-read-that-fails-is-NOT-MEASURED-never-a-pass-or-a-breach',
+      await unmeasured({ throws: 'pull' }, /its pull request could not be read/) === true && await unmeasured({ throws: 'timeline' }, /its timeline could not be read/) === true &&
+      await unmeasured({ throws: 'reviews' }, /its reviews could not be read/) === true && await unmeasured({ throws: 'comments' }, /comment thread could not be read/) === true &&
+      await unmeasured({ attribution: null }, /its merge could not be read/) === true && await unmeasured({ rd: { available: false, reason: 'no guard' } }, /no guard/) === true &&
+      await unmeasured({ git: gitOf(null) }, /could not be read, so whether its queue read the declaration split is not known/) === true);
+    assert('the-leg-reads-only-a-claude-entry-with-a-PR-and-leaves-one-beside-a-low-risk-row-to-the-arm-leg',
+      (await run({ entry: { ...entryOf(), pr: null } })) === null && (await run({ entry: classifyCommit({ sha: LANDED, date: MERGED_AT, subject: 'x (#71)' }, ['docs/adr/0001-x.md'], OS) })) === null &&
+      (await run({ entry: classifyCommit({ sha: LANDED, date: MERGED_AT, subject: 'x (#71)' }, [CL, 'skills/objectstack-data/SKILL.md'], OS) })) === null);
+
+    // The report: a verified landing and a BREACH are listed APART, after the maintainer's list; every other state stays on it.
+    const at = (e, ruleChange) => ({ ...e, attribution: { mergedBy: 'os-steve', mergedAt: MERGED_AT, title: 't', size: null }, attributionChannel: 'env-token', ruleChange });
+    const sub = (pr) => ({ ...entryOf(), pr, subject: `chore(pm): y (#${pr})` });
+    const report = renderReport({ window: dateWindowFor('2026-11-24T00:00:00Z'), repos: allAudited, scanned: 4, lookups: 4,
+      entries: [at(entryOf(), pass), at(sub(72), { state: 'breach', headSha: HEAD, declared: 'none', reason: 'no record', record: {} }),
+        at(sub(73), { state: 'tier-h', headSha: HEAD, reasons: ['the PR body declares `Rule-change: yes`'] }), at(sub(74), { state: 'unbound', headSha: HEAD, declared: 'none' })] });
+    const apart = report.indexOf('declaration-split landings');
+    assert('⭐ the-report-head-counts-the-split-landings-and-their-breaches', report.includes('of which 2 landed through the `.claude/**` declaration split, 1 of them ⛔ BREACH'), report);
+    assert('⭐ split-landings-are-listed-AFTER-the-maintainers-list-never-in-it-and-a-Tier-H-or-unbound-one-stays-on-it',
+      apart > 0 && report.indexOf('PR #71') > apart && report.indexOf('PR #72') > apart && report.indexOf('PR #73') < apart && report.indexOf('PR #74') < apart, report);
+    assert('the-PASS-row-names-its-declaration-and-record-and-the-BREACH-row-says-BREACH',
+      report.includes('✅ `.claude/**` declaration split landing on head 222222222222 on `Rule-change: none`: verified by the same-head at-tier PASS record PR comment 800') && report.includes('⛔ BREACH — `.claude/**` declaration split landing') &&
+      report.includes("its landed tree predates the split, so its queue read the row's raw Tier S"), report);
+    assert('control-a-report-with-no-split-reading-prints-no-split-section', !renderReport({ window: dateWindowFor('2026-11-24T00:00:00Z'), repos: allAudited, scanned: 1, lookups: 1, entries: [at(sub(73), undefined)] }).includes('declaration-split landings') &&
+      ruleChangeCell({}) === '' && ruleChangeCell({ ruleChange: { state: 'not-measured', reason: 'x' } }).includes('NOT MEASURED'));
+    // The weekly audit card files on the split leg exactly as on the arm's: a BREACH is a row, an unread leg is NOT MEASURED.
+    const sweep = (entries) => JSON.stringify({ since: '2026-11-21T00:00:00Z', scanned: 4, complete: true, repos: [{ slug: 'objectstack-ai/objectstack', status: 'audited' }], entries });
+    const card = readAuditSweep({ exit: '0', raw: sweep([at(sub(72), { state: 'breach', headSha: HEAD, reason: 'its record does not verify the declaration' }), at(sub(75), { state: 'not-measured', reason: 'a read failed' })]) });
+    assert('⭐ the-audit-card-files-a-split-BREACH-and-lists-an-unread-split-leg-NOT-MEASURED',
+      card.verdict === 'breach-and-unread' && card.breaches[0]?.key === 'PR #72' && /does not verify the declaration/.test(card.breaches[0].line) && card.unread.some((u) => u.startsWith('PR #75 `.claude/**` declaration split NOT MEASURED')), JSON.stringify(card));
+    const quiet = readAuditSweep({ exit: '0', raw: sweep([at(entryOf(), pass), at(sub(74), { state: 'unbound' })]) });
+    assert('control-a-verified-split-landing-and-an-unbound-one-file-nothing', quiet.verdict === 'clean' && quiet.readings['PR #71'] === 'a landing on a same-head at-tier PASS record' && /older than the declaration split/.test(quiet.readings['PR #74']), JSON.stringify(quiet));
+    // S1 of record 7238665187: the BREACH list holds both legs, so every row names its leg and neither heading names
+    // the arm alone — a split landing whose PASS record lacks the verified line is never announced as a skills landing.
+    const mixed = readAuditSweep({ exit: '0', raw: sweep([at(sub(72), { state: 'breach', headSha: HEAD, reason: 'its record does not verify the declaration (… carries no `Rule-change-verified:` line)' }),
+      { pr: 42, sha: '9'.repeat(40), subject: 'docs(skills): x (#42)', arm: { state: 'breach', headSha: HEAD, reason: 'no record' }, attribution: { mergedBy: 'os-steve', mergedAt: MERGED_AT } }]) });
+    const splitRow = mixed.breaches.find((b) => b.key === 'PR #72')?.line ?? '';
+    const armRow = mixed.breaches.find((b) => b.key === 'PR #42')?.line ?? '';
+    assert('⭐ S1-a-split-BREACH-row-names-the-declaration-split-and-an-arm-BREACH-row-names-the-arm-each-keyed-as-before',
+      splitRow.startsWith('PR #72 — `.claude/**` declaration split BREACH — ') && !splitRow.includes('low-risk') && armRow.startsWith('PR #42 — low-risk skills arm BREACH — ') && !armRow.includes('declaration split') &&
+      AUDIT_ROW_KEY.test(`- ${splitRow}`) && AUDIT_ROW_KEY.test(`- ${armRow}`), JSON.stringify(mixed.breaches));
+    const summary = renderAuditRunSummary(mixed).join('\n');
+    const filed = composeAuditCard({ findings: mixed, existing: null, meta: { marker: 'os-governed-merges-audit', runUrl: 'https://example.invalid/run/2', sha: '8'.repeat(40), event: 'schedule', exit: '0', verdict: 'breach', counts: '2 entries', schedule: '31 23 * * 0', sweptAt: new Date('2026-11-29T23:40:00Z') } });
+    assert('⭐ S1-both-headings-and-the-card-preamble-name-both-legs-and-never-the-arm-alone',
+      summary.includes(`— 2 ${AUDIT_BREACH_WHAT}`) && filed.body.includes(`— 2 ${AUDIT_BREACH_WHAT}; on this card`) && /the `\.claude\/\*\*` declaration split/.test(AUDIT_BREACH_WHAT) && /the low-risk skills arm/.test(AUDIT_BREACH_WHAT) &&
+      !/low-risk skills arm landing\(s\) without/.test(`${summary}\n${filed.body}`) && filed.body.includes('found a seat landing with no same-head at-tier PASS') && filed.body.includes('`.claude/**` declaration split, whose') &&
+      readAuditCardRows(filed.body, [AUDIT_CARD.breachHeading]).rows.map((r) => r.key).sort().join() === 'PR #42,PR #72', `${summary}\n---\n${filed.body}`);
+    // N1 of record 7238665187: an unread split reading makes the sweep incomplete, as an unread arm reading does, and
+    // the sweep loop counts it and hands it to both.
+    assert('⛔ N1-sweepComplete-is-false-on-one-unread-split-reading-or-one-unread-arm-reading-and-true-on-none',
+      sweepComplete({ splitUnmeasured: 1 }) === false && sweepComplete({ armUnmeasured: 1 }) === false && sweepComplete({}) === true &&
+      sweepComplete({ attributionFailed: true }) === false && sweepComplete({ unaudited: [{}] }) === false && sweepComplete({ edged: [{}] }) === false);
+    assert('⛔ N1-structural-the-sweep-loop-counts-each-unread-split-reading-and-hands-the-count-to-complete-and-the-banner',
+      /if \(entry\.ruleChange\?\.state === 'not-measured'\) splitUnmeasured \+= 1;/.test(readFileSync(scriptPath, 'utf8')) &&
+      /const complete = sweepComplete\(\{ attributionFailed, unaudited, edged, armUnmeasured, splitUnmeasured \}\);/.test(readFileSync(scriptPath, 'utf8')) &&
+      /return reportSweepIncomplete\(\{ unaudited, edged, attributionFailed, rearm, armUnmeasured, splitUnmeasured \}\);/.test(readFileSync(scriptPath, 'utf8')));
+    const banner = [];
+    reportSweepIncomplete({ unaudited: [], edged: [], attributionFailed: false, rearm: { hint: false }, splitUnmeasured: 1 }, (l) => banner.push(l));
+    assert('⛔ an-unmeasured-split-reading-makes-the-sweep-INCOMPLETE-and-says-so', banner.join('').includes('1 `.claude/**` landing(s) whose declaration-split reading or record could not be read'), banner.join(''));
+    // The sweep loop reads every split candidate the arm does not, through the same readers (structural).
+    const own = readFileSync(scriptPath, 'utf8');
+    assert('⛔ structural-the-sweep-loop-reads-the-split-leg-for-every-claude-entry-the-arm-leg-does-not-read',
+      /const splitCandidates = entries\.filter\(\(e\) => e\.pr != null && !armCandidates\.includes\(e\) && \(e\.surfaces \?\? \[\]\)\.some\(\(s\) => s\?\.ruleChangeVerdict\)\);/.test(own) && /else entry\.ruleChange = await readRuleChangeLanding\(entry, leg\);/.test(own));
+  }
+
   // ── ⭐ the weekly audit card: every reading the job files on, both ways (#33814) ──
   //
   // The readings the `governed-merges-audit` job of fleet-patrols.yml files its card on, lifted out of the job's
@@ -11626,7 +12071,7 @@ async function selfTest() {
     const huge = composeAuditCard({ findings: { breaches: many, unread: ['one unread row'], readings: {} }, existing: null, meta });
     const hugeRows = readAuditCardRows(huge.body, [AUDIT_CARD.breachHeading]).rows.length;
     assert('⭐ N8-a-card-of-120-long-rows-is-fitted-under-the-body-bound', huge.body.length <= AUDIT_CARD.bodyChars && hugeRows > 0 && hugeRows < 100, `${huge.body.length} chars, ${hugeRows} rows`);
-    assert('⭐ N8-the-heading-counts-the-rows-on-the-card-and-names-the-rest', huge.body.includes(`— ${hugeRows} low-risk skills arm landing(s) without a same-head at-tier PASS record on this card (${hugeRows} read by this run, 0 carried from earlier runs); ${120 - hugeRows} more did not fit`), huge.body.split('\n').find((l) => l.startsWith(AUDIT_CARD.breachHeading)));
+    assert('⭐ N8-the-heading-counts-the-rows-on-the-card-and-names-the-rest', huge.body.includes(`— ${hugeRows} ${AUDIT_BREACH_WHAT}; on this card (${hugeRows} read by this run, 0 carried from earlier runs); ${120 - hugeRows} more did not fit`), huge.body.split('\n').find((l) => l.startsWith(AUDIT_CARD.breachHeading)));
     const small = composeAuditCard({ findings: { breaches: many.slice(0, 3).map((b) => ({ ...b, line: `${b.key} — short` })), unread: [], readings: {} }, existing: null, meta });
     assert('N8-control-a-small-card-keeps-every-row-and-names-no-overflow', readAuditCardRows(small.body, [AUDIT_CARD.breachHeading]).rows.length === 3 && !small.body.includes('did not fit'), small.body);
     const capped = composeAuditCard({ findings: { breaches: many.map((b) => ({ ...b, line: `${b.key} — short` })), unread: [], readings: {} }, existing: { number: 901, body: card([]) }, meta });
