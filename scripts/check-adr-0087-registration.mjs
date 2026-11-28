@@ -8381,7 +8381,7 @@ function selfTest() {
     '}\n' +
     '\n' +
     '/** Auth client interface - abstracts the underlying auth library */\n' +
-    'export interface AuthClient extends AuthBase<{ a: 1 }> {\n' +
+    'export interface AuthClient extends AuthBase<Session> {\n' +
     '  /** Sign in with email/password. */\n' +
     '  signIn(email: string, password: string): Promise<SignInResult>;\n' +
     '  profile: {\n' +
@@ -8403,7 +8403,7 @@ function selfTest() {
     const r = readRef(IFC_TYPES, IFC('AuthClient.signIn'));
     assert(
       r.refusal === null && r.surface?.type === 'Promise<SignInResult>',
-      `TSO-I2: a METHOD signature on the same interface resolves too -- \`extends AuthBase<{ a: 1 }>\` does not send the walk into a type argument's braces. Got: ${JSON.stringify(r)}`,
+      `TSO-I2: a METHOD signature on the same interface resolves too, past its \`extends\` clause. Got: ${JSON.stringify(r)}`,
     );
   }
   {
@@ -8437,10 +8437,10 @@ function selfTest() {
     );
   }
   {
-    const r = readRef('export declare interface Api<T = string> {\n  get(id: T): Promise<Row>;\n}\n', IFC('Api.get'));
+    const r = readRef('export declare interface Api<T = string> extends Base<{ a: 1 }> {\n  get(id: T): Promise<Row>;\n}\n', IFC('Api.get'));
     assert(
       r.refusal === null && r.surface?.type === 'Promise<Row>',
-      `TSO-I7: \`export declare interface\` with a type-parameter DEFAULT is a declaration the walk reads. Got: ${JSON.stringify(r)}`,
+      `TSO-I7: \`export declare interface\` with a type-parameter DEFAULT is a declaration the walk reads, and \`extends Base<{ a: 1 }>\` does not send it into a type argument's braces. Got: ${JSON.stringify(r)}`,
     );
   }
   {
