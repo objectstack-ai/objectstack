@@ -253,6 +253,26 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         expect(s.admitAuthoredSource).toHaveBeenCalledWith(SOURCE_ITEM, caller.executionContext);
     });
 
+    // The save refusal of a source whose `adapter` the deployment does not
+    // mount is a `400`, where the gates' own are `403`: the door answers the
+    // predicate's status and sentence, never one of its own.
+    it('a source naming an adapter the deployment does not mount refuses the duplicate 400 VALIDATION_ERROR with the save\'s sentence, and nothing is copied', async () => {
+        const UNMOUNTED = {
+            admitted: false, status: 400, code: 'VALIDATION_ERROR',
+            message: "The knowledge source \"faq\" was not saved: it names adapter 'ragflow', which this deployment does not mount (mounted: memory).",
+        };
+        const held = { ...SOURCE_ITEM, adapter: 'ragflow' };
+        const s = withKnowledge({ items: [held] }, () => UNMOUNTED);
+        const caller = authed(BOTH);
+        const r = await call(s, DUPLICATE, caller);
+        expect(r.response?.status).toBe(400);
+        expect(r.response?.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(r.response?.body?.error?.message).toContain('nothing was copied');
+        expect(r.response?.body?.error?.message).toContain(UNMOUNTED.message);
+        expect(s.protocol.duplicatePackage).not.toHaveBeenCalled();
+        expect(s.admitAuthoredSource).toHaveBeenCalledWith(held, caller.executionContext);
+    });
+
     it('every source is asked about: the second one refused refuses the duplicate', async () => {
         const second = { ...SOURCE_ITEM, name: 'handbook' };
         const s = withKnowledge({ items: [SOURCE_ITEM, second] }, (item: any) => (item.name === 'handbook' ? REFUSAL : { admitted: true }));

@@ -513,7 +513,21 @@ export const CEILINGS = new Map([
   // ceil(27623 / 4) = 6906; the row moves +13, the measured remainder only.
   // Pinned AT the measurement.
   //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27623 / 4)
-  ['skills/objectstack-ai/SKILL.md', 6906], //          -18 (was 6824), then -5 A2′ (was 6806)
+  // 6906 -> 6958 (2026-11-28, the unmounted-adapter save refusal): the
+  // `adapter` row named the refusal of an omitted adapter only; a run-time save
+  // naming an adapter the deployment does not mount is refused too
+  // (`400 VALIDATION_ERROR`, nothing written), and the row now says so with
+  // what the refusal names and the two remedies. Raise path the standing ruling
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B). PAID DOWN
+  // FIRST: the row's "Optional" (its "Omitted:" clause says it). Arithmetic in
+  // priced bytes (stamp line excluded), measured on this PR's head merged with
+  // `main` 9957484dba, whose file had shrunk 2 bytes under the standing row
+  // (27650 -> 27648, priced 27621, still ceil = 6906): the file is
+  // 27648 -> 27858 bytes, so the LANDED priced text is 27831 ->
+  // ceil(27831 / 4) = 6958; the row moves +52, the measured remainder only.
+  // Pinned AT the measurement.
+  //   ceil(($(wc -c < skills/objectstack-ai/SKILL.md) - 27) / 4) == ceil(27831 / 4)
+  ['skills/objectstack-ai/SKILL.md', 6958], //          -18 (was 6824), then -5 A2′ (was 6806)
   // -12 (was 6331): the `http.server` decision-table row dropped a trailing
   // clause that taught `contributes.routes` as a key that "parses but serves
   // nothing". The key is retired — an authored entry is now REFUSED, carrying
