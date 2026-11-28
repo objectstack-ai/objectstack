@@ -13,4 +13,4 @@ The six examples that had dropped their `locations` key declare a placement agai
 
 `skills/objectstack-ui/rules/record-page.md` and `skills/objectstack-formula/SKILL.md` each change one sentence to the new words, and five eval cases under `skills/objectstack-ui/evals/` expect them. Nothing an author can write changes: these are the words `@objectstack/spec` 19 already accepts.
 
-Token ceilings: `skills/objectstack-ui/rules/actions.md` 3844 to 3918, after one restating sentence was cut from it; `skills/objectstack-ui/SKILL.md` 2256 to 2253; `skills/objectstack-formula/SKILL.md` 6090 to 6088.
+Token ceilings: `skills/objectstack-ui/rules/actions.md` 3844 to 3918, after one restating sentence was cut from it; `skills/objectstack-ui/SKILL.md` 2256 to 2262; `skills/objectstack-formula/SKILL.md` 6090 to 6088.

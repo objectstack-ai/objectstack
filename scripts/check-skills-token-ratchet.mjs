@@ -1128,14 +1128,17 @@ export const CEILINGS = new Map([
   //   ceil(($(wc -c < skills/objectstack-ui/SKILL.md) - 20) / 4) == ceil(9087 / 4)
   // 2264 -> 2256: the Actions JSON fence drops its `locations` key (32 bytes), so it parses
   // under both action location vocabularies; the row follows the measurement down.
-  // 2256 -> 2253: the Actions JSON fence declares its placement again, in the protocol-19 word
+  // 2256 -> 2262: the Actions JSON fence declares its placement again, in the protocol-19 word
   // (`"locations": ["record"],`, +25 bytes; it had dropped the key so that it parsed under
-  // both vocabularies). PAID DOWN FIRST by one restatement cut from this file: " over an
-  // image, avatar or file field" beside `gallery` in the List Views kind list (-36 bytes),
-  // which the paragraph right below it says as the fields `gallery.coverField` takes. Net
-  // shrink, so no raise: the ceiling follows the file down to the measurement, 9050 bytes
-  // (9023 priced) -> 9039 (9012 priced) -> 2253 tokens.
-  ['skills/objectstack-ui/SKILL.md', 2253], // -3 to the measurement (was 2256)
+  // both vocabularies, the 2264 -> 2256 note above). No cut pays for it: the one passage
+  // weighed as restatement, " over an image, avatar or file field" beside `gallery` in the
+  // List Views kind list, was ruled teaching by the seat's review of the PR and stays, and
+  // nothing else in the file restates another passage. So the ruling's second half carries the
+  // delta: 9050 bytes (9023 priced) -> 9075 (9048 priced) -> 2262 tokens, headroom 0 before,
+  // ceiling +6, the measured remainder only, pinned AT the measurement (2 under the 2264 the
+  // row held before the fence dropped its key). Standing ruling (2026-10-27, tap A):
+  // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
+  ['skills/objectstack-ui/SKILL.md', 2262], // +6 to the measurement (was 2256)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into

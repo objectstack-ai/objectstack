@@ -87,7 +87,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 ### List Views
 
 A list view's `type`: `grid` (the default table), `kanban` (a board by status),
-`gallery` (cards), `calendar`, `timeline`
+`gallery` (cards over an image, avatar or file field), `calendar`, `timeline`
 (a chronological stream), `gantt` (start/end bars with dependencies), `map`
 (`location` fields), `chart` (an aggregate over the object), `tree` (a
 self-referencing hierarchy).
