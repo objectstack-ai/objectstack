@@ -129,6 +129,27 @@ export interface DomainRoute {
 }
 
 /**
+ * [#16402] What {@link DomainHandlerDeps.classifyServiceOrLoud} answers: the
+ * classified service lookup's three non-fault outcomes.
+ *
+ *  - `resolved`: an instance.
+ *  - `never-registered`: every registry in the chain answered the branded
+ *    "nothing was ever registered under this name", or the probe tail found
+ *    nothing. The supported no-service composition.
+ *  - `no-instance-in-scope`: a registry did know the name, and the read made
+ *    in this scope produced no instance.
+ *
+ * A caller that named no scope and asked for a `SCOPED` registration is not
+ * here: that stays the unbranded rejection `packages/core` raises, so
+ * `Scope ID required for scoped service 'NAME'` keeps reaching the one caller
+ * it is true about.
+ */
+export type ClassifiedServiceLookup =
+    | { readonly outcome: 'resolved'; readonly value: any }
+    | { readonly outcome: 'never-registered' }
+    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
+/**
  * The dispatcher facilities an extracted domain body is allowed to use — the
  * WHOLE dependency contract, made explicit. Growing this interface is a
  * design decision, not a convenience: every addition couples all domains to
@@ -153,27 +174,6 @@ export interface DomainRoute {
  * reads a kernel without taking the request, and do not cache the resolved
  * kernel anywhere that outlives one request.
  */
-/**
- * [#16402] What {@link DomainHandlerDeps.classifyServiceOrLoud} answers: the
- * classified service lookup's three non-fault outcomes.
- *
- *  - `resolved`: an instance.
- *  - `never-registered`: every registry in the chain answered the branded
- *    "nothing was ever registered under this name", or the probe tail found
- *    nothing. The supported no-service composition.
- *  - `no-instance-in-scope`: a registry did know the name, and the read made
- *    in this scope produced no instance.
- *
- * A caller that named no scope and asked for a `SCOPED` registration is not
- * here: that stays the unbranded rejection `packages/core` raises, so
- * `Scope ID required for scoped service 'NAME'` keeps reaching the one caller
- * it is true about.
- */
-export type ClassifiedServiceLookup =
-    | { readonly outcome: 'resolved'; readonly value: any }
-    | { readonly outcome: 'never-registered' }
-    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
-
 export interface DomainHandlerDeps {
     /**
      * Environment-scoped service resolution (per-request kernel aware), typed
