@@ -75,6 +75,9 @@ import '@better-auth/core/context';
 import '@better-auth/core/error';
 import '@better-auth/oauth-provider';
 import '@better-auth/scim';
+// The SSO discovery egress guard the source loads with a dynamic import, paid
+// here too, during collection (check-test-source-alias, "The source reach").
+import '@objectstack/core/egress';
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
