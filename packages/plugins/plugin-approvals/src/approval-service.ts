@@ -406,6 +406,11 @@ export interface ApprovalResumeSurface {
    * Optional, and its absence is FAIL-CLOSED: a caller that cannot prove node
    * identity refuses the continuation rather than proceeding on the weaker
    * check.
+   *
+   * [#37763] Also read by {@link ApprovalService.cancelForDeletedRecord}, one
+   * hop at a time, to walk the chain of parked runs a voided request's run
+   * sits at the bottom of (each parent's correlation names its child). Absent,
+   * that door cancels the request's own run alone.
    */
   suspensionOf?(runId: string): Promise<{ runId: string; flowName: string; nodeId: string; correlation?: string } | undefined>;
   /**
@@ -809,9 +814,9 @@ type RequestStrandability = 'strandable' | 'not-strandable';
  * than an assumption. The reading: `APPROVAL_STATUSES` gained `cancelled`
  * (#13568) AFTER this subset was written, and `cancelled` is correctly outside
  * it — {@link ApprovalService.cancelForDeletedRecord} does NOT resume
- * the run, says so in its own `warn` naming the parked run ids, and reporting
- * those here would bury the real findings under expected ones, exactly the
- * `recalled` argument. ⇒ the VALUE was right; only the MECHANISM was the
+ * the run (it cancels it since #37763, and names any it could not cancel in
+ * its own `warn`), and reporting those here would bury the real findings
+ * under expected ones, exactly the `recalled` argument. ⇒ the VALUE was right; only the MECHANISM was the
  * hand-copy, and nothing recorded that `cancelled` had been considered at all,
  * so the next reader could not tell "weighed and excluded" from "written before
  * it existed".
@@ -832,7 +837,7 @@ export const REQUEST_STATUS_STRANDABILITY = {
   rejected:  'strandable',       // idem
   recalled:  'not-strandable',   // deliberate abandonment; tolerates an unresumable run
   returned:  'strandable',       // send-back resumes down the `revise` edge
-  cancelled: 'not-strandable',   // [#13568] platform void; never resumes, and says so
+  cancelled: 'not-strandable',   // [#13568] platform void; never resumes (cancels the run, #37763)
 } as const satisfies Record<ApprovalStatus, RequestStrandability>;
 
 /**
@@ -1276,6 +1281,15 @@ interface ParticipantProbe {
  * submit), so this is two orders of magnitude of headroom over the real shape.
  */
 const RECORD_DELETE_CANCEL_LIMIT = 200;
+
+/**
+ * [#37763] Bound on the walk {@link ApprovalService.voidedRunChain} takes down
+ * a chain of parked runs, so a corrupt correlation cannot loop it. Equal to the
+ * engine's own bound on a run's links to its parents (`MAX_DERIVATION_HOPS` in
+ * service-automation's `root-run.ts`): a chain the engine can place is one
+ * this walk can read.
+ */
+const VOIDED_RUN_CHAIN_MAX_HOPS = 32;
 
 /**
  * Who is acting, for the purpose of a data write made on their behalf (#3783).
@@ -7263,12 +7277,21 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * such parent — leaves things exactly as they were before, which for a
    * recall with no batch above it is the whole answer. The parent is the one
    * {@link batchAboveItem} read before the cancel.
+   *
+   * [#37763] The record-delete void ({@link cancelForDeletedRecord}) cancels
+   * a batch item's run for the same want of a decision, and wakes its batch
+   * through this same call; `cause` only names, in what this tells, which of
+   * the two cancelled the item.
    */
   private async resumeBatchOfRecalledItem(
     itemRunId: string,
     requestId: string,
     batch: BatchLookup,
+    cause: 'recall' | 'record-delete' = 'recall',
   ): Promise<{ resumeError?: string; resumeFailure?: ResumeFailureReport }> {
+    const recorded = cause === 'recall'
+      ? `the recall was recorded on request ${requestId}`
+      : `request ${requestId} was cancelled because its record was deleted`;
     let batchRunId: string | undefined;
     try {
       if ('lookupFailure' in batch) throw batch.lookupFailure;
@@ -7287,19 +7310,22 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       // The batch advanced; a run above it (a subflow parent) did not.
       return {
         resumeError:
-          `RESUME_FAILED: the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', ` +
+          `RESUME_FAILED: ${recorded} and cancelled its run '${itemRunId}', ` +
           `and the batch run '${batchRunId}' above it resumed, but the subflow parent above that — run ` +
           `'${bubbleStrand.runId}' — consumed its suspension and is now stranded: ${bubbleStrand.error}`,
         resumeFailure: ApprovalService.parentStrandReport(bubbleStrand),
       };
     } catch (err: any) {
       const message = err?.message ?? String(err);
-      this.logger?.error?.('[approvals] resuming the batch after a revise-window recall of its item failed — the batch may stay parked', {
-        request: requestId, run: itemRunId, batchRun: batchRunId, error: message,
-      });
+      this.logger?.error?.(
+        cause === 'recall'
+          ? '[approvals] resuming the batch after a revise-window recall of its item failed — the batch may stay parked'
+          : '[approvals] resuming the batch after its item\'s record was deleted failed — the batch may stay parked',
+        { request: requestId, run: itemRunId, batchRun: batchRunId, error: message },
+      );
       const at = batchRunId ? `resuming the batch run '${batchRunId}' above it` : 'looking up the batch run above it';
       return {
-        resumeError: `the recall was recorded on request ${requestId} and cancelled its run '${itemRunId}', but ${at} failed: ${message}`,
+        resumeError: `${recorded} and cancelled its run '${itemRunId}', but ${at} failed: ${message}`,
         // Only the engine's own stranded exit is told in fields, as in `recall`.
         ...(batchRunId && ApprovalService.resumeStatusOf(err) === 'stranded'
           ? {
@@ -7333,6 +7359,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * for every approver forever — so {@link syncApproverIndex} clears them, the
    * same call every other exit from `pending` makes.
    *
+   * ## The run the request gated is cancelled (#37763)
+   *
+   * Maintainer ruling 2026-11-28 (option A, card comment 7237973760): the flow
+   * run parked on the voided request is cancelled in the same step, end state
+   * `cancelled`, reason "the record was deleted" — see
+   * {@link cancelRunsOfVoidedRequest}, which also cancels a `subflow` chain
+   * above it and wakes a batch whose item it was. Runs parked by deletes that
+   * landed before this are not cleaned up (ruled with the option).
+   *
    * ## Three things this deliberately does NOT do
    *
    * 1. **No status mirror-back.** Every other terminal transition calls
@@ -7343,21 +7378,20 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    *    forensics recorded on the reject door. Skipped by construction, not by a
    *    swallowed error.
    *
-   * 2. **No flow resume, and no run cancel.** A cancellation is a status write
-   *    plus a reason; it is not a decision, so there is no branch to resume
-   *    down and no downstream node that should run. The suspended run this
-   *    request gated is reported (below) and left alone — what becomes of an
-   *    approval run whose request was voided is a lifecycle question that
-   *    belongs to the automation service, not to a delete hook, and answering
-   *    it here by guessing would be exactly the kind of consumer-side
-   *    accommodation PD #12 refuses.
+   * 2. **No flow resume.** A cancellation is a status write plus a reason; it
+   *    is not a decision, so there is no branch to resume down and no
+   *    downstream node that should run: neither the `approve` nor the `reject`
+   *    branch runs (a `reject` branch that writes the record back would fail
+   *    on the record this delete removed). The run ends `cancelled` instead.
    *
    * 3. **No refusal of the delete.** The delete has already landed by the time
    *    this runs, and the "forbid delete while an approval is pending"
    *    direction was VETOED in the same ruling (`lockRecord` already blocks the
    *    edit; blocking the delete too locks an author onto a record they cannot
    *    fix). So nothing here throws — a failure degrades to a warning and the
-   *    stale row, which is the pre-existing state, never to a failed delete.
+   *    stale row, which is the pre-existing state, never to a failed delete. A
+   *    run that cannot be cancelled is the same: it stays parked, named in the
+   *    warning, and the delete stands.
    *
    * Terminal rows are untouched: the `where` below names `status: 'pending'`,
    * so an `approved` / `rejected` / `recalled` / `returned` request about the
@@ -7365,13 +7399,15 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
    * history is kept; only the presentation of its dead record reference is
    * someone else's card.
    *
-   * @returns the request ids cancelled and the suspended run ids left behind.
+   * @returns the request ids cancelled, the run ids cancelled with them
+   *   (`cancelledRuns`), and the run ids that could not be and stay suspended
+   *   (`suspendedRuns`).
    */
   async cancelForDeletedRecord(
     objectName: string,
     recordId: string,
-  ): Promise<{ cancelled: string[]; suspendedRuns: string[] }> {
-    const empty = { cancelled: [] as string[], suspendedRuns: [] as string[] };
+  ): Promise<{ cancelled: string[]; cancelledRuns: string[]; suspendedRuns: string[] }> {
+    const empty = { cancelled: [] as string[], cancelledRuns: [] as string[], suspendedRuns: [] as string[] };
     const object = String(objectName ?? '').trim();
     const record = String(recordId ?? '').trim();
     if (!object || !record) return empty;
@@ -7398,7 +7434,7 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
 
     const now = this.clock.now().toISOString();
     const cancelled: string[] = [];
-    const suspendedRuns: string[] = [];
+    const voided: Array<{ requestId: string; runId: string; recordRunId?: string }> = [];
 
     for (const raw of pending) {
       const requestId = String(raw?.id ?? '');
@@ -7438,7 +7474,12 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
         cancelled.push(requestId);
 
         const runId = raw?.flow_run_id ? String(raw.flow_run_id) : '';
-        if (runId) suspendedRuns.push(runId);
+        if (runId) {
+          voided.push({
+            requestId, runId,
+            ...(raw?.record_run_id ? { recordRunId: String(raw.record_run_id) } : {}),
+          });
+        }
       } catch (err: any) {
         // Per request, so one unwritable row cannot skip the rest.
         this.logger?.warn?.(
@@ -7449,17 +7490,163 @@ export class ApprovalService implements IApprovalService, ObjectSchemaReadDelega
       }
     }
 
+    // [#37763] After every request is voided, so a run that cannot be
+    // cancelled never keeps a later request in the inbox.
+    const cancelledRuns: string[] = [];
+    const suspendedRuns: string[] = [];
+    for (const v of voided) {
+      const ended = await this.cancelRunsOfVoidedRequest(v.requestId, v.runId, v.recordRunId);
+      cancelledRuns.push(...ended.cancelled);
+      suspendedRuns.push(...ended.left);
+    }
+
     if (suspendedRuns.length) {
-      // Reported, never repaired here (docstring point 2). `warn`: a run parked
-      // on an approval that can no longer be decided is a real functional
-      // degradation, and naming the run ids is what makes it actionable.
+      // `warn`: a run parked on an approval that can no longer be decided is
+      // a real functional degradation, and naming the run ids is what makes
+      // it actionable — an operator cancels each by hand. Each failed cancel
+      // was already told at `error` with its cause.
       this.logger?.warn?.(
         '[approvals] auto-cancelled approval request(s) for a deleted record — the automation run(s) '
-        + 'they gated stay suspended and are not resumed by a cancellation',
+        + 'they gated could not be cancelled and stay suspended; cancel each by hand',
         { object, record, requests: cancelled, runs: suspendedRuns },
       );
     }
-    return { cancelled, suspendedRuns };
+    return { cancelled, cancelledRuns, suspendedRuns };
+  }
+
+  /**
+   * [#37763] End the run a record-delete void left with no decision to wait
+   * for: cancel it with the reason, every `subflow` parent above it on the
+   * same record, and wake the batch whose item the top of that chain is.
+   *
+   * ## Which runs
+   *
+   * The request's `record_run_id` (ADR-0162 Execution item 7) is the highest
+   * run, from the request's own run up, over which the record does not change:
+   * the top of a `subflow` chain (a `subflow` body runs on its parent's
+   * record), or a `map` item run whose item is the record. Every run from
+   * there down to the request's run is parked on the one below it, so with the
+   * record gone none of them has anything left to do. They are found by
+   * walking DOWN from the record run along each parent's own correlation
+   * (`subflow:CHILD` / `map:CHILD`, read through
+   * {@link ApprovalResumeSurface.suspensionOf}, one keyed read per hop) until
+   * the walk reaches the request's run. The chain is cut below its LOWEST
+   * `map:` link: a batch whose items carry no record of their own is a batch
+   * still, and the ruling wakes a batch rather than ending it.
+   *
+   * ## What is never done
+   *
+   * ⛔ No resume is sent to a `subflow` parent: the engine reads a resumed
+   * subflow parent whose child is gone as the subflow having completed, and
+   * runs the rest of the parent. Every run of the chain is cancelled instead,
+   * deepest first, so a run is cancelled only after the run it waits on was
+   * (or the engine answered `false` for it: no suspension under that id, or
+   * a store it could not read, which the engine logs itself). Only the batch above the chain is resumed, through
+   * {@link resumeBatchOfRecalledItem}, which records the item as cancelled
+   * (the cancelled-item ruling) and goes on to the next one.
+   *
+   * ## What degrades, and how it is told
+   *
+   * Never throws. A request with no `record_run_id` (opened before requests
+   * recorded it, or on an engine that hands no record run) cancels the
+   * request's own run alone and says nothing: that is also every flat run on
+   * such an engine, where a warning would be noise. An engine without
+   * `suspensionOf`, or a walk that cannot reach the request's run, cancels
+   * the request's own run alone and warns that a run above it may stay
+   * parked. A cancel that throws stops the
+   * chain there, at `error` as the revise-window recall's does, and the runs
+   * not cancelled are answered in `left`.
+   */
+  private async cancelRunsOfVoidedRequest(
+    requestId: string,
+    runId: string,
+    recordRunId: string | undefined,
+  ): Promise<{ cancelled: string[]; left: string[] }> {
+    if (typeof this.automation?.cancelRun !== 'function') {
+      // Not `missingRunCapability`: its words (a recorded outcome to advance,
+      // a request to recall) are the decision door's, not a delete's.
+      this.logger?.error?.(
+        '[approvals] no automation engine in this process can cancel the run a record delete left with no '
+        + 'decision to wait for — the run stays parked',
+        { request: requestId, run: runId },
+      );
+      return { cancelled: [], left: [runId] };
+    }
+    const chain = await this.voidedRunChain(requestId, runId, recordRunId);
+    // Read the batch above the top while its suspension still carries the
+    // linkage: `cancelRun` removes it (#28230).
+    const batch = await this.batchAboveItem(chain[0]);
+    const reason = `approval request ${requestId} was cancelled because the record it is about was deleted`;
+    const cancelled: string[] = [];
+    const deepestFirst = [...chain].reverse();
+    let topCancelled = false;
+    for (let i = 0; i < deepestFirst.length; i++) {
+      const id = deepestFirst[i];
+      try {
+        // `false` is the engine's "no suspension under this id" (already
+        // ended, or a store it could not read, which it logs itself): the
+        // run is not parked, so the runs above it go on being cancelled.
+        const result = await this.automation!.cancelRun!(id, reason);
+        if (result === true) cancelled.push(id);
+        if (i === deepestFirst.length - 1) topCancelled = result === true;
+      } catch (err: any) {
+        const left = deepestFirst.slice(i);
+        this.logger?.error?.('[approvals] cancelRun after a record delete voided its approval failed — the run may stay parked', {
+          request: requestId, run: id, notCancelled: left, error: err?.message ?? String(err),
+        });
+        return { cancelled, left };
+      }
+    }
+    // Its answer is not read: a failed wake is logged there, and a strand
+    // above the batch by the engine. Nothing THIS door cancels stays parked.
+    if (topCancelled) await this.resumeBatchOfRecalledItem(chain[0], requestId, batch, 'record-delete');
+    return { cancelled, left: [] };
+  }
+
+  /**
+   * [#37763] The runs {@link cancelRunsOfVoidedRequest} cancels, top first and
+   * ending with `runId`: the walk down from `recordRunId` described there, cut
+   * below its lowest `map:` link. `[runId]` alone when there is nothing to
+   * walk (no record run, silently), or when the walk cannot be completed
+   * (told at `warn`).
+   */
+  private async voidedRunChain(
+    requestId: string,
+    runId: string,
+    recordRunId: string | undefined,
+  ): Promise<string[]> {
+    if (!recordRunId || recordRunId === runId) return [runId];
+    const alone = (why: string, error?: unknown): string[] => {
+      this.logger?.warn?.(
+        '[approvals] could not read the runs above a run whose approval a record delete voided — only that run '
+        + 'is cancelled, and a run above it may stay parked',
+        { request: requestId, run: runId, recordRun: recordRunId, why, ...(error ? { error: (error as any)?.message ?? String(error) } : {}) },
+      );
+      return [runId];
+    };
+    if (typeof this.automation?.suspensionOf !== 'function') return alone('no suspensionOf on the automation engine');
+    const chain: string[] = [];
+    let current: string | undefined = recordRunId;
+    try {
+      for (let hop = 0; current && hop < VOIDED_RUN_CHAIN_MAX_HOPS; hop++) {
+        chain.push(current);
+        if (current === runId) return chain;
+        const parked = await this.automation.suspensionOf(current);
+        const correlation: string = parked?.correlation ?? '';
+        if (correlation.startsWith('map:')) {
+          // A batch stays a batch: the chain starts again below it.
+          chain.length = 0;
+          current = correlation.slice('map:'.length) || undefined;
+        } else if (correlation.startsWith('subflow:')) {
+          current = correlation.slice('subflow:'.length) || undefined;
+        } else {
+          current = undefined;
+        }
+      }
+    } catch (err) {
+      return alone('the suspended-run store could not be read', err);
+    }
+    return alone('the walk down from the record run did not reach this run');
   }
 
   // ── Send back for revision / resubmit (ADR-0044) ─────────────
