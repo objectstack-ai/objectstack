@@ -1554,7 +1554,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // executor through the REAL `rest` provider, imported from
     // `connector-rest`'s source by relative path: that package already
     // dev-depends on this one, so a manifest edge back would close a cycle.
-    globs: ['packages/connectors/connector-rest/src/**'],
+    // src/variable-key-reserved-segments.test.ts reads the spec's binding
+    // positions from their package-internal module, to hold the registration
+    // door's judged positions equal to them.
+    globs: [
+      'packages/connectors/connector-rest/src/**',
+      'packages/spec/src/automation/flow-bound-variable-name.ts',
+    ],
   },
   '@objectstack/metadata-protocol': {
     // src/sys-metadata-repository.draft-drain.test.ts reads the durability

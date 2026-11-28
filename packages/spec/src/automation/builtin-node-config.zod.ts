@@ -1776,10 +1776,12 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
     }),
     // [objectstack#18847] `__proto__` ONLY. This slot's key type carries no
     // grammar beyond the `$` rule (`flowBoundVariableNameSchema(…).min(1)`),
-    // so `constructor` and `prototype` are legal flow-variable names today and
-    // are left legal — only `__proto__` is structurally unreachable by any key
-    // schema (see `refuseRecordProtoKey`'s docblock), so it alone is refused
-    // here.
+    // so this schema accepts `constructor` and `prototype` — only `__proto__`
+    // is structurally unreachable by any key schema (see
+    // `refuseRecordProtoKey`'s docblock), so it alone is refused here. A flow
+    // is judged at its own door as well: the automation engine's registration
+    // refuses a variable key whose name, or any dot-separated part of it, is
+    // `__proto__`, `constructor` or `prototype`.
     'assignments',
   ).optional()
     .describe('Variables to set: each key is a variable name, each value a CEL value envelope or a literal'),
@@ -1807,9 +1809,11 @@ export const AssignmentConfigSchema = lazySchema(() => refuseCatchallProtoKey(z.
   // `if (key === "__proto__") continue;` runs above `_catchall.run`, so no
   // catchall schema can ever see the key. `constructor`, `prototype` and
   // every other reserved-looking name reach the catchall unskipped and
-  // round-trip intact (measured), so they stay legal top-level variable
-  // names — nothing here narrows this surface's accept set beyond the one
-  // name zod makes unrepresentable.
+  // round-trip intact (measured), so this schema accepts them — nothing here
+  // narrows this surface's accept set beyond the one name zod makes
+  // unrepresentable. The automation engine's registration refuses a variable
+  // key whose name, or any dot-separated part of it, is `__proto__`,
+  // `constructor` or `prototype`, so a flow naming one does not register.
   'an `assignment` node config',
 ));
 

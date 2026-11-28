@@ -28,10 +28,11 @@ import { carriedRefusalOfResult, readCarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { dropEventsOf, foldDropEvents } from './run-dropped-fields.js';
 import { noteTenantCurrencyReadFault } from './builtin/template.js';
+import { HeldValueCycleError, RESERVED_VARIABLE_KEY_REFUSAL, copyHeldValue, scopeContainer } from './scope-key-segments.js';
 import { mapItemCancelledVariable, type MapItemCancelledMarker } from './builtin/map-node.js';
 // The values below (`buildRunTrigger`, `FlowRefusalSignal`, `isRefusalSignal`,
 // `isSuspendSignal`, `isRetryableResumeRefusal`, `carriesSubflowChildOutput`,
-// `applyResumeSignal`, `engineBuilt`, `activeMsAtPause` and `waitOfPausedRun`) are read only inside the function bodies, at call
+// `applyResumeSignal`, `reservedResumeSignalKeys`, `engineBuilt`, `activeMsAtPause` and `waitOfPausedRun`) are read only inside the function bodies, at call
 // time, never while a module is evaluating, so the import cycle with
 // ./engine.js is safe under ESM live bindings; the tsup bundle is one file and
 // has no cycle.
@@ -44,6 +45,7 @@ import {
     isRetryableResumeRefusal,
     carriesSubflowChildOutput,
     applyResumeSignal,
+    reservedResumeSignalKeys,
     engineBuilt,
     waitOfPausedRun,
     type AutomationEngine,
@@ -137,6 +139,16 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
         flowName: flow.name,
         ...(runId ? { flowRunId: runId } : {}),
     };
+    // The run's own copy of a plain record it was handed (`copyHeldValue`).
+    // When the start node declares lookups (`expandDeclaredLookups`, at the
+    // end), they are grafted into a new top-level record that replaces this
+    // one, and the run's variables are seeded from that, so no engine write
+    // reaches the caller's object, a record that is not a plain object
+    // included. With no graft, a record that is not a plain object is not
+    // copied: it is itself the object the run binds as `record`. A record that
+    // contains itself throws `HeldValueCycleError` here, which `execute()`
+    // answers as a failed run.
+    if (context?.record) runContext.record = copyHeldValue(context.record) as Record<string, unknown>;
 
     // #3356 (follow-up to #1888) — a `runAs:'user'` run must enforce its data
     // ops as the TRIGGERING user's real authorization. Most trigger surfaces
@@ -470,7 +482,21 @@ function decisionImpersonatorOf(signal: ResumeSignal): string | undefined {
     return trimmed ? trimmed : undefined;
 }
 
-/** The body of {@link AutomationEngine.expandDeclaredLookups}, moved unedited; that method's docblock is its contract. */
+/**
+ * A NEW top-level record: the own enumerable properties of `record`, then each
+ * grafted relation. `record` itself is never written, so a record that is not
+ * a plain object (one `copyHeldValue` hands back as it is) keeps what it was
+ * handed. A record with no prototype gets a result with none.
+ */
+function withGraftedRelations(record: Record<string, unknown>, grafts: ReadonlyArray<[string, unknown]>): Record<string, unknown> {
+    const out: Record<string, unknown> = Object.getPrototypeOf(record) === null ? scopeContainer() : {};
+    for (const [key, value] of [...Object.entries(record), ...grafts]) {
+        Object.defineProperty(out, key, { value, enumerable: true, writable: true, configurable: true });
+    }
+    return out;
+}
+
+/** The body of {@link AutomationEngine.expandDeclaredLookups}; that method's docblock is its contract. */
 export async function expandDeclaredLookups(this: Pick<RunResumeHost, 'recordExpander' | 'logger'>, flow: FlowParsed, runContext: AutomationContext): Promise<void> {
     if (!this.recordExpander) return;
     const record = runContext.record as Record<string, unknown> | undefined;
@@ -493,15 +519,17 @@ export async function expandDeclaredLookups(this: Pick<RunResumeHost, 'recordExp
     try {
         const full = await this.recordExpander(object, id, expandFields, runContext);
         if (full && typeof full === 'object') {
+            const grafts: Array<[string, unknown]> = [];
             for (const field of expandFields) {
                 const expanded = (full as Record<string, unknown>)[field];
                 // Graft only a genuinely expanded relation (object/array); a
                 // scalar means the field is not a resolvable lookup — leave the
                 // raw id in place rather than overwrite it.
                 if (expanded !== null && typeof expanded === 'object') {
-                    record[field] = expanded;
+                    grafts.push([field, expanded]);
                 }
             }
+            if (grafts.length) runContext.record = withGraftedRelations(record, grafts);
         }
     } catch (err) {
         // #6499 — the expander's thrown text (transitively the
@@ -803,9 +831,38 @@ export async function loadSuspendedRun(this: Pick<RunResumeHost, 'loadSuspendedR
     }
 }
 
+/**
+ * A suspension held in memory, handed out the way a store hands a row: the
+ * same record with its own copy of `variables` (arrays and plain objects at
+ * every depth, `copyHeldValue`). `null` for no entry.
+ */
+function heldSuspensionCopy(run: SuspendedRun | undefined, logger: RunResumeHost['logger']): SuspendedRun | null {
+    if (!run) return null;
+    try {
+        return { ...run, variables: copyHeldValue(run.variables) as SuspendedRun['variables'] };
+    } catch (err) {
+        if (!(err instanceof HeldValueCycleError)) throw err;
+        // A held value that contains itself has no copy. The run is still
+        // here, so it is handed out as held — never read as an unreachable
+        // store — and the one cost is said: this run's values are shared with
+        // the held pause for this read. (A durable store could not have held
+        // such a run at all.)
+        logger.error(
+            `[automation] suspended run '${run.runId}': ${err.message} It is handed out as held, so what this ` +
+                `read writes into its values also changes the held pause.`,
+        );
+        return run;
+    }
+}
+
 /** The body of {@link AutomationEngine.loadSuspendedRunStrict}, moved unedited; that method's docblock is its contract. */
-export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' | 'suspendedRuns' | 'cacheOnlySuspensions' | 'evictConsumedSuspension'>, runId: string): Promise<SuspendedRun | null> {
-    if (!this.store) return this.suspendedRuns.get(runId) ?? null;
+export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' | 'suspendedRuns' | 'cacheOnlySuspensions' | 'evictConsumedSuspension' | 'logger'>, runId: string): Promise<SuspendedRun | null> {
+    // With no durable answer the in-memory entry IS the run, and it is handed
+    // out as a store hands a row: with variables of its own
+    // (`heldSuspensionCopy`), so a resume — or any reader — that writes into
+    // them changes neither the held pause nor a value it shares with the run
+    // that parked (the trigger's record, the paused log entry).
+    if (!this.store) return heldSuspensionCopy(this.suspendedRuns.get(runId), this.logger);
     const stored = await this.store.load(runId);
     if (stored) return stored;
     // The store has no row. For every run it ever accepted that IS the
@@ -815,7 +872,7 @@ export async function loadSuspendedRunStrict(this: Pick<RunResumeHost, 'store' |
     // so its silence says nothing about it, and `persistSuspendedRun`
     // deliberately keeps such a run resumable in-process (it reports the
     // lost durability at `error`).
-    if (this.cacheOnlySuspensions.has(runId)) return this.suspendedRuns.get(runId) ?? null;
+    if (this.cacheOnlySuspensions.has(runId)) return heldSuspensionCopy(this.suspendedRuns.get(runId), this.logger);
     // [#15832] The store ANSWERED, and the answer is "no row". Any entry
     // this process still holds for that run is a run it parked and another
     // replica consumed — the phantom the two listings hand back. This is
@@ -1692,6 +1749,28 @@ export async function resumeInternal(
         // other resume refusals and BEFORE the suspension is consumed — so
         // a rejected bag leaves the pause live and the legitimate
         // submission still lands.
+        //
+        // Asked FIRST, before the screen contract below reads the submitted
+        // values: no signal key with a reserved segment
+        // (`./scope-key-segments.ts`) reaches anything, a `visibleWhen`
+        // evaluated over the bag included. Refused here, the pause stays
+        // live, exactly as for the refusals below.
+        const reservedKeys = reservedResumeSignalKeys(signal);
+        if (reservedKeys.length) {
+            // The keys are the CALLER's (nothing constrains them against
+            // newlines), so they ride the structured slot, never the log
+            // message. FUNCTIONAL — `warn`, like the refusals below.
+            this.logger.warn(
+                `[automation] refused resume of run '${runId}': the signal names a variable key with a reserved ` +
+                    `segment — the refused keys are in this record's meta.`,
+                { rejected: reservedKeys },
+            );
+            return {
+                success: false,
+                code: 'INVALID_SIGNAL',
+                error: `${RESERVED_VARIABLE_KEY_REFUSAL} Refused key(s): ${reservedKeys.join(', ')}. Nothing was applied.`,
+            };
+        }
         const screenRefusal = this.refuseInvalidScreenInput(run, runId, signal);
         if (screenRefusal) return screenRefusal;
 
