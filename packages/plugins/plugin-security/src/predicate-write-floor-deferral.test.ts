@@ -110,6 +110,12 @@ const NARROW = 'usr_narrow';
 const ERIN = 'usr_erin';
 /** Holds Modify All under the two wideners; owns nothing, and created only what a case seeds as theirs. */
 const WIDE_MANAGER = 'usr_wide_manager';
+/**
+ * [#37535] A delegator who holds the two wideners and no Modify All: an
+ * ordinary member, so her half of an on-behalf-of write keeps a sharing write
+ * scope (the rows she owns, none of the matrix) for an authored scope to widen.
+ */
+const FRANK = 'usr_frank';
 
 const CRUD = { allowRead: true, allowCreate: true, allowEdit: true, allowDelete: true };
 const MODIFY_ALL = { ...CRUD, viewAllRecords: true, modifyAllRecords: true };
@@ -309,7 +315,7 @@ beforeAll(async () => {
     ],
   } as never);
   await engine.syncSchemas();
-  await engine.insert('sys_user', [ALICE, BOB, CAROL, MANAGER, DAVE, NARROW, ERIN, WIDE_MANAGER].map((id) => ({
+  await engine.insert('sys_user', [ALICE, BOB, CAROL, MANAGER, DAVE, NARROW, ERIN, WIDE_MANAGER, FRANK].map((id) => ({
     id, name: id, email: `${id}@pwf.test`,
   })), SYS);
   await engine.insert('sys_organization', [{ id: ORG, name: 'PWF', slug: 'pwf' }], SYS);
@@ -322,6 +328,7 @@ beforeAll(async () => {
   await engine.insert('sys_member', [
     { id: 'mem_carol', user_id: CAROL, organization_id: ORG, role: 'member' },
     { id: 'mem_erin', user_id: ERIN, organization_id: ORG, role: 'admin' },
+    { id: 'mem_frank', user_id: FRANK, organization_id: ORG, role: 'member' },
   ], SYS);
   const grants = (engine as any).getDriver('sys_user_permission_set');
   for (const userId of [CAROL, ERIN]) {
@@ -329,6 +336,9 @@ beforeAll(async () => {
       id: `ups_${userId}`, user_id: userId, permission_set: MANAGER_SET.name, organization_id: ORG,
     });
   }
+  await grants.create('sys_user_permission_set', {
+    id: `ups_${FRANK}`, user_id: FRANK, permission_set: WIDENER_SET.name, organization_id: ORG,
+  });
 
   let securityService: unknown;
   const services: Record<string, unknown> = {
@@ -503,12 +513,6 @@ async function expectPredicateMatchesById(
 /** A caller acting on behalf of `delegator` (ADR-0090 D10). */
 const onBehalfOf = (caller: object, delegator: string) => ({ ...caller, onBehalfOf: { userId: delegator } });
 
-/**
- * [#37535] What ALICE under the wideners, acting on behalf of CAROL, writes by
- * id: the authored-policy deferral abstains on a delegated write, so it is the
- * rows both principals' own gates admit, and the predicate write must match.
- */
-const DELEGATED_UNDER_WIDENERS: Record<'update' | 'delete', readonly Role[]> = { update: [], delete: [] };
 
 describe('[#35802] a predicate write composes the platform ownership floor per row, as the by-id write does', () => {
   describe('(a) the owner who created some of what they own — ALICE', () => {
@@ -1002,12 +1006,17 @@ describe('[#37535] a predicate write honours an app-authored update / delete pol
       await expectPredicateMatchesById('update', memberOf(ALICE, EMEA_CHECK_SET.name), ['r1', 'r2']);
       expect(await securityPlugin.getAuthoredRowWriteFilter(DEAL, 'update', memberOf(ALICE, EMEA_CHECK_SET.name))).toBeUndefined();
     });
+    // Both principals hold the wideners, so each one's own row-level layer
+    // admits every open deal; ALICE owns r1 and r2, FRANK nothing. By id,
+    // sharing refuses every row for one principal or the other and the
+    // authored-policy deferral abstains on a delegated write. Were the
+    // authored scope ORed in here, the predicate write would change r1 to r4.
     for (const verb of ['update', 'delete'] as const) {
-      it(`a delegated write, ${verb}: ALICE under the wideners on behalf of CAROL writes what her by-id write does, and the scope is never asked`, async () => {
+      it(`a delegated write, ${verb}: ALICE on behalf of FRANK, both under the wideners, writes nothing, as by id, and the scope is never asked`, async () => {
         const spy = vi.spyOn(securityPlugin, 'getAuthoredRowWriteFilter');
         try {
-          const caller = onBehalfOf(memberOf(ALICE, WIDENER_SET.name), CAROL);
-          await expectPredicateMatchesById(verb, caller, DELEGATED_UNDER_WIDENERS[verb]);
+          const caller = onBehalfOf(memberOf(ALICE, WIDENER_SET.name), FRANK);
+          await expectPredicateMatchesById(verb, caller, []);
           expect(spy, 'the by-id probe abstains on a delegated write, and the bulk scope is not asked').not.toHaveBeenCalled();
         } finally {
           spy.mockRestore();
