@@ -651,6 +651,11 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | `**/translations/*.generated.ts` (nine packages — `platform-objects`, five plugins, three services) | **AUTO-GEN** | ❌ Never hand-edit the file *structure*. Regenerate all nine with `node scripts/check-i18n-bundles.mjs --write` (merge mode keeps every existing **translated-locale** value; the default locale `en` is rewritten from the source on every run, so hand-edits to `en.*.generated.ts` do not survive and belong in the source metadata); `pnpm i18n:extract` still covers `platform-objects` alone. Translated-locale *values* (`zh-CN` / `ja-JP` / `es-ES`) are hand-written: editing one of those strings is fine, adding or dropping keys is drift. `pnpm check:i18n` gates all nine in CI, and `pnpm check:i18n-coverage` ratchets untranslated declared labels. |
 | `content/docs/<tree>/` — every tree except `references/` and `releases/` above | hand-written | ✅ Update that tree's own `meta.json` when adding a page: each is an explicit ordered `pages` array with no rest-spread, so a page you add but never list is absent from the nav. |
 
+**Volatile counts are deleted, not synced.** ⛔ Never write into user-facing output, `content/docs`, skills
+text or a test baseline a number that ordinary development changes (rule, file or registry-entry counts) unless a
+reader acts on it; a limit, quota or price is acted on and stays. Where you meet one, above all one a gate or test
+exists only to keep equal to a registry, delete the number, and that gate with it, instead of updating it.
+
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
 `packages/spec` has **six** checked-in generated artifacts, each with its own CI
