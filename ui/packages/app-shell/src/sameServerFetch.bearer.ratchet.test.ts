@@ -235,11 +235,13 @@ function defaultsCredentials(init: ts.Expression | undefined): boolean {
  * in a renderer package that name is the host's `apiFetch` channel.
  */
 function bareCookieOnlyCalls(fileName: string, text: string, builds = true): string[] {
+  // Neither JSDoc nor parent links are read here (every `getText`/`getStart`
+  // is handed `sf`), and building them is a fifth of the parse (objectstack#38101).
   const sf = ts.createSourceFile(
     fileName,
     text,
-    ts.ScriptTarget.Latest,
-    true,
+    { languageVersion: ts.ScriptTarget.Latest, jsDocParsingMode: ts.JSDocParsingMode.ParseNone },
+    false,
     fileName.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
   );
   // A `const NAME = { credentials: 'include', … }` anywhere in the file: an
@@ -322,7 +324,7 @@ function packageSourceRoots(): Map<string, string> {
  * `globalThis.`, `self.`, or bound to a local name), or `sharedGetJson`, matched
  * on their written text. A file holding neither is skipped before it is parsed:
  * the parse of ~40 MB of source is where the scan's time went
- * (objectstack#38101), and about four files in five hold neither token.
+ * (objectstack#38101), and more than four files in five hold neither token.
  */
 const MAY_HOLD_A_COUNTED_CALL = /\bfetch\b|sharedGetJson/;
 
@@ -394,11 +396,14 @@ describe('cookie-only same-server fetch ratchet (every ui package + console)', (
     for (const [code, expected] of rendererCases) {
       const found = bareCookieOnlyCalls('case.ts', `async function run() { ${code} }`, false).length;
       expect({ code, found, renderer: true }).toEqual({ code, found: expected, renderer: true });
+      // The scan's pre-parse skip never drops a file the detector counts in.
+      if (expected) expect({ code, kept: MAY_HOLD_A_COUNTED_CALL.test(code) }).toEqual({ code, kept: true });
     }
     for (const [code, expected] of cases) {
       // Inside an async function: at a script's top level `await (x)(…)` parses as a call of `await`.
       const found = bareCookieOnlyCalls('case.ts', `async function run() { ${code} }`).length;
       expect({ code, found }).toEqual({ code, found: expected });
+      if (expected) expect({ code, kept: MAY_HOLD_A_COUNTED_CALL.test(code) }).toEqual({ code, kept: true });
     }
   });
 
