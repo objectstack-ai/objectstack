@@ -2440,7 +2440,8 @@ export function lowRiskRecordStage({ pair, recognisers }) {
     ruleChangeVerified: readRuleChangeVerified(comment.body),
     ruleChangeCarried: located.carriedFrom ? ((refusal) => ({ from: located.carriedFrom, ok: refusal === null, reason: refusal }))(ruleChangeCarryRefusal(located.carriedFrom, pair)) : null,
     // ...and the record LEG's own verdict on the same pair (`recordVerdict`, `recordPassVerdict`): the split's record
-    // conjunct holds only where the queue would clear this record — at its face's tier, on a clean PASS (N1 of #35610).
+    // conjunct and the arm's (#35612) hold only where the queue would clear this record — at its face's tier, on a
+    // clean PASS (N1 of #35610). The queue leg itself defers both to the record leg it runs next.
     recordLeg: recordLegReading(recordPassVerdict(recordVerdict({ pair, recognisers }), pair, recognisers)),
   };
 }
