@@ -43,7 +43,9 @@
  * - **Verdicts fail to ABSTENTION.** {@link ISecurityService.checkAuthoredRowWrite}
  *   answers a question a composing caller may use to WIDEN, so its failure mode
  *   is the one that changes nothing: `abstain`. It never reports `admit` for a
- *   reason it did not measure, and it never throws outward.
+ *   reason it did not measure, and it never throws outward. Its filter-shaped
+ *   twin {@link ISecurityService.getAuthoredRowWriteFilter} fails the same way:
+ *   `undefined`, the answer that widens nothing.
  * - **Gate outcomes refuse, and a fault rejects.** {@link ISecurityService.checkControlledByParentWrite}
  *   answers a question a composing gate uses to REFUSE, so every outcome but
  *   `allow` and `not_applicable` refuses. A store fault is not an outcome: it
@@ -1261,6 +1263,54 @@ export interface ISecurityService {
     operation: AuthoredRowWriteOperation,
     context?: SecurityContext,
   ): Promise<AuthoredRowWriteVerdict>;
+
+  /**
+   * [#37535, ruling record 7190344023 (2a)] The FILTER-shaped twin of
+   * {@link checkAuthoredRowWrite}: the rows the caller's **app-authored**
+   * row-level policies admit for `operation` on `object`, with the platform's
+   * ownership floor taken out — for a write that names no row (a predicate
+   * `update` / `delete`, `multi: true`), where a per-row verdict has no id to
+   * ask about.
+   *
+   * It is the same question as the verdict, asked of a set: a row matches the
+   * filter iff {@link checkAuthoredRowWrite} answers `admit` for it — the same
+   * applicable non-floor policies carrying a `using` scope, the same tenant
+   * wall (Layer 0) AND-ed beside them. The record sharing middleware ORs it into
+   * its own bulk write scope, so a predicate write reaches the rows a by-id
+   * write of each of them reaches, and nothing beyond.
+   *
+   * **Evidence, not authorization — exactly as the verdict.** A row the filter
+   * matches is not thereby writable: object-level CRUD, the tenant wall, the
+   * caller's readable rows, row-level security (floor OR authored policies) and
+   * the post-image `check` clause all still apply to the write. A consumer may
+   * only use it to WIDEN a scope it composes itself, by OR, and ⛔ never to
+   * narrow: no filter is "no evidence", never "denied".
+   *
+   * **Verb for verb.** An authored `update` policy widens `update` only and a
+   * `delete` policy widens `delete` only; a caller maps lifecycle verbs onto
+   * these two classes itself, as for the verdict.
+   *
+   * **`undefined` is the fail-closed answer — the one that changes nothing.**
+   * The caller holds no authored `using` policy for `(object, operation)`; the
+   * ADR-0066 ① superuser short-circuit skips business row-level security; the
+   * context carries no principal; the context is on-behalf-of (ADR-0090 D10 —
+   * the delegator intersection is not computed here, as the verdict abstains on
+   * it); or any internal resolution fails. The method never throws outward.
+   *
+   * **OPTIONAL.** A security service that predates it omits it, and a caller
+   * that cannot find it reads the absence as `undefined`: that deployment's bulk
+   * writes keep today's scope, byte for byte. Callers feature-detect
+   * (`typeof svc.getAuthoredRowWriteFilter === 'function'`).
+   *
+   * **Request-scoped and in-process**, for the reasons {@link getReadFilter}
+   * gives: compiled for `context`'s user, handed to the engine write it was
+   * asked for, never memoised and never serialised.
+   */
+  getAuthoredRowWriteFilter?(
+    object: string,
+    operation: AuthoredRowWriteOperation,
+    context?: SecurityContext,
+  ): Promise<FilterCondition | undefined>;
 
   /**
    * [ADR-0055] What the master-detail write check answers for an UPDATE of

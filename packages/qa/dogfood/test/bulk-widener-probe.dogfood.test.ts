@@ -2,31 +2,27 @@
 //
 // [#6736] PROBE — app-authored RLS wideners on the BULK write path.
 //
-// ⚠️ This file PINS TODAY'S BEHAVIOUR, and today's behaviour is
-// defective-by-declaration. It is NOT a fix and must never be read as one.
-// The maintainer's 2026-08-08 ruling on #5493 (Q2 = A1) deliberately deferred
-// the only shape that could cover this path — a filter-shaped authored-only
-// write `FilterCondition` OR-composed into `buildWriteFilter` — with a stated
-// reason: no measured pull. #6736's own acceptance section names the missing
-// first step: "An end-to-end probe first (the mechanism above is a code read)."
-// This file IS that probe. Its job is to produce the numbers a future pricing
-// decision can rest on, and to fail loudly the day the behaviour changes in
-// either direction.
+// [#37535] The probe now pins the FIX. It was written to pin the defect the
+// maintainer's 2026-08-08 ruling on #5493 (Q2 = A1) deferred for "no measured
+// pull": the bulk write path ignored an app-authored widener, silently. Ruling
+// record 7190344023 (2a) replaced that deferral: the security service answers
+// the authored policies' own scope as a filter
+// (`ISecurityService.getAuthoredRowWriteFilter`, the platform ownership floor
+// taken out), and the sharing middleware ORs it into its bulk write scope, verb
+// for verb. The two MEASURE cases below moved with it (term (v)): the bulk
+// statement now touches exactly the rows the declaration admits, which are the
+// rows the by-id path admits (C1 / C2 bound that set).
 //
 // ── The claim under test ──────────────────────────────────────────────────
-// The bulk write path (`update({multi})` / `delete({multi})`) ANDs
-// `SharingService.buildWriteFilter` into the query AST
-// (`plugin-sharing/src/sharing-plugin.ts`, the `// Bulk (multi) write` branch).
-// An app-authored RLS write-widener lives one layer away — `plugin-security`
-// ANDs `computeRlsFilter`'s answer into the SAME `ast.where`
-// (`plugin-security/src/security-plugin.ts`, step 3 "RLS filter injection").
-// Applicable RLS policies OR-combine, so the widener widens WITHIN the RLS
-// layer and is then INTERSECTED with sharing's owner-match. It therefore
-// cannot widen the row set at all on this path — and, unlike the by-id half
-// (#5493, which refuses loudly with FORBIDDEN), nothing says so: no error, no
-// 403, no envelope field, no log on that branch. The statement silently
-// touches FEWER rows than the declaration admits.
-//
+// The bulk write path (`update({multi})` / `delete({multi})`) ANDs the sharing
+// middleware's bulk scope into the query AST
+// (`plugin-sharing/src/sharing-plugin.ts`, the `// Bulk (multi) write` branch):
+// `SharingService.buildWriteFilter` (owner-match, plus edit shares on update)
+// OR the authored policies' own scope. Before #37535 the scope was
+// `buildWriteFilter` alone, and the widener, which `plugin-security` composes
+// into its own row-level layer, was intersected away with no error, no 403 and
+// no log: the statement touched FEWER rows than the declaration admits.
+
 // ── Why the fixture is shaped this way ────────────────────────────────────
 // The object is `public_read` (OWD `read`) rather than `private`, deliberately:
 //   • `buildReadFilter` returns null for a non-`private` model, so READS are
@@ -50,7 +46,7 @@
 //      ADR-0112 envelope. A fixture that leaked ownership or disabled the gate
 //      would let this through.
 // Together: the declaration is live, it is genuinely a widener, its boundary
-// is real — and the bulk path still ignores it.
+// is real — and the bulk path honours it, row for row.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { defineStack, definePermissionSet } from '@objectstack/spec';
@@ -271,7 +267,7 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
 
   // ── the measurement ──────────────────────────────────────────────────────
 
-  it('[MEASURE update({multi})] the declaration admits 3 rows; the bulk statement touches 1, silently', async () => {
+  it('[MEASURE update({multi})] the declaration admits 3 rows; the bulk statement touches those 3', async () => {
     const declaredAdmitted: string[] = [];
     for (const id of ['n_bob_open', 'n_alice_open_1', 'n_alice_open_2', 'n_alice_closed']) {
       const verdict = await security.checkAuthoredRowWrite(OBJECT, id, 'update', bobCtx);
@@ -279,8 +275,9 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
       if (verdict === 'admit' || owned) declaredAdmitted.push(id);
     }
 
-    // The exact narrowing predicate, named rather than inferred.
+    // The two halves of the bulk scope, named rather than inferred.
     const writeFilter = await sharing.buildWriteFilter(OBJECT, bobCtx, 'update');
+    const authoredScope = await security.getAuthoredRowWriteFilter(OBJECT, 'update', bobCtx);
 
     let threw: unknown = null;
     let affected: unknown = null;
@@ -296,17 +293,19 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
 
     // eslint-disable-next-line no-console
     console.log('[#6736 PROBE update]', JSON.stringify({
-      declaredAdmitted, writeFilter, affected, touched,
+      declaredAdmitted, writeFilter, authoredScope, affected, touched,
       threw: threw ? String((threw as Error).message ?? threw) : null,
     }, null, 2));
 
     expect(declaredAdmitted.sort()).toEqual(['n_alice_open_1', 'n_alice_open_2', 'n_bob_open']);
-    expect(threw, 'the narrowing is SILENT — no error, no 403').toBeNull();
-    expect(touched, 'ONLY the caller-owned row is touched').toEqual(['n_bob_open']);
-    expect(affected, 'the affected-row count is the ONLY signal, and it names no authority').toBe(1);
+    expect(authoredScope, 'the security service answers the authored update scope').toBeDefined();
+    expect(threw).toBeNull();
+    expect(touched, 'every row the declaration admits is touched, the caller-owned one and the two it widens to')
+      .toEqual(declaredAdmitted);
+    expect(affected).toBe(3);
   });
 
-  it('[MEASURE delete({multi})] same reading on the delete path — 3 admitted, 1 removed, silently', async () => {
+  it('[MEASURE delete({multi})] same reading on the delete path — 3 admitted, 3 removed', async () => {
     const declaredAdmitted: string[] = [];
     for (const id of ['d_bob_stale', 'd_alice_stale_1', 'd_alice_stale_2']) {
       const verdict = await security.checkAuthoredRowWrite(OBJECT, id, 'delete', bobCtx);
@@ -314,6 +313,7 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
       if (verdict === 'admit' || owned) declaredAdmitted.push(id);
     }
     const deleteFilter = await sharing.buildWriteFilter(OBJECT, bobCtx, 'delete');
+    const authoredScope = await security.getAuthoredRowWriteFilter(OBJECT, 'delete', bobCtx);
 
     let threw: unknown = null;
     let affected: unknown = null;
@@ -325,13 +325,14 @@ describe('[#6736 PROBE] app-authored RLS wideners on the bulk write path', () =>
 
     // eslint-disable-next-line no-console
     console.log('[#6736 PROBE delete]', JSON.stringify({
-      declaredAdmitted, deleteFilter, affected, survivors,
+      declaredAdmitted, deleteFilter, authoredScope, affected, survivors,
       threw: threw ? String((threw as Error).message ?? threw) : null,
     }, null, 2));
 
     expect(declaredAdmitted.sort()).toEqual(['d_alice_stale_1', 'd_alice_stale_2', 'd_bob_stale']);
-    expect(threw, 'the narrowing is SILENT on delete too').toBeNull();
-    expect(survivors, "the two rows the declaration admits survive").toEqual(['d_alice_stale_1', 'd_alice_stale_2']);
-    expect(affected, 'again, only a count').toBe(1);
+    expect(authoredScope, 'the security service answers the authored delete scope').toBeDefined();
+    expect(threw).toBeNull();
+    expect(survivors, 'no row the declaration admits survives').toEqual([]);
+    expect(affected).toBe(3);
   });
 });

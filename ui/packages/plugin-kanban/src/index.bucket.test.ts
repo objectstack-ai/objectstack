@@ -139,3 +139,32 @@ describe('bucketCardsIntoColumns — expanded reference values (objectstack#3643
     expect(result.find((c) => c.id === KANBAN_UNCOLUMNED_ID)!.cards.map((c: any) => c.id)).toEqual(['1']);
   });
 });
+
+describe('bucketCardsIntoColumns — the Uncategorized lane past the page (objectstack#37516)', () => {
+  const lanes = [
+    { id: 'acc-a', title: 'acc-a' },
+    { id: 'acc-b', title: 'acc-b' },
+  ];
+  const page = [
+    { id: '1', account: 'acc-a' },
+    { id: '2', account: 'acc-b' },
+  ];
+
+  it('draws the trailing lane with no card when the host keeps it', () => {
+    const result = bucketCardsIntoColumns(lanes, page, 'account', undefined, 'Uncategorized', true);
+    expect(result.map((c) => c.id)).toEqual(['acc-a', 'acc-b', KANBAN_UNCOLUMNED_ID]);
+    expect(result[2].title).toBe('Uncategorized');
+    expect(result[2].cards).toEqual([]);
+  });
+
+  it('kept, it still takes the page\'s uncategorized cards, in one lane', () => {
+    const result = bucketCardsIntoColumns(lanes, [...page, { id: '3', account: null }], 'account', undefined, 'Uncategorized', true);
+    expect(result.filter((c) => c.id === KANBAN_UNCOLUMNED_ID)).toHaveLength(1);
+    expect(result[2].cards.map((c: any) => c.id)).toEqual(['3']);
+  });
+
+  it('CONTROL: not kept, a page with no uncategorized card draws no such lane', () => {
+    const result = bucketCardsIntoColumns(lanes, page, 'account', undefined, 'Uncategorized');
+    expect(result.map((c) => c.id)).toEqual(['acc-a', 'acc-b']);
+  });
+});

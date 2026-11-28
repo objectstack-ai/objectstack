@@ -3,7 +3,8 @@
 
 /**
  * rerun-failed — re-run the FAILED jobs of one pull-request run of a listed workflow
- * (`RERUN_FAILED_WORKFLOWS` in `fleet-write/ops.mjs`: `ci.yml` and read-only checks), ONCE, as
+ * (`RERUN_FAILED_WORKFLOWS_BY_REPO` in `fleet-write/ops.mjs`, keyed by the run's repository:
+ * objectstack's `ci.yml` and read-only checks, hotcrm's read-only link check), ONCE, as
  * `objectstack-fleet[bot]`, through the fleet-write relay's `run_rerun_failed` op.
  *
  *   node scripts/pm/rerun-failed.mjs --run 39713789453                       # a run on the board repo
@@ -26,7 +27,8 @@
  *      it names (`pull_requests[0].number`, by the pull's own
  *      `GET /repos/{repo}/pulls/{n}`), and judges the five fences on them with
  *      the predicates the relay's executor uses (`RERUN_FAILED_FENCES` in
- *      `fleet-write/ops.mjs`): the workflow, the event, once, failed, the head
+ *      `fleet-write/ops.mjs`): the workflow (a path the `--repo` repository
+ *      lists — another repository's entry never matches), the event, once, failed, the head
  *      (the run's `head_sha` is the pull's CURRENT head, never the copy the
  *      run embeds; a run naming no pull is refused by name). A run that fails
  *      one is REFUSED here (exit 2) with every failing fence named and nothing
@@ -89,7 +91,7 @@ import {
   RELAY_REPO,
   RERUN_FAILED_ATTEMPT,
   RERUN_FAILED_RERUN_STATES,
-  RERUN_FAILED_WORKFLOWS,
+  RERUN_FAILED_WORKFLOWS_BY_REPO,
   TARGET_REPO_SHAPE,
   failedJobNames,
   rerunFailedFenceFailures,
@@ -224,7 +226,7 @@ async function readFences(call, repo, runId) {
     if (p.status !== 200 || !isObject(p.json)) return { run: read.run, fail: `${p.call} -> HTTP ${p.status}${p.detail ? ` (${p.detail})` : ''}: pull #${number}, the run's pull request, could not be read, so the head fence was not judged` };
     pull = p.json;
   }
-  return { run: read.run, pull, failures: rerunFailedFenceFailures(read.run, pull) };
+  return { run: read.run, pull, failures: rerunFailedFenceFailures(read.run, pull, repo) };
 }
 
 // ---------------------------------------------------------------------------
@@ -343,9 +345,9 @@ const PROBE_PULL = 25155;
 const PROBE_HEAD = '25b3a6c4bff905d462d4ff44030e5465c342254a';
 
 /** An offline board for the probe and the self-test: a run, its pull and its two attempts' job lists, every read recorded. */
-function fakeBoard({ run = {}, pull = {}, attempt1 = null, attempt2 = null, after = null } = {}) {
+function fakeBoard({ repo = RELAY_REPO, run = {}, pull = {}, attempt1 = null, attempt2 = null, after = null } = {}) {
   const calls = [];
-  const REPO = RELAY_REPO;
+  const REPO = repo;
   // `run: null` is a run the platform does not answer for; an object patches the measured run, which EMBEDS a copy of its pull.
   const base = run === null ? null : { id: PROBE_RUN, name: 'CI', path: '.github/workflows/ci.yml', event: 'pull_request', run_attempt: 1, status: 'completed', conclusion: 'failure', head_sha: PROBE_HEAD, pull_requests: [{ number: PROBE_PULL, head: { sha: PROBE_HEAD } }], ...run };
   // `pull: null` is a pull the platform does not answer for; an object patches the pull's OWN answer (its current head).
@@ -464,12 +466,18 @@ export async function selfTest() {
       const r = await drive({}, { board: { run, ...board } });
       return [r.exit, r.sent.length, r.calls.length, r.text.includes(`fence \`${fence}\``) && r.text.includes('Nothing sent')];
     };
+    const LISTED = Object.entries(RERUN_FAILED_WORKFLOWS_BY_REPO).flatMap(([repo, paths]) => paths.map((path) => [repo, path]));
     const listed = [];
-    for (const path of RERUN_FAILED_WORKFLOWS) {
-      const r = await drive({}, { board: { run: { path } } });
-      listed.push([path, r.exit, r.sent.length]);
+    for (const [repo, path] of LISTED) {
+      const r = await drive({ repo }, { board: { repo, run: { path } } });
+      listed.push([repo, path, r.exit, r.sent.length]);
     }
-    t('accepted: a run of each listed workflow passes at the seat and is dispatched once — check-links.yml among them, lint.yml not', [listed, RERUN_FAILED_WORKFLOWS.includes('.github/workflows/check-links.yml'), RERUN_FAILED_WORKFLOWS.includes('.github/workflows/lint.yml')], [RERUN_FAILED_WORKFLOWS.map((path) => [path, EXIT_OK, 1]), true, false]);
+    t('accepted: a run of each listed workflow passes at the seat on the repository that lists it and is dispatched once — check-links.yml and hotcrm link-check.yml among them, lint.yml not', [listed, LISTED.some(([, p]) => p === '.github/workflows/check-links.yml'), LISTED.some(([r, p]) => r === 'objectstack-ai/hotcrm' && p === '.github/workflows/link-check.yml'), LISTED.some(([, p]) => p === '.github/workflows/lint.yml')], [LISTED.map(([repo, path]) => [repo, path, EXIT_OK, 1]), true, true, false]);
+    const across = async (repo, path) => {
+      const r = await drive({ repo }, { board: { repo, run: { path } } });
+      return [r.exit, r.sent.length, r.calls.length, r.text.includes('fence `workflow`') && r.text.includes('Nothing sent')];
+    };
+    t("⛔ fence workflow, refused at the seat across repositories: objectstack's ci.yml on hotcrm, hotcrm's link-check.yml on objectstack — exit 2, no dispatch, no further read", [await across('objectstack-ai/hotcrm', '.github/workflows/ci.yml'), await across(RELAY_REPO, '.github/workflows/link-check.yml')], [[EXIT_USAGE, 0, 2, true], [EXIT_USAGE, 0, 2, true]]);
     t('⛔ fence workflow, refused at the seat: a run of lint.yml — exit 2, no dispatch, no further read', await fenced({ path: '.github/workflows/lint.yml' }, 'workflow'), [EXIT_USAGE, 0, 2, true]);
     t('⛔ fence event, refused at the seat: a merge_group run', await fenced({ event: 'merge_group' }, 'event'), [EXIT_USAGE, 0, 2, true]);
     t('⛔ fence once, refused at the seat: a run already at attempt 2 — a second failure is real', await fenced({ run_attempt: 2 }, 'once'), [EXIT_USAGE, 0, 2, true]);
@@ -526,7 +534,7 @@ export async function selfTest() {
     const own = readFileSync(SELF_PATH, 'utf8');
     const code = own.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     t('⛔ no write verb in this file\'s code — its one write is the dispatch, which sendFleetWrite sends and paces', /\b(?:method|verb)\s*:\s*'(?:POST|PATCH|PUT|DELETE)'/.test(code), false);
-    t('the fences are the relay table\'s, imported — no fence predicate or allowlist is spelled here', [/\brerunFailedFenceFailures\b/.test(own), /RERUN_FAILED_WORKFLOWS\s*=/.test(code), /\[\s*'\.github\/workflows\/[^']+'(?:\s*,\s*'[^']+')*\s*\]/.test(code)], [true, false, false]);
+    t('the fences are the relay table\'s, imported — no fence predicate or allowlist is spelled here', [/\brerunFailedFenceFailures\b/.test(own), /RERUN_FAILED_WORKFLOWS(?:_BY_REPO)?\s*=/.test(code), /\[\s*'\.github\/workflows\/[^']+'(?:\s*,\s*'[^']+')*\s*\]/.test(code)], [true, false, false]);
     t('the relay-only declaration the conformance reads is set', relayOnly, true);
   }
 

@@ -891,6 +891,7 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
   });
   const sealed: ObjectDef = { ...TICKET, name: 'sealed', enable: { apiEnabled: false } };
   const getOnly: ObjectDef = { ...TICKET, name: 'get_only', enable: { apiMethods: ['get'] } };
+  const unsearchable: ObjectDef = { ...TICKET, name: 'unsearchable', enable: { apiMethods: ['list'], searchable: false } };
   const sysClosed: ObjectDef = { ...TICKET, name: 'sys_closed_note' };
   const sysOpen: ObjectDef = { ...TICKET, name: 'sys_open_note', enable: { aiReadable: true } };
 
@@ -971,7 +972,8 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
   it.each([
     ['an object of a disabled package', { objects: [TICKET], disabled: ['ticket'] }, 'ticket', 'disabled package'],
     ['an object the API does not serve at all', { objects: [sealed] }, 'sealed', 'does not serve object'],
-    ['an object whose `apiMethods` do not grant `search`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object whose `apiMethods` do not grant `list`', { objects: [getOnly] }, 'get_only', 'does not serve object'],
+    ['an object granting `list` beside `searchable: false`', { objects: [unsearchable] }, 'unsearchable', 'does not serve object'],
     ['a system object without `enable.aiReadable`', { objects: [sysClosed] }, 'sys_closed_note', 'does not opt into AI reads'],
   ])('%s is refused PERMISSION_DENIED / 403, naming the object', async (_label, opts, object, said) => {
     const { svc } = setup({ sources: [], ...opts });
@@ -981,6 +983,20 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect((verdict as { message: string }).message).toContain(said);
     // The engine's own write is admitted: a package install is judged at validate and publish.
     expect(await svc.admitAuthoredSource(item(object, ['body']), SYSTEM)).toEqual({ admitted: true });
+  });
+
+  it('the not-served refusal names `list` and `searchable` as cause and fix, never a `search` grant', async () => {
+    for (const object of ['sealed', 'get_only', 'unsearchable']) {
+      const { svc } = setup({ sources: [], objects: [sealed, getOnly, unsearchable] });
+      const verdict = await svc.admitAuthoredSource(item(object, ['body']), MANAGER);
+      expect(verdict).toMatchObject({ admitted: false, code: 'PERMISSION_DENIED', status: 403, object });
+      const message = (verdict as { message: string }).message;
+      expect(message).toContain('does not grant `list`');
+      expect(message).toContain('include `list` with `enable.searchable` not false');
+      // `search` is a retired `apiMethods` value the parse strips: never prescribed as a grant.
+      expect(message).not.toMatch(/(include|grant)s? `search`/);
+      expect(message).not.toContain('Serve the object for `search`');
+    }
   });
 
   it('CONTROL: a served object, and a system object that opts into AI reads, are admitted', async () => {

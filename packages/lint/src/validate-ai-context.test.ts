@@ -186,6 +186,33 @@ describe('validateAiContext — ADR-0160 D1 author defects', () => {
     expect(validateAiContext(stack)).toEqual([]);
   });
 
+  // `id` is provisioned by the driver, not the injection pass, so no injected
+  // definition carries it; existence resolves through `injectedColumnsFor`.
+  it('`id` is no unknown field, in fields, related fields, where and orderBy', () => {
+    const stack = {
+      objects,
+      aiContexts: [pack({
+        fields: ['title', 'id'],
+        related: [{ object: 'policy_revision', fields: ['version', 'id'], where: { id: 'rev_1' }, orderBy: [{ field: 'id' }] }],
+      })],
+    };
+    expect(objects.flatMap((o) => Object.keys(o.fields))).not.toContain('id');
+    expect(validateAiContext(stack)).toEqual([]);
+    // Through the CLI tier too (`os validate`).
+    expect(runAuthoringRules('validate', { parsed: stack, normalized: stack }).filter((f) => f.rule.startsWith('ai-context-')))
+      .toEqual([]);
+    // CONTROL: a misspelling beside it is still reported.
+    expect(rulesOf({ objects, aiContexts: [pack({ fields: ['idd'], related: undefined })] })).toEqual([
+      [AI_CONTEXT_FIELD_UNKNOWN, 'aiContexts[0].fields[0]'],
+    ]);
+  });
+
+  it('a body naming `id` exists and is judged not long text, never unknown', () => {
+    expect(rulesOf({ objects, aiContexts: [pack({ body: { field: 'id' } })] })).toEqual([
+      [AI_CONTEXT_BODY_NOT_LONG_TEXT, 'aiContexts[0].body.field'],
+    ]);
+  });
+
   it('a column the platform does not inject on the object is still unknown: owner_id under ownership org', () => {
     const orgOwned = objects.map((o) => (o.name === 'policy' || o.name === 'policy_revision' ? { ...o, ownership: 'org' } : o));
     const stack = {
