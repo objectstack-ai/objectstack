@@ -17,7 +17,10 @@ name: Publish starter to marketplace (staging)
 # trigger: this repo's version tags are pushed by release.yml with
 # GITHUB_TOKEN, and nothing GITHUB_TOKEN pushes starts a workflow, and the
 # starter is a private package, which changesets never tag. A version already
-# on the marketplace answers 409, so a re-run publishes nothing twice.
+# on the marketplace answers 409, so a re-run publishes nothing twice. Any
+# other edit to that file also starts a real run (an upsert, then 409 for an
+# existing version). Every run prints the commit it built from and the bundle's
+# sha256, so a later production run can be compared with it.
 on:
   push:
     branches: [main]
@@ -41,7 +44,7 @@ jobs:
   publish:
     name: Build and publish the starter to staging
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     if: github.repository == 'objectstack-ai/objectstack'
     steps:
       - name: Checkout repository

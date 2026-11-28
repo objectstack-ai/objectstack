@@ -34,8 +34,18 @@
 //   2. POST {OS_CLOUD_URL}/api/v1/cloud/packages/:id/versions -- the built
 //      artifact, with `auto_approve: true` (honoured for a platform-admin key
 //      only; without it the version stays draft and the catalog hides it).
-//      409 means the version is already there: a re-run is a no-op, not a
-//      failure.
+//      A version that answers with a `listing_status` other than `approved`
+//      fails the run. 409 means the version is already there: a re-run is a
+//      no-op, not a failure -- but this run did not see that version's status,
+//      so it says approval was NOT verified rather than calling it published
+//      (a draft left by an earlier run with a non-admin key also answers 409).
+//      A 2xx answer that carries no `listing_status` is reported the same way.
+//
+// ## Comparing the two planes
+//
+// Every run, a dry run included, prints the commit it built from and a sha256
+// of the bundle it sends. The starter is never tagged, so these two lines are
+// what tells a production publish apart from the staging one it promotes.
 //
 // Auth is `Authorization: Bearer $OS_CLOUD_API_KEY` (service mode).
 //
@@ -66,13 +76,14 @@
 //
 // Env: OS_CLOUD_URL, OS_CLOUD_API_KEY, OS_CLOUD_TIMEOUT_MS (per request,
 // default 240000: the control plane is a singleton that can be cold).
-// Exit: 0 published or already published, 1 refused or failed, 2 usage.
+// Exit: 0 published (or already there, approval not verified), 1 refused or failed, 2 usage.
 
 import fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { isEntrypoint } from '../invoked-as.mjs';
@@ -165,6 +176,18 @@ function describeBundle(bundle) {
     .join(' · ');
 }
 
+/** sha256 of the bundle exactly as it is sent (the JSON the version body carries). */
+export function bundleDigest(artifact) {
+  return createHash('sha256').update(JSON.stringify(artifact)).digest('hex');
+}
+
+/** The commit this run built from: GITHUB_SHA in CI, else the checkout's HEAD, else unknown. */
+function builtFrom(appDir) {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA;
+  const r = spawnSync('git', ['-C', appDir, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+  return r.status === 0 ? r.stdout.trim() : 'unknown (not a git checkout)';
+}
+
 /** The package body as printed: the README is long, so it is shown by length. */
 function printablePackageBody(body) {
   return { ...body, ...(body.readme ? { readme: `<${body.readme.length} chars, starts ${JSON.stringify(body.readme.split('\n')[0])}>` } : {}) };
@@ -227,6 +250,7 @@ export async function publish({
   sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   log = (m) => console.log(m),
   error = (m) => console.error(m),
+  commit = undefined,
 } = {}) {
   const base = cloudUrl.replace(/\/+$/, '');
   let starter;
@@ -256,6 +280,8 @@ export async function publish({
   log(`── ${STARTER_MANIFEST_ID} @ ${version} → ${base || '(no control plane: dry run)'}`);
   if (stampedFrom !== undefined) log(`  artifact manifest.version ${stampedFrom} set to ${version}, the package.json version this publishes`);
   log(`  bundle: ${describeBundle(artifact)}`);
+  log(`  built from commit ${commit ?? builtFrom(appDir)}`);
+  log(`  bundle sha256 ${bundleDigest(artifact)}`);
 
   if (dryRun) {
     log('  dry run: no HTTP request is made.');
@@ -282,7 +308,11 @@ export async function publish({
 
   const ver = await postJson({ url: `${base}/api/v1/cloud/packages/${encodeURIComponent(pkgId)}/versions`, body: verBody, ...common });
   if (ver.status === 409) {
-    log(`  = version ${version} is already published -- nothing to do`);
+    log(`  = version ${version} already exists -- nothing was sent for it`);
+    log(
+      `::warning::version ${version} already existed, so this run did not see its listing status and its approval was NOT verified. `
+        + `Check GET ${base}/api/v1/cloud/packages for ${STARTER_MANIFEST_ID}: the cloud counts only an approved version as the starter.`,
+    );
     return 0;
   }
   if (!ver.ok) {
@@ -292,11 +322,19 @@ export async function publish({
     return 1;
   }
   const data = ver.json?.data ?? ver.json;
-  log(`  ✓ published version ${version}${data?.listing_status ? ` (listing status: ${data.listing_status})` : ''}`);
-  if (data?.listing_status && data.listing_status !== 'approved') {
+  if (!data?.listing_status) {
+    log(`  ✓ created version ${version}`);
+    log(
+      `::warning::the version answer carried no listing_status, so approval was NOT verified. `
+        + `Check GET ${base}/api/v1/cloud/packages for ${STARTER_MANIFEST_ID}: the cloud counts only an approved version as the starter.`,
+    );
+    return 0;
+  }
+  if (data.listing_status !== 'approved') {
     error(`✗ version ${version} landed as ${data.listing_status}, not approved -- the cloud counts only an approved version as the starter; the key is probably not a platform-admin key`);
     return 1;
   }
+  log(`  ✓ published version ${version} (listing status: approved)`);
   return 0;
 }
 
@@ -323,7 +361,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the artifact manifest version is set to the published version, and the run says so': 1,
   'a dry run prints both payloads and makes no request, with no key or URL': 1,
   'a full run upserts the package and then publishes the version, both with the bearer key': 1,
-  'an existing version answers 409 and the run is a no-op that exits 0': 1,
+  'an existing version answers 409: a no-op that exits 0 and says approval was NOT verified': 1,
   'a 5xx is retried with backoff and then succeeds': 1,
   'a 4xx on the upsert fails the run and never posts a version': 1,
   'a 422 on the version prints the marketplace policy violations and fails': 1,
@@ -333,9 +371,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'an artifact with another manifest id is refused before any request': 1,
   'a missing artifact is refused and names the build command': 1,
   'the CLI exits 1 on a refusal, 2 on an unknown argument, 0 on a dry run': 1,
+  'a version answer with no listing_status exits 0 and says approval was NOT verified': 1,
+  'every run prints the commit it built from and the bundle sha256, a dry run included': 1,
+  'a network error on every attempt gives up after the last retry and fails the run': 1,
+  'an upsert answer with no package id fails the run and never posts a version': 1,
+  'an empty OS_CLOUD_URL outside a dry run is refused before any request': 1,
 });
 // Deleting a roster entry silences its floor as surely as zeroing it.
-const SELF_TEST_BATTERY_FLOOR = 15;
+const SELF_TEST_BATTERY_FLOOR = 20;
 
 let selfTestReachedVerdict = false;
 
@@ -374,7 +417,7 @@ async function run(opts) {
   const out = [];
   const err = [];
   const slept = [];
-  const code = await publish({ cloudUrl: 'https://cloud.test', apiKey: 'k-test', sleep: async (ms) => { slept.push(ms); }, log: (m) => out.push(m), error: (m) => err.push(m), ...opts });
+  const code = await publish({ cloudUrl: 'https://cloud.test', apiKey: 'k-test', commit: 'c0ffee', sleep: async (ms) => { slept.push(ms); }, log: (m) => out.push(m), error: (m) => err.push(m), ...opts });
   return { code, out: out.join('\n'), err: err.join('\n'), slept };
 }
 
@@ -453,13 +496,14 @@ const SELF_TEST_CASES = [
     },
   },
   {
-    label: 'an existing version answers 409 and the run is a no-op that exits 0',
+    label: 'an existing version answers 409: a no-op that exits 0 and says approval was NOT verified',
     check: async (dir) => {
       const f = fakeFetch([PKG_OK, { status: 409, json: { error: 'duplicate' } }]);
       const r = await run({ appDir: dir, fetchImpl: f.impl });
       return [
         ...(r.code === 0 ? [] : [`exit ${r.code}`]),
-        ...(r.out.includes('already published') ? [] : ['no "already published" line']),
+        ...(r.out.includes('::warning::version 0.1.1-next.1 already existed') && r.out.includes('NOT verified') ? [] : [`no not-verified warning:\n${r.out}`]),
+        ...(/published version/.test(r.out) ? ['a 409 run still claims the version is published'] : []),
       ];
     },
   },
@@ -556,6 +600,71 @@ const SELF_TEST_CASES = [
       const usage = spawnSync(process.execPath, [self, '--dryrun'], { encoding: 'utf8', env });
       if (usage.status !== 2) problems.push(`unknown argument exit ${usage.status}`);
       return problems;
+    },
+  },
+  {
+    label: 'a version answer with no listing_status exits 0 and says approval was NOT verified',
+    check: async (dir) => {
+      const f = fakeFetch([PKG_OK, { status: 201, json: { data: { id: 'ver_1' } } }]);
+      const r = await run({ appDir: dir, fetchImpl: f.impl });
+      return [
+        ...(r.code === 0 ? [] : [`exit ${r.code}`]),
+        ...(r.out.includes('carried no listing_status') && r.out.includes('NOT verified') ? [] : [`no not-verified warning:\n${r.out}`]),
+        ...(/published version/.test(r.out) ? ['an unread status is still reported as published'] : []),
+      ];
+    },
+  },
+  {
+    label: 'every run prints the commit it built from and the bundle sha256, a dry run included',
+    check: async (dir) => {
+      const want = bundleDigest(loadStarter(dir).artifact);
+      const problems = [];
+      const dry = await run({ appDir: dir, dryRun: true });
+      const full = await run({ appDir: dir, fetchImpl: fakeFetch([PKG_OK, VER_OK]).impl });
+      for (const [name, r] of [['dry run', dry], ['full run', full]]) {
+        if (!r.out.includes('built from commit c0ffee')) problems.push(`${name}: no commit line`);
+        if (!r.out.includes(`bundle sha256 ${want}`)) problems.push(`${name}: no bundle sha256 ${want}`);
+      }
+      if (!/^[0-9a-f]{64}$/.test(want)) problems.push(`digest is not a sha256: ${want}`);
+      return problems;
+    },
+  },
+  {
+    label: 'a network error on every attempt gives up after the last retry and fails the run',
+    check: async (dir) => {
+      let calls = 0;
+      const impl = async () => { calls += 1; throw new Error('ECONNRESET'); };
+      const r = await run({ appDir: dir, fetchImpl: impl });
+      return [
+        ...(r.code === 1 ? [] : [`exit ${r.code}`]),
+        ...(calls === 4 ? [] : [`${calls} attempts, expected 4`]),
+        ...(JSON.stringify(r.slept) === JSON.stringify([3000, 6000, 12000]) ? [] : [`backoff ${JSON.stringify(r.slept)}`]),
+        ...(r.err.includes('request failed: ECONNRESET') ? [] : [`no failure line: ${r.err}`]),
+      ];
+    },
+  },
+  {
+    label: 'an upsert answer with no package id fails the run and never posts a version',
+    check: async (dir) => {
+      const f = fakeFetch([{ status: 200, json: { success: true, data: {} } }]);
+      const r = await run({ appDir: dir, fetchImpl: f.impl });
+      return [
+        ...(r.code === 1 ? [] : [`exit ${r.code}`]),
+        ...(f.calls.length === 1 ? [] : [`${f.calls.length} requests`]),
+        ...(r.err.includes('no package id') ? [] : [`no failure line: ${r.err}`]),
+      ];
+    },
+  },
+  {
+    label: 'an empty OS_CLOUD_URL outside a dry run is refused before any request',
+    check: async (dir) => {
+      const f = fakeFetch([]);
+      const r = await run({ appDir: dir, cloudUrl: '', fetchImpl: f.impl });
+      return [
+        ...(r.code === 1 ? [] : [`exit ${r.code}`]),
+        ...(f.calls.length === 0 ? [] : ['a request was made']),
+        ...(r.err.includes('OS_CLOUD_URL is empty') ? [] : [`no refusal line: ${r.err}`]),
+      ];
     },
   },
 ];

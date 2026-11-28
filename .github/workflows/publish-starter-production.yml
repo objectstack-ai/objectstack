@@ -5,9 +5,16 @@ name: Publish starter to marketplace (production)
 # body is scripts/ci/publish-starter-marketplace.mjs, the same script the
 # staging workflow runs.
 #
-# MANUAL ONLY: no push, tag or release trigger. Publish to staging first,
-# check that a new staging workspace installs the starter, then dispatch this
-# to promote the same version. The dry run is on by default.
+# MANUAL ONLY: no push, tag or release trigger, and only from `main`: a
+# dispatch on any other ref fails before it builds. Publish to staging first,
+# check that a new staging workspace installs the starter, then dispatch this.
+#
+# What this builds is `main` AT DISPATCH TIME, not the bytes staging holds: the
+# starter is never tagged, and its source can change between releases while its
+# version does not. Both runs print the commit they built from and the bundle's
+# sha256. Compare them with the staging run's log, a dry run here included,
+# before a real run: a version that already exists answers 409, so the first
+# bundle to reach a version is the one it keeps. The dry run is on by default.
 #
 # Credential: `OS_CLOUD_API_KEY_PRODUCTION`, a platform-admin key for
 # production. An unset secret FAILS the run and names itself.
@@ -30,9 +37,16 @@ jobs:
   publish:
     name: Build and publish the starter to production
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 50
     if: github.repository == 'objectstack-ai/objectstack'
     steps:
+      - name: Refuse a ref other than main
+        run: |
+          if [ "$GITHUB_REF" != 'refs/heads/main' ]; then
+            echo "::error title=Production publish refused::dispatched on $GITHUB_REF; the production starter is built from main only. Re-run it on main."
+            exit 1
+          fi
+
       - name: Checkout repository
         uses: actions/checkout@v7
 
