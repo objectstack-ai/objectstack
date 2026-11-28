@@ -84,7 +84,7 @@ entry; new packages arrive covered; a package that graduates deletes its entry i
 same PR; when a re-measure forces a count up, rewrite the entry's `note` too — a note
 naming only the old errors reads as "nearly graduated" to the next author.
 
-Three principles the ratchet's invariants encode:
+Principles the ratchet's invariants encode:
 
 - **A package's `tsconfig.json` reaches every `*.test.ts` / `*.spec.ts` in it**
   ([why](docs/agents/build-and-test.md#why-a-test-the-tsconfigjson-misses-is-hidden)). A sibling
@@ -239,15 +239,15 @@ See `ui/AGENTS.md` for the app-id / localStorage / auth gotchas.
     the shared tree has its HEAD switched and reset *under you*, silently clobbering uncommitted work — a feature
     branch on the *shared* checkout is **not** enough. Before your **first file edit**, be in a dedicated worktree on
     a feature branch: `git fetch origin main && git worktree add --no-track ../objectstack-<task> -b <branch>
-    origin/main && cd ../objectstack-<task> && pnpm install`. Two PreToolUse hooks **enforce** this —
+    origin/main && cd ../objectstack-<task> && pnpm install`. PreToolUse hooks **enforce** this —
     `.claude/hooks/guard-main-checkout.sh` blocks `Edit`/`Write`/`NotebookEdit`, and
     `.claude/hooks/guard-main-checkout-bash.sh` blocks the identical write arriving through **Bash** (`>`/`>>`
     redirection, `sed -i`, `perl -i`, `tee`, `cp`, `mv`, `rm`, `touch`) — and both check the **target file's own
     repo**, so sibling repos (`cloud`, `hotcrm`) you touch are covered too (deliberate non-task override:
     `OS_ALLOW_MAIN_EDITS=1`, one switch for both). The Bash guard is precision-first: it never blocks reads, and any
     shape it cannot resolve with confidence (`bash -c …`, `xargs`, `node -e`, a `$VAR`/glob target) is allowed through
-    — the rule still outranks the hook. **A worktree isolates neither the stash nor the build cache** — the
-    third hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`) and the replacements live in Multi-agent discipline below.
+    — the rule still outranks the hook. **A worktree isolates neither the stash nor the build cache** — another
+    hook (`guard-shared-stash.sh`, `OS_ALLOW_STASH=1`) and the replacements live in Multi-agent discipline below.
 12. **Contract-first — fix the metadata, not the runtime.** `packages/spec` is the one contract between metadata
     *producers* and the runtime/renderers that *consume* it. When a piece of metadata "doesn't work," ask **first**:
     *is it spec-compliant? is this the long-term-correct direction?* If the metadata is wrong, fix it at the
@@ -450,7 +450,7 @@ platform's, not your form downgraded. Which layer does this is unknown; don't go
 it. **Commit message:** an agent commit ends with the model-free trailer pair
 `Claude-Session: https://claude.ai/code/session_<id>` and `Co-authored-by: Claude <noreply@anthropic.com>`, and the
 pre-push hook refuses a model identifier in that pair; no model identifier lands in a PR title or body, a comment, a
-changeset, a doc or a code comment. Two exemptions: a harness-written `Co-Authored-By` trailer (REPORTING: not declared
+changeset, a doc or a code comment. Exemptions: a harness-written `Co-Authored-By` trailer (REPORTING: not declared
 a deviation; landed history is not rewritten) and a verbatim maintainer ruling preserved as a quotation block.
 
 **GitHub mutates body BYTES — spell poison-shaped tokens out in words, never literally.**
@@ -497,7 +497,7 @@ Even inside your own worktree, operate defensively:
    accepted and non-draft, then let the queue merge it**
    ([why](docs/agents/multi-agent-discipline.md#what-the-merge-queue-does-with-your-pr)).
 
-   ⛔ **Three classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
+   ⛔ **These classes of PR never enter this path on green alone:** (a) a diff touching any **governed surface**
    (**Prime Directive #14**, which names them and holds the current list — **this file and `CLAUDE.md` are on it**,
    so re-read it rather than recalling it); (b) the **Version Packages** PR, or any PR whose merge performs a
    release (**Prime Directive #15**); (c) a PR whose **changed lines exceed 3,000** (`additions + deletions`,
@@ -653,8 +653,8 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 
 **Volatile counts are deleted, not synced.** ⛔ Never write into user-facing output, docs, skills text or a test
 baseline a count that ordinary development moves (rules, files, registry entries) unless a reader acts on it (a
-limit, quota, price). Meet one: delete it, and any check whose only job is keeping it equal to a registry;
-never update either.
+limit, quota, price). Meet one: delete it, and any check whose only job is keeping it equal to a registry (its PR
+cites this rule, not the duplicate pin a test deletion needs); never update either.
 
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
@@ -713,9 +713,9 @@ Principles the wrapper encodes (its own output is the authority on detail):
   a name, with accepted cases in the shrink-only, hand-edited
   `dual-source-exports.baseline.json`.
 
-Three generators have **no** gate at all. Nothing verifies `gen:openapi` and `gen:sbom`
+Some generators have **no** gate at all. Nothing verifies `gen:openapi` and `gen:sbom`
 are current, and `gen:migration-registry` writes gitignored output that install, build and
-test regenerate; the wrapper reports all three each run rather than staying silent.
+test regenerate; the wrapper reports each of them every run rather than staying silent.
 
 ---
 ## Context Routing — apply the right role per path
@@ -784,7 +784,7 @@ export class MyPlugin implements Plugin {
 
 ## Route & surface ownership
 
-Five rules. They matter more than usual here because this repo is largely written by
+These rules matter more than usual here because this repo is largely written by
 agents, and every one of them is a trap that reads as reasonable code.
 
 **1. One route, one owner.** Never add a second implementation of a path that another
@@ -821,7 +821,7 @@ zero rows, and no status, header or field distinguishes either from a real answe
 AI caller cannot see it at all. This is review-enforceable: a PR adding a `GET` route
 that reads `req.query` without declaring a closed set is incomplete.
 
-Three things to get right:
+Get these right:
 
 - ⛔ **Measure the set from the handler's ACTUAL read points, never from the docs or
   the card.** It is not "the filters" — it is paging, ordering, format, alias spellings
@@ -1037,7 +1037,7 @@ Both non-handshake shapes, and how to classify and probe your own:
    migration**: removing or renaming anything an author can write (a spec key, an export, a config field) puts the FROM
    → TO mapping and the one-line fix in the body, which ships as `CHANGELOG.md` in the npm package. Removing an
    authorable spec key also needs a tombstone (`retiredKey()`, `packages/spec/src/shared/retired-key.ts`) so the
-   rejection carries the prescription — one of fourteen retirement surfaces; follow the `spec-property-retirement`
+   rejection carries the prescription — one of the retirement surfaces; follow the `spec-property-retirement`
    skill (`.claude/skills/`), never reconstruct the kit. **A breaking changeset must also state its ADR-0087
    disposition, in writing** — exactly one marker in the changeset body, which also carries both declaration lines
    (`pnpm check:adr-0087-registration` reads the arm and the kind there). ⛔ The categories are NOT copied here —
