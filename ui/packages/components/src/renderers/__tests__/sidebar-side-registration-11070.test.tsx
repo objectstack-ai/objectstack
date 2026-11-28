@@ -89,11 +89,15 @@ describe('what each side draws, through the real SchemaRenderer (objectui#11070)
     expect(new Set(drawn).size).toBe(drawn.length);
     expect(markup({ ...base, side: 'left' })).toBe(markup(base));
     // The difference is the edge shadcn pins the panel to: the outer element
-    // names the side, and the panel is positioned at that edge.
+    // names the side, and the panel is positioned at that edge, the inline
+    // end for `right` and the inline start for `left` (objectstack#37914: the
+    // right and left edges in a left-to-right document, mirrored in a
+    // right-to-left one).
     const right = markup({ ...base, side: 'right' });
     expect(right).toContain('data-side="right"');
-    expect(right).toContain('right-0');
+    expect(right).toContain('end-0');
     expect(markup(base)).toContain('data-side="left"');
+    expect(markup(base)).toContain('start-0');
   });
 
   it('on the in-flow form (`collapsible: false`), every value draws the same column', () => {
