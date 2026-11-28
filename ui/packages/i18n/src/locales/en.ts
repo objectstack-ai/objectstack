@@ -1661,7 +1661,21 @@ const en = {
       typeLabel: 'View type',
       includeCurrent: 'Include the current filters and sort',
       scopeShared: 'Shared',
-      scopeHint: 'Shared views are seen by everyone who can see this list',
+      scopeHint: 'Shared views are seen by everyone who can see this list, unless the view is limited to the holders of a capability',
+      // objectstack#34908 — who a shared view reaches: the capability picker and its position preview.
+      audienceLabel: 'Who sees this view',
+      audienceEveryone: 'Everyone who can see this list',
+      audienceAdd: 'Limit to a capability…',
+      audienceAllAdded: 'All capabilities added',
+      audienceLoading: 'Loading capabilities…',
+      audienceLoadFailed: 'The capabilities could not be loaded, so none can be added: {{message}}',
+      audienceNone: 'No capability is defined yet. Capabilities are granted on permission sets, in Setup.',
+      audienceGrantedBy: 'Granted by {{sets}}',
+      audienceRemove: 'Remove {{name}}',
+      audiencePositions: '{{positions}} will see this view',
+      audienceNoPosition: 'No single position holds every picked capability: only people who hold all of them, directly or through several positions, will see this view',
+      audienceSelf: 'This applies to you too: if you do not hold every capability picked, the view leaves your own list once it is created',
+      audiencePositionsUnread: 'The positions could not be read, so who will see this view is not shown',
       // objectstack#36409 — a shared view's name already taken, and a view that is gone.
       shareNameTaken: 'An unpublished draft already uses this view’s name, so nothing was shared. Give the view another name and try again.',
       viewGone: 'The view you opened is no longer available, so the list shows its default view.',
@@ -3195,7 +3209,29 @@ const en = {
           availableObjects: 'List the available data objects.',
           recentActivity: 'Summarize my recent activity.',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Summarize this record',
+            related: 'What is related to this record?',
+          },
+          list: {
+            summarize: 'Summarize the records in this list',
+            recent: 'Which records were added this week?',
+          },
+          dashboard: {
+            explain: 'What does this dashboard show?',
+            standOut: 'What stands out on this dashboard?',
+          },
+          report: {
+            summarize: 'Summarize this report',
+            takeaways: 'What are the key takeaways from this report?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Suggested questions',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -3223,8 +3259,8 @@ const en = {
         expand: 'Expand',
         restore: 'Restore side panel',
         open: 'Open assistant',
-        // objectui#11666 — the launchers' marker while a proposed plan awaits approval.
-        planAwaitingApproval: 'A proposed plan is waiting for your approval',
+        // objectui#11666 — the launchers' marker while a proposed write awaits approval.
+        planAwaitingApproval: 'An action is waiting for your approval',
         close: 'Close',
         more: 'More actions',
       },
@@ -3751,6 +3787,10 @@ const en = {
         twoFactorTooManyAttempts: 'Too many incorrect codes. Sign in with your password again.',
         twoFactorExpired: 'This sign-in has expired. Sign in with your password again.',
         twoFactorLocked: 'Too many failed attempts. Your account is temporarily locked. Try again later.',
+        // objectstack#34171 — a cloud-managed runtime's 409 `RESOURCE_CONFLICT` on the
+        // password doors (`signInRefusalMessages`, `passwordDoorRefusalMessages`).
+        managedPasswordSignIn: "This deployment signs you in through its identity provider, so a password can't be used here. Use the identity provider's button above to sign in.",
+        managedPasswordReset: "This deployment signs you in through its identity provider, so no password is set or reset here. Sign in with the identity provider's button on the sign-in page.",
       },
     },
     register: {
@@ -4198,6 +4238,7 @@ const en = {
     recent: 'Recent',
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
+    conversationUnavailable: 'This conversation is no longer available',
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
@@ -4232,6 +4273,7 @@ const en = {
         report: 'Reports',
         page: 'Pages',
         url: 'Link',
+        aiChat: 'AI inquiry',
       },
       linkLabel: 'Label',
       linkUrl: 'URL',
@@ -4257,6 +4299,17 @@ const en = {
       creating: 'Creating…',
       newItemPendingDraft: 'A draft with this name is already pending. Try again.',
       newItemLeft: 'The new dashboard "{{name}}" could not be removed again; remove it in Studio.',
+      aiChatName: 'Ask AI',
+      aiChatDefaults: 'Leave a field empty to show the page\'s default.',
+      aiChatTitle: 'Heading',
+      aiChatSubtitle: 'Subtitle',
+      aiChatPlaceholder: 'Question box hint',
+      aiChatSuggestions: 'Suggested questions',
+      aiChatSuggestionsHint: 'One per line, at most 4.',
+      aiChatTooLong: 'At most {{max}} characters.',
+      aiChatTooMany: 'At most {{max}} questions.',
+      aiChatEdit: 'Edit inquiry page',
+      setAsHome: 'Set as home',
     },
     pins: {
       button: 'Header buttons',
@@ -4996,10 +5049,12 @@ const en = {
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
       organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
+      unpaidOrganizationLimitReached: 'You already own as many free organizations as one account may. To create another, upgrade one of them to a paid plan or contact support. Organizations you were invited to do not count.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',
     },
+    viewPlans: 'View plans and upgrade',
     backToList: 'Back to organizations',
     notFound: 'Organization not found',
     notFoundDescription: 'This organization does not exist or you do not have access.',
@@ -5516,6 +5571,7 @@ const en = {
       add_field: 'Add a field',
       apply_blueprint: 'Build the app from the plan',
       apply_edit: 'Apply the change',
+      ask_which: 'Clarify the question',
       create_metadata: 'Create a metadata item',
       create_object: 'Create an object',
       create_package: 'Create a package',
@@ -6280,6 +6336,7 @@ const en = {
       toggleFailed: 'Failed to toggle app status: {{reason}}',
       setDefaultDone: '{{name}} set as default',
       setDefaultFailed: 'Failed to set default app: {{reason}}',
+      restoreDefaultFailed: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
       appDeleted: '{{name}} deleted',
       deleteFailed: 'Failed to delete app: {{reason}}',
       // A `reset: false` answer: no customization row existed, so nothing was

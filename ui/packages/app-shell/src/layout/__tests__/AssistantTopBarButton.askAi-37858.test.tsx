@@ -130,7 +130,7 @@ describe('the Ask AI entry says what it does (objectstack#37858)', () => {
     const button = await screen.findByTestId('topbar-ai-assistant');
     expect(screen.getByTestId('topbar-ai-assistant-plan-pending')).toBeInTheDocument();
     expect(button).toHaveAccessibleName('Ask AI');
-    expect(button).toHaveAccessibleDescription('A proposed plan is waiting for your approval');
+    expect(button).toHaveAccessibleDescription('An action is waiting for your approval');
   });
 });
 

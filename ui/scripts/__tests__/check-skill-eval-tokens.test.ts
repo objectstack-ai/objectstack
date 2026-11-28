@@ -365,6 +365,53 @@ describe('the preconditions — never exit 0 for "nothing checked"', () => {
   });
 });
 
+describe('must_contain_any — the runner\'s any-of form', () => {
+  /**
+   * `packages/qa/scenarios/src/skill-evals/cases.ts` (`anyOfProblem`) grades
+   * groups each met by any one token. This gate refuses the same shapes, needs
+   * EVERY member taught (any one passes an answer), and does not count a
+   * groups-only case as asserting nothing.
+   */
+  const run = (assertions: unknown) =>
+    withTree(
+      (write) => {
+        write('skills/fixture/SKILL.md', 'Approve with ai:approve from a signed-in session.\n');
+        write('skills/fixture/evals/a.json', evalDoc(assertions, 6));
+      },
+      (root) => analyze({ root, baseline: new Set() }),
+    );
+
+  it('refuses each shape the runner refuses, and passes the well-formed one', () => {
+    const reasons = (v: unknown) => run({ must_contain_any: v }).shapeFindings.map((f: { reason: string }) => f.reason);
+    expect(reasons('ai:approve')).toEqual(['not-an-array']);
+    expect(reasons(['ai:approve'])).toEqual(['bad-group']);
+    expect(reasons([[]])).toEqual(['empty-group']);
+    expect(reasons([['ai:approve', '']])).toEqual(['bad-token']);
+    expect(reasons([['ai:approve', 'signed-in session']])).toEqual([]);
+  });
+
+  it('scores every member and reds the one the bundle never says, keyed by its group', () => {
+    const r = run({ must_contain_any: [['ai:approve', 'signed-in session', 'neverTaught']] });
+    expect(r.rows.map((x: { key: string }) => x.key)).toEqual([
+      'skills/fixture/evals/a.json eval 6 must_contain_any[0] ai:approve',
+      'skills/fixture/evals/a.json eval 6 must_contain_any[0] signed-in session',
+      'skills/fixture/evals/a.json eval 6 must_contain_any[0] neverTaught',
+    ]);
+    expect(r.red.map((x: { key: string }) => x.key)).toEqual(['skills/fixture/evals/a.json eval 6 must_contain_any[0] neverTaught']);
+  });
+
+  it('keeps a must_contain key unchanged and gives a member its group', () => {
+    expect(rowKey('skills/x/evals/y.json', 6, 'refused')).toBe('skills/x/evals/y.json eval 6 refused');
+    expect(rowKey('skills/x/evals/y.json', 6, 'refused', 0)).toBe('skills/x/evals/y.json eval 6 must_contain_any[0] refused');
+  });
+
+  it('does not count a groups-only case under the EMPTY tally, nor refuse it as an empty population', () => {
+    const r = run({ must_contain_any: [['ai:approve']], must_not_contain: ['pendingActions.approve('] });
+    expect(r.bundles[0].emptyMustContain).toBe(0);
+    expect(r.preconditions).toEqual([]);
+  });
+});
+
 describe('the real corpus', () => {
   it('is non-empty and green under the chosen oracle', () => {
     // The starting population objectui#7461 asked to be stated. If this ever

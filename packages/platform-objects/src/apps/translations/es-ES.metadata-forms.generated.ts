@@ -1645,7 +1645,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "Tamaño",
-        helpText: "Categoría de tamaño del panel de detalle: 'auto' (por defecto: el renderizador lo deriva del número de campos y del área visible; la IA no escribe nada) o un ajuste aproximado sm/md/lg/xl/full. Prefiérelo al `width` en píxeles; el modo page lo ignora."
+        helpText: "Categoría de ancho del panel lateral del registro: 'auto' (por defecto) mantiene el ancho fijo por defecto del host, el mismo para todos los objetos sea cual sea su número de campos (el panel lateral de registros de la consola se abre a 460px), o un ajuste aproximado sm/md/lg/xl/full (un tope de 480/720/960/1200/1600px, siempre limitado al área visible). Un ancho que el lector arrastra prevalece sobre ambos. Prefiérelo al `width` en píxeles; no tiene efecto cuando el registro se abre como página (en la consola, todo registro en un teléfono), ni en una pantalla de ancho de teléfono, donde el panel la ocupa entera."
       },
       "navigation.width": {
         label: "Ancho",
@@ -1661,7 +1661,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Permisos requeridos",
-        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco podrá volver a abrir esta vista."
+        helpText: "Quién ve esta vista: las capacidades que una persona debe tener, todas las indicadas. Los conjuntos de permisos otorgan capacidades, y un puesto transmite las que otorgan sus conjuntos de permisos. Si se deja vacío, todos los que pueden ver la lista ven esta vista. Para mostrarla a varios grupos, elija una capacidad y otórguela al conjunto de permisos de cada grupo. El servidor lo aplica: los demás no encuentran la vista en la lista y se les deniega si la abren directamente. Esto también se aplica a usted: si indica una capacidad que no tiene, o la escribe mal, usted tampoco verá esta vista en la lista."
       },
       object: {
         label: "Objeto"

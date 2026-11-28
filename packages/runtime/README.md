@@ -261,6 +261,28 @@ interface PluginContext {
 }
 ```
 
+### In-process authoring tools
+
+A host's own AI assistant that runs in the server process (an in-app ask turn)
+calls the MCP draft door's five tools as the signed-in person, with no OAuth
+grant, through `createInProcessAuthoringRegistry`. The tools, read gates and
+publish verdicts are the MCP door's own; admission is the person's own
+`manage_metadata`; saves are recorded as `surface: 'copilot'`; no tool
+publishes, so a person reviews and publishes the drafts in Studio.
+
+```typescript
+import { createInProcessAuthoringRegistry } from '@objectstack/runtime';
+
+// Once per turn, as the person your door authenticated.
+const authoring = await createInProcessAuthoringRegistry(kernel, { executionContext, environmentId });
+const tools = authoring.getAll(); // [] when the person lacks manage_metadata
+const result = await authoring.execute({ toolCallId, toolName: 'list_drafts', input: {} });
+```
+
+`kernel` and the placement are `dispatchAction`'s; as there, authenticating
+the person, the authentication-policy gate and environment membership stay the
+host's job.
+
 ## Examples
 
 Complete, CI-exercised examples live in the repo's [`examples/`](../../examples)

@@ -313,6 +313,13 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   readOnly?: boolean;
   /**
+   * The id of the conversation shown. It keys the question card's skip marks
+   * in localStorage (`QUESTION_SKIP_STORAGE_PREFIX`), so a question the user
+   * skipped stays skipped when the conversation is opened again on this
+   * device. Without it a skip holds for the mounted view only.
+   */
+  conversationId?: string;
+  /**
    * Whether the assistant is currently generating a response. While it is
    * true a message the user sends is queued until the turn ends.
    */
@@ -360,6 +367,18 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    * Clicking a chip submits the message immediately.
    */
   suggestions?: string[];
+  /**
+   * objectstack#37862 — the host's own empty conversation, drawn in place of
+   * the built-in one (the icon, {@link ChatbotLabels.emptyTitle},
+   * {@link ChatbotLabels.emptyDescription} and {@link suggestions}) while the
+   * conversation has no message. It gets the two things a suggestion can do:
+   * `send` sends the text as a message, as a built-in chip does; `fill` puts
+   * the text in the composer and focuses it, sending nothing.
+   */
+  renderEmptyState?: (actions: {
+    send: (text: string) => void;
+    fill: (text: string) => void;
+  }) => React.ReactNode;
   /**
    * Optional UI string overrides for localization. Each field falls back
    * to its English default, so existing callers keep working unchanged.

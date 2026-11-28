@@ -42,7 +42,7 @@ import {
   type CryptoAdapter,
   type SettingsService,
 } from '@objectstack/service-settings';
-import { KnowledgeServicePlugin } from '../knowledge-service-plugin.js';
+import { KnowledgeServicePlugin, type KnowledgeServicePluginOptions } from '../knowledge-service-plugin.js';
 import type { KnowledgeService } from '../knowledge-service.js';
 
 const EMBEDDER_KEYS = aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => !!k);
@@ -62,11 +62,11 @@ class FakeManifestPlugin implements Plugin {
   }
 }
 
-async function boot(withKnowledge: boolean) {
+async function boot(withKnowledge: boolean, options: KnowledgeServicePluginOptions = {}) {
   const registered: unknown[] = [];
   const kernel = new LiteKernel();
   kernel.use(new FakeManifestPlugin(registered));
-  if (withKnowledge) kernel.use(new KnowledgeServicePlugin({ enableEventSync: false }));
+  if (withKnowledge) kernel.use(new KnowledgeServicePlugin({ enableEventSync: false, ...options }));
   kernel.use(new SettingsServicePlugin({ env: {}, registerRoutes: false }));
   await kernel.bootstrap();
   const settings = kernel.getService<SettingsService>('settings');
@@ -141,6 +141,51 @@ describe('#33933 — knowledge settings are contributed by the mounted knowledge
     expect(knowledgeEntries(bare.registered)).toHaveLength(0);
     // Non-vacuity: the bare tree is a real Setup tree with its AI entry.
     expect(configurationEntries(bare.registered).some((i) => i.id === 'nav_settings_ai')).toBe(true);
+  });
+});
+
+/**
+ * A host that provides the embedder itself switches the embedder section off
+ * (`embedderSettings: false`): the `ai` page then reads as on a kernel without
+ * the knowledge service, and everything else the service contributes stays.
+ */
+describe('embedderSettings: false keeps the embedder section off the ai page', async () => {
+  const off = await boot(true, { embedderSettings: false });
+  const on = await boot(true, { embedderSettings: true });
+  const mounted = await boot(true);
+  const bare = await boot(false);
+  const aiKeysOf = (s: SettingsService) =>
+    (s.getManifest('ai').specifiers as Array<{ key?: string; id?: string }>).map((x) => x.key ?? x.id);
+
+  it('no embedder key, group or button joins the ai page', () => {
+    const keys = aiKeysOf(off.settings);
+    expect(keys).toContain('provider');
+    for (const key of [...EMBEDDER_KEYS, 'embedder', 'test_embedder']) expect(keys, key).not.toContain(key);
+    expect(keys).toEqual(aiKeysOf(bare.settings));
+  });
+
+  it('ai/test_embedder has no handler: it answers what an undeclared action answers', async () => {
+    // Judged against the bare kernel's answer for the same action, never by
+    // message text; non-vacuity: the default mount answers differently.
+    const offAnswer = await off.settings.runAction('ai', 'test_embedder', {});
+    expect(offAnswer).toEqual(await bare.settings.runAction('ai', 'test_embedder', {}));
+    expect(offAnswer.ok).toBe(false);
+    expect(await mounted.settings.runAction('ai', 'test_embedder', {})).not.toEqual(offAnswer);
+  });
+
+  it('the knowledge page, its test button and its Setup entry are offered as before', async () => {
+    expect(off.settings.listManifests().map((m) => m.namespace)).toContain('knowledge');
+    expect(off.settings.getManifest('knowledge')).toEqual(mounted.settings.getManifest('knowledge'));
+    const knowledgeValues = await namespaceValues(off.settings, 'knowledge');
+    expect(await off.settings.runAction('knowledge', 'test', {})).toEqual(
+      await knowledgeTestActionHandler({ namespace: 'knowledge', actionId: 'test', values: knowledgeValues, payload: {}, ctx: {} }),
+    );
+    expect(knowledgeEntries(off.registered)).toHaveLength(1);
+  });
+
+  it('true is the default: the same ai page as when the option is omitted', () => {
+    expect(aiKeysOf(on.settings)).toEqual(aiKeysOf(mounted.settings));
+    expect(aiKeysOf(on.settings)).toEqual(expect.arrayContaining([...EMBEDDER_KEYS, 'test_embedder']));
   });
 });
 

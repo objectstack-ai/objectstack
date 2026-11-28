@@ -118,3 +118,37 @@ describe('#33933 — the embedder section joins the bundled ai page only', () =>
     expect(contributeKnowledgeSettings(ctx, '0.0.0')).toEqual({ knowledge: false, embedder: false, nav: false });
   });
 });
+
+describe('embedderSettings: false — the host chose no embedder section, so nothing joins and nothing is said', () => {
+  it('the bundled page is left as it is, with no test handler and no boot warning', async () => {
+    const settings = hubWith(aiSettingsManifest);
+    const { ctx, warn } = contextFor(settings);
+    const offered = contributeKnowledgeSettings(ctx, '0.0.0', undefined, { embedderSettings: false });
+    expect(offered).toMatchObject({ knowledge: true, embedder: false });
+    expect(settings.getManifest('ai')).toBe(aiSettingsManifest);
+    expect((await settings.runAction('ai', 'test_embedder', {})).ok).toBe(false);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a host page that declares the embedder keys gets no test handler', async () => {
+    const host = withAiEmbedderSection(aiSettingsManifest);
+    const settings = hubWith(host);
+    const { ctx, warn } = contextFor(settings);
+    expect(contributeKnowledgeSettings(ctx, '0.0.0', undefined, { embedderSettings: false }).embedder).toBe(false);
+    const answer = await settings.runAction('ai', 'test_embedder', {});
+    expect(answer).toEqual(await hubWith(host).runAction('ai', 'test_embedder', {}));
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it('a host page without the keys, or no ai page at all, is not warned about', () => {
+    for (const settings of [hubWith({ ...aiSettingsManifest, scope: 'tenant' as const }), new SettingsService({ env: {} })]) {
+      const { ctx, warn } = contextFor(settings);
+      contributeKnowledgeSettings(ctx, '0.0.0', undefined, { embedderSettings: false });
+      expect(warn).not.toHaveBeenCalled();
+      // Non-vacuity: the same hub, contributed to by default, is warned about.
+      const fresh = contextFor(settings);
+      contributeKnowledgeSettings(fresh.ctx, '0.0.0');
+      expect(fresh.warn).toHaveBeenCalledTimes(1);
+    }
+  });
+});

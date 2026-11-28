@@ -11,12 +11,13 @@ vi.mock('@object-ui/plugin-chatbot/core', async (importOriginal) => ({
 }));
 const mockAgents = vi.mocked(useAgents);
 
-function agentsResult(names: string[], isLoading: boolean) {
+function agentsResult(names: string[], isLoading: boolean, settled = false) {
   return {
     agents: names.map((name) => ({ name, label: name })),
     isLoading,
     error: undefined,
     refetch: vi.fn(),
+    settled,
   };
 }
 
@@ -51,8 +52,16 @@ describe('useAiSurfaceEnabled', () => {
     const { result, rerender } = renderHook(() => useAiSurfaceEnabled());
     expect(result.current.isLoading).toBe(true);
 
-    mockAgents.mockReturnValue(agentsResult([], false));
+    mockAgents.mockReturnValue(agentsResult([], false, true));
     rerender();
+    expect(result.current).toEqual({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
+  });
+});
+
+describe('useAiSurfaceEnabled — an empty catalog the cache answers (objectstack#37833)', () => {
+  it('is disabled, not loading, on the first render that holds a settled empty answer, never seen loading', () => {
+    mockAgents.mockReturnValue(agentsResult([], false, true));
+    const { result } = renderHook(() => useAiSurfaceEnabled());
     expect(result.current).toEqual({ enabled: false, isLoading: false, buildServed: false, focusServed: false });
   });
 });

@@ -119,7 +119,7 @@ import {
   verifyArgs,
   type PromptChoice,
 } from './prompts.js';
-import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
+import { derivedFields, driftText, lookupKey, requiredLookups, RESTORE_UNCOMPARED, RESTORE_UNWRITTEN, rollupFields, rowDrift, seedPlan, type HeldRow, type RowDrift, type SeedLookup } from './seed.js';
 import type { SchemaMasking } from './schema-masking.js';
 import type { ParsedTurn } from './transcript.js';
 
@@ -514,6 +514,12 @@ export interface RunHalf {
     rewritten?: string[];
     /** Lookup values the second pass set, per `object.field` ({@link seedPlan}); absent when nothing waited. */
     secondPass?: Record<string, number>;
+    /**
+     * The card columns the seed did not send, `object.field`: each a roll-up the
+     * build declares ({@link rollupFields}), whose value the platform derives
+     * from the child rows the seed does send. Absent when the seed left none out.
+     */
+    leftOut?: string[];
   };
   questions: QuestionResult[];
   /**
@@ -1225,7 +1231,13 @@ async function buildHalf(
  * that user), a persona's own record bound to that persona's user, and the row
  * owned by the persona the card makes its owner. `rewritten` names the
  * user-handle fields it rewrote (`object.field`), `asAdmin` the handles no
- * persona holds, each loaded as the admin user. A restore sends the same body
+ * persona holds, each loaded as the admin user. A column of `rollups` (this
+ * object's roll-ups in the build, {@link rollupFields}) is left out and named
+ * in `leftOut` (`object.field`): the card states it as the total its child
+ * rows make, and the platform derives it from them — a roll-up the seed path
+ * were sent would be stored as written, so a rule that caps a child at its
+ * parent's open balance would read the end state and refuse the very rows
+ * that make it (#35654). A restore sends the same body
  * for a seeded row it inserts again ({@link restoreSeededRows}).
  */
 function seedRowBody(
@@ -1234,11 +1246,14 @@ function seedRowBody(
   row: Card['run']['seed'][string][number],
   accounts: readonly PersonaAccount[],
   adminId: string,
-): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[] } {
+  rollups: ReadonlySet<string> = new Set(),
+): { body: Record<string, unknown>; rewritten: string[]; asAdmin: string[]; leftOut: string[] } {
   const handles = personaHandles(card);
   const userFields = userHandleFields(card);
   const accountOf = (persona: string | undefined) => (persona === undefined ? undefined : accounts.find((a) => a.persona === persona));
   const body: Record<string, unknown> = { ...row };
+  const leftOut = Object.keys(row).filter((k) => k !== 'id' && rollups.has(k));
+  for (const k of leftOut) delete body[k];
   const rewritten: string[] = [];
   const asAdmin: string[] = [];
   for (const [k, v] of Object.entries(row)) {
@@ -1254,7 +1269,7 @@ function seedRowBody(
   if (self) body[PERSON_USER_FIELD] = self.userId;
   const owner = accountOf(rowOwner(card, object, row));
   if (owner) body.owner_id = owner.userId;
-  return { body, rewritten, asAdmin };
+  return { body, rewritten, asAdmin, leftOut: leftOut.map((k) => `${object}.${k}`) };
 }
 
 /**
@@ -1264,7 +1279,9 @@ function seedRowBody(
  * naming a row loaded later left out, then one update per such row setting
  * them. `required` is the built schema's required lookup fields
  * ({@link requiredLookups}), so a cycle is broken on a side the build left
- * optional; without it any side may wait.
+ * optional; without it any side may wait. `rollups` is the build's roll-ups,
+ * per object ({@link rollupFields}): their card values are left out of every
+ * row ({@link seedRowBody}) and named in the tally's `leftOut`.
  *
  * Row ownership follows the persons the card declares ({@link rowOwner}). A
  * row is owned (`owner_id`, the platform's record owner) by a persona's user
@@ -1305,6 +1322,7 @@ export async function seedApp(
   accounts: readonly PersonaAccount[],
   seed: RunHalf['seed'] = { inserted: 0, refused: [] },
   required?: ReadonlySet<string>,
+  rollups: ReadonlyMap<string, ReadonlySet<string>> = new Map(),
 ): Promise<RunHalf['seed']> {
   const { card } = scenario;
   const plan = seedPlan(card, required);
@@ -1320,8 +1338,9 @@ export async function seedApp(
   for (const object of plan.order) {
     const records: Array<Record<string, unknown>> = [];
     for (const row of card.run.seed[object] ?? []) {
-      const { body, rewritten, asAdmin } = seedRowBody(card, object, row, accounts, app.adminUserId());
+      const { body, rewritten, asAdmin, leftOut } = seedRowBody(card, object, row, accounts, app.adminUserId(), rollups.get(object));
       if (rewritten.length) seed.rewritten = [...new Set([...(seed.rewritten ?? []), ...rewritten])].sort();
+      if (leftOut.length) seed.leftOut = [...new Set([...(seed.leftOut ?? []), ...leftOut])].sort();
       if (asAdmin.length) seed.handlesAsAdmin = [...new Set([...(seed.handlesAsAdmin ?? []), ...asAdmin])].sort();
       const waits = later.get(`${object}/${row.id}`);
       for (const field of Object.keys(waits?.patch ?? {})) delete body[field];
@@ -1631,6 +1650,7 @@ export async function restoreSeededRows(
 ): Promise<{ restored?: RowRestore; failed?: string }> {
   const { card } = scenario;
   const derived = derivedFields(built);
+  const rollups = rollupFields(built);
   const unwritten = (object: string) => new Set([...RESTORE_UNWRITTEN, ...(derived.get(object) ?? [])]);
   const order = restoreOrder(card, seeded);
   const deleted = new Set<string>();
@@ -1689,7 +1709,7 @@ export async function restoreSeededRows(
         skip.delete('id');
         records.push(
           seedRow
-            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId()).body
+            ? seedRowBody(card, d.object, seedRow, accounts, app.adminUserId(), rollups.get(d.object)).body
             : Object.fromEntries(Object.entries(was).filter(([k]) => !skip.has(k))),
         );
       }
@@ -1785,7 +1805,7 @@ export async function runHalf(
     }
     let adminKey = await app.adminApiKey();
 
-    await seedApp(scenario, app, accounts, half.seed, requiredLookups(built)); // tallied in place, so a throw keeps the partial seed
+    await seedApp(scenario, app, accounts, half.seed, requiredLookups(built), rollupFields(built)); // tallied in place, so a throw keeps the partial seed
     // The state every operation starts from: the rows as the seed left them.
     let seeded = await seededRows(app, restoreObjects(card));
 
@@ -1803,7 +1823,7 @@ export async function runHalf(
         const copyAccounts: PersonaAccount[] = [];
         for (const p of card.run.personas) copyAccounts.push(await copy.app.createPersona(p.id, permissionSetName(card, p.id)));
         const copyKey = await copy.app.adminApiKey();
-        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built));
+        const copySeed = await seedApp(scenario, copy.app, copyAccounts, { inserted: 0, refused: [] }, requiredLookups(built), rollupFields(built));
         const differs = seedDifference(half, copyAccounts, copySeed);
         if (differs !== undefined) throw new Error(differs);
         const copySeeded = await seededRows(copy.app, restoreObjects(card));

@@ -20,13 +20,11 @@
 import * as React from 'react';
 import { cn } from '@object-ui/components';
 import { useObjectTranslation, useSafeTranslate } from '@object-ui/i18n';
-import { Copy, Check, RefreshCw, CornerDownLeft, Bot, Clock3, CheckCircle2, XCircle, Loader2, Table2, Sparkles, Hourglass, Trash2 } from 'lucide-react';
+import { Copy, Check, RefreshCw, CornerDownLeft, Bot, Clock3 } from 'lucide-react';
 import type { ChatStatus } from 'ai';
 import {
-  humanizeToolName,
   isUnsentSendError,
   parseAiQuotaError,
-  unwrapToolResult,
 } from './tool-display';
 import type { StickToBottomContext } from 'use-stick-to-bottom';
 import {
@@ -62,13 +60,7 @@ import {
   type PromptInputMessage,
 } from './elements/prompt-input';
 import { Suggestion } from './elements/suggestion';
-import {
-  Tool,
-  ToolHeader,
-  ToolContent,
-  ToolInput,
-  type ToolStatusLabels,
-} from './elements/tool';
+import type { ToolStatusLabels } from './elements/tool';
 import {
   Reasoning,
   ReasoningTrigger,
@@ -86,24 +78,26 @@ import { RecordCitations } from './RecordCitations';
 import type {
   ChatbotEnhancedMessage,
   ChatbotEnhancedProps,
-  ChatbotEnhancedToolInvocation,
 } from './chat/types';
 import { ModelPicker } from './chat/ModelPicker';
 import { AssistantThinkingMessage, MessageAvatar, ThinkingDots } from './chat/liveness';
 import {
   shouldRenderDetailedTool,
-  SmartToolOutput,
   ToolPhaseSummary,
-  ToolRunningTimer,
 } from './chat/toolSummary';
 import { AnswerCharts, isToolCallPlaceholder, layoutAnswer } from './chat/answerLayout';
-import { formatRecordWriteValue, writtenRecordOf } from './chat/toolRecordWrite';
+import { renderToolDetail, type ToolDetailContext } from './chat/toolDetail';
 import {
   ComposerNotice,
   ErrorBanner,
   formatSizeLimit,
   SendErrorNotice,
 } from './chat/composerNotices';
+import { QuestionCard } from './QuestionCard';
+import { ComposerGate } from './chat/composerGate';
+import { QuestionMessage } from './chat/questionMessage';
+import { findPendingQuestion, findQuestions, type ChatQuestion } from './chat/pendingQuestion';
+import { useQuestionSkips } from './chat/questionSkip';
 
 export type {
   ChatbotEnhancedMessage,
@@ -156,6 +150,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       onUpgrade,
       disabled = false,
       readOnly = false,
+      conversationId,
       isLoading = false,
       error,
       unsentText,
@@ -176,6 +171,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       acceptedFileTypes = 'image/*,.pdf,.doc,.docx,.txt,.csv,.tsv,.xlsx,.xlsm',
       maxFileSize = 10 * 1024 * 1024,
       suggestions,
+      renderEmptyState,
       labels,
       models,
       selectedModelId,
@@ -485,6 +481,50 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       [queuedSends],
     );
 
+    // The question card (question-card topic, Q2b). A question the turn ended
+    // on takes the composer's place until it is answered or skipped; the
+    // conversation draws every question from its envelope. See
+    // `chat/pendingQuestion.ts` for when a question is pending.
+    const { skipped: skippedQuestions, skip: skipQuestion } = useQuestionSkips(conversationId);
+    const questionsByMessage = React.useMemo(
+      () => new Map(findQuestions(messages).map((question) => [question.messageId, question])),
+      [messages],
+    );
+    const pendingQuestion = React.useMemo(
+      () =>
+        findPendingQuestion(messages, promptStatus, {
+          queued: queuedSends.length > 0,
+          skipped: skippedQuestions,
+          readOnly,
+          toolDecisions,
+        }),
+      [messages, promptStatus, queuedSends.length, skippedQuestions, readOnly, toolDecisions],
+    );
+    // The question last answered from the card. Its card stays mounted (hidden)
+    // while the answer is on its way: a send that fails rolls the answer back,
+    // the question is pending again, and the card returns with its choices.
+    const [answeredQuestion, setAnsweredQuestion] = React.useState<ChatQuestion | null>(null);
+    const cardQuestion = pendingQuestion ?? answeredQuestion;
+    const answerQuestion = React.useCallback(
+      (question: ChatQuestion, text: string) => {
+        setAnsweredQuestion(question);
+        // A card answer is not typed text: a rejected send has nothing to put
+        // back in the composer (the card returns instead).
+        lastSubmittedRef.current = '';
+        restoredErrorRef.current = null;
+        onSendMessage?.(text);
+        followThreadToBottom();
+      },
+      [onSendMessage, followThreadToBottom],
+    );
+    const skipPendingQuestion = React.useCallback(
+      (question: ChatQuestion) => {
+        setAnsweredQuestion(null);
+        skipQuestion(question.toolCallId);
+      },
+      [skipQuestion],
+    );
+
     const handleSuggestionClick = React.useCallback(
       (text: string) => {
         // Not typed by the user — nothing to restore if this send is rejected
@@ -497,6 +537,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     );
 
     const promptInputWrapRef = React.useRef<HTMLDivElement>(null);
+
+    // objectstack#37862 — a host's empty conversation offers suggestions that
+    // fill the composer rather than send: the text replaces what the box holds
+    // and the caret lands at its end, so the user finishes the question.
+    const fillComposer = React.useCallback((text: string) => {
+      const textarea = promptInputWrapRef.current?.querySelector('textarea');
+      if (!textarea) return;
+      // Through the prototype's setter, so React's value tracker sees a change
+      // and the textarea's `onChange` (the host's `onInputChange`) runs.
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    }, []);
+    const emptyStateActions = React.useMemo(
+      () => ({ send: handleSuggestionClick, fill: fillComposer }),
+      [handleSuggestionClick, fillComposer],
+    );
 
     // Restore the composer text when a send was REJECTED before reaching the
     // model (rate-limit / network — `notSent`). The composer's own form.reset
@@ -536,454 +594,48 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       window.setTimeout(() => setCopiedId((prev) => (prev === message.id ? null : prev)), 1500);
     }, []);
 
-    const renderToolDetail = (tool: ChatbotEnhancedToolInvocation) => {
-      const state =
-        tool.state ??
-        (tool.errorText
-          ? 'output-error'
-          : tool.result !== undefined
-            ? 'output-available'
-            : 'input-available');
-      const partType = `tool-${tool.toolName}` as `tool-${string}`;
-      const decision = toolDecisions?.[tool.toolCallId];
-      const isAwaitingApproval =
-        state === 'approval-requested' && Boolean(onToolApprove) && !decision;
-      // cloud#3565 — a record-write card draws the record itself and its own
-      // three buttons; the generic Approve / Deny strip, its decision line and
-      // the raw payload stay out of the way.
-      const isRecordWriteCard = Boolean(tool.recordWrite);
-      const hidePendingPayload =
-        state === 'approval-requested' && Boolean(tool.pendingActionId);
-      // objectui#7254 / cloud#1658 — `humanizeToolName`'s translator seam has
-      // existed since the tool titles were found untranslatable, but no call
-      // site ever passed one, so every card header read English
-      // ("Propose blueprint", "Apply edit", "Verify build") inside an otherwise
-      // Chinese conversation. Unknown/custom tools still fall back to the same
-      // English title-caser.
-      const friendlyTitle = humanizeToolName(tool.toolName, tt);
-      const renderableResult = unwrapToolResult(tool.result);
-      const showRawName =
-        processVisibility === 'debug' &&
-        friendlyTitle &&
-        friendlyTitle.toLowerCase() !== tool.toolName.toLowerCase();
-      // Raw PARAMETERS/RESULT JSON is developer detail — only in `debug` mode,
-      // or when a HITL approval needs the operator to see the exact payload.
-      const showPayload =
-        processVisibility === 'debug' ||
-        (isAwaitingApproval && !isRecordWriteCard && !tool.sampleDataCleanup && !tool.packageRemoval);
-      // A tool with no output yet is RUNNING — show a live elapsed timer next to
-      // its title so a long tool call has a visible countdown, not a
-      // static "Running" (issue #432).
-      const isRunning = state === 'input-streaming' || state === 'input-available';
-      const titleNode = (
-        <span className="inline-flex min-w-0 items-center gap-2">
-          <span>{friendlyTitle || tool.toolName}</span>
-          {showRawName ? (
-            <code className="rounded bg-muted px-1 py-px text-[10px] font-mono text-muted-foreground">
-              {tool.toolName}
-            </code>
-          ) : null}
-          {isRunning ? <ToolRunningTimer offlineLabel={L.connectionOfflineLabel} /> : null}
-        </span>
-      );
-
-      return (
-        <Tool
-          key={tool.toolCallId}
-          defaultOpen={
-            state === 'output-error' ||
-            state === 'approval-requested' ||
-            Boolean(tool.recordHandoff) ||
-            Boolean(tool.recordWrite) ||
-            Boolean(tool.packageRemoval)
-          }
-        >
-          <ToolHeader
-            type={partType}
-            state={state}
-            title={titleNode}
-            statusLabels={toolStatusLabels}
-          />
-          <ToolContent>
-            {showPayload && tool.args !== undefined ? (
-              <ToolInput input={tool.args} />
-            ) : null}
-            {hidePendingPayload ? null : showPayload || state === 'output-error' ? (
-              <SmartToolOutput
-                output={renderableResult}
-                errorText={tool.errorText}
-              />
-            ) : null}
-            {decision && !isRecordWriteCard ? (
-              <div
-                className={
-                  'flex items-center gap-2 p-3 border-t text-xs ' +
-                  (decision.state === 'error'
-                    ? 'bg-destructive/10 text-destructive'
-                    : decision.state === 'success'
-                      ? 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-400'
-                      : decision.state === 'held'
-                        ? 'bg-amber-500/10 text-amber-700 dark:text-amber-400'
-                        : 'bg-muted/30 text-muted-foreground')
-                }
-                data-testid="tool-decision"
-                data-state={decision.state}
-              >
-                {decision.state === 'held' ? (
-                  <Hourglass className="size-3.5" aria-hidden="true" />
-                ) : (
-                  <span aria-hidden="true">
-                    {decision.state === 'pending'
-                      ? '...'
-                      : decision.state === 'success'
-                        ? 'OK'
-                        : 'X'}
-                  </span>
-                )}
-                <span>
-                  {decision.state === 'held'
-                    ? heldForApprovalLabel
-                    : decision.message ??
-                      (decision.state === 'pending'
-                        ? 'Submitting decision...'
-                        : decision.state === 'success'
-                          ? 'Action approved and executed.'
-                          : 'Decision failed.')}
-                </span>
-              </div>
-            ) : null}
-            {isAwaitingApproval && !isRecordWriteCard ? (
-              <div className="flex gap-2 p-3 border-t bg-muted/30">
-                <button
-                  type="button"
-                  onClick={() => onToolApprove?.(tool.toolCallId, true)}
-                  className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                >
-                  {toolApproveLabel}
-                </button>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onToolApprove?.(
-                      tool.toolCallId,
-                      false,
-                      toolDenyReason,
-                    )
-                  }
-                  className="inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent"
-                >
-                  {toolDenyLabel}
-                </button>
-              </div>
-            ) : null}
-            {/* cloud#3565 — 「清理示例数据」: what the seed ledger recorded, per
-                table, so the user confirms a list rather than a payload, and
-                that the removal cannot be undone (the maintainer's note on
-                cloud#3565: no recycle bin until objectstack#3146). The rows
-                the list leaves out — hidden from the user or already gone —
-                and the rows kept because someone edited them are each said
-                when there are any. The generic Approve / Deny strip below
-                stays the decision. */}
-            {tool.sampleDataCleanup ? (
-              <div
-                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
-                data-testid="sample-data-cleanup"
-              >
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-                  <Table2 className="size-3.5" />
-                  {sampleDataCleanupTitleLabel}
-                </span>
-                <ul className="flex flex-col gap-0.5 text-xs" data-testid="sample-data-cleanup-tables">
-                  {tool.sampleDataCleanup.tables.map((t) => (
-                    <li key={t.objectName} className="flex items-baseline justify-between gap-3">
-                      <span className="min-w-0 truncate">{t.label}</span>
-                      <span className="tabular-nums text-muted-foreground">{t.count}</span>
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-xs font-medium text-destructive" data-testid="sample-data-cleanup-irreversible">
-                  {sampleDataCleanupIrreversibleLabel}
-                </p>
-                {tool.sampleDataCleanup.edited > 0 ? (
-                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-edited">
-                    {sampleDataCleanupEditedLabel(tool.sampleDataCleanup.edited)}
-                  </p>
-                ) : null}
-                {tool.sampleDataCleanup.absent > 0 ? (
-                  <p className="text-xs text-muted-foreground" data-testid="sample-data-cleanup-absent">
-                    {sampleDataCleanupAbsentLabel(tool.sampleDataCleanup.absent)}
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-            {/* objectstack#31025 — 「删除软件包」: what goes, per object with its
-                row count, the other items by type, and the total, so the user
-                confirms a list rather than a payload. A draft object has no
-                table and an uncounted one says so; neither reads as 0. When the
-                tables are dropped the card says they are gone for good and skip
-                the recycle bin (the shape's `recycleBin: false`); when they are
-                kept it says so. The generic Approve / Deny strip below stays the
-                decision; once approved, the outcome says removed or partial. */}
-            {tool.packageRemoval ? (
-              <div
-                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
-                data-testid="package-removal"
-                data-data={tool.packageRemoval.data}
-              >
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-                  <Trash2 className="size-3.5" />
-                  {packageRemovalTitleLabel(tool.packageRemoval.label)}
-                </span>
-                {tool.packageRemoval.objects.length > 0 ? (
-                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-objects">
-                    {tool.packageRemoval.objects.map((o) => (
-                      <li
-                        key={o.name}
-                        className="flex items-baseline justify-between gap-3"
-                        data-testid={`package-removal-object-${o.name}`}
-                      >
-                        <span className="min-w-0 truncate">{o.label}</span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          {o.rows !== undefined
-                            ? packageRemovalRowsLabel(o.rows)
-                            : o.draft
-                              ? packageRemovalDraftLabel
-                              : packageRemovalRowsUnknownLabel}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                {Object.keys(tool.packageRemoval.items).length > 0 ? (
-                  <ul className="flex flex-col gap-0.5 text-xs" data-testid="package-removal-items">
-                    {Object.entries(tool.packageRemoval.items).map(([type, n]) => (
-                      <li
-                        key={type}
-                        className="flex items-baseline justify-between gap-3"
-                        data-testid={`package-removal-item-${type}`}
-                      >
-                        <span className="min-w-0 truncate">{packageRemovalItemTypeLabel(type)}</span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">{n}</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : null}
-                <p className="text-xs text-muted-foreground" data-testid="package-removal-total">
-                  {packageRemovalTotalLabel(tool.packageRemoval.totalRows)}
-                </p>
-                {tool.packageRemoval.uncountedObjects > 0 ? (
-                  <p className="text-xs text-muted-foreground" data-testid="package-removal-uncounted">
-                    {packageRemovalUncountedLabel(tool.packageRemoval.uncountedObjects)}
-                  </p>
-                ) : null}
-                {tool.packageRemoval.data === 'dropped' ? (
-                  <p className="text-xs font-medium text-destructive" data-testid="package-removal-permanent">
-                    {packageRemovalPermanentLabel}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground" data-testid="package-removal-kept">
-                    {packageRemovalKeptLabel}
-                  </p>
-                )}
-                {(() => {
-                  const outcome =
-                    decision?.state === 'success' && decision.decision === 'approved'
-                      ? detectPackageRemovedResult(decision.result)
-                      : undefined;
-                  if (!outcome) return null;
-                  return (
-                    <p
-                      className={
-                        'text-xs font-medium ' +
-                        (outcome.status === 'removed'
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : 'text-amber-700 dark:text-amber-400')
-                      }
-                      data-testid="package-removal-outcome"
-                      data-state={outcome.status}
-                    >
-                      {outcome.status === 'removed'
-                        ? packageRemovalRemovedLabel
-                        : packageRemovalPartialLabel(outcome.failed)}
-                    </p>
-                  );
-                })()}
-              </div>
-            ) : null}
-            {/* cloud#3565 — the ONE-record write the user confirms. The card is
-                the whole affordance: the record as it will be written (old → new
-                on an update), what the server left out and why, and the three
-                buttons the ruling names. 确认 approves the pending action, which
-                writes AS THE USER; 取消 rejects it; 打开完整表单 rejects it too
-                and hands the host the values, so a record saved in the form is
-                never written a second time from here. */}
-            {tool.recordWrite ? (
-              <div
-                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
-                data-testid="record-write"
-                data-operation={tool.recordWrite.operation}
-              >
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-                  <Sparkles className="size-3.5" />
-                  {tool.recordWrite.operation === 'create'
-                    ? recordWriteCreateTitle(tool.recordWrite.objectLabel)
-                    : recordWriteUpdateTitle(tool.recordWrite.objectLabel)}
-                  {tool.recordWrite.label ? (
-                    <span className="font-normal text-muted-foreground">· {tool.recordWrite.label}</span>
-                  ) : null}
-                </span>
-                {tool.recordWrite.reason ? (
-                  <p className="text-xs text-muted-foreground">{tool.recordWrite.reason}</p>
-                ) : null}
-                <dl
-                  className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs"
-                  data-testid="record-write-fields"
-                >
-                  {tool.recordWrite.fields.map((f) => (
-                    <React.Fragment key={f.name}>
-                      <dt className="text-muted-foreground">{f.label}</dt>
-                      <dd className="min-w-0 break-words" data-testid={`record-write-field-${f.name}`}>
-                        {'current' in f ? (
-                          <>
-                            <span className="text-muted-foreground line-through">
-                              {formatRecordWriteValue(f.current)}
-                            </span>
-                            <span aria-hidden="true"> → </span>
-                          </>
-                        ) : null}
-                        <span className="font-medium">{formatRecordWriteValue(f.value)}</span>
-                      </dd>
-                    </React.Fragment>
-                  ))}
-                </dl>
-                {tool.recordWrite.dropped.length > 0 ? (
-                  <p className="text-xs text-muted-foreground" data-testid="record-write-dropped">
-                    {recordWriteDroppedLabel}:{' '}
-                    {tool.recordWrite.dropped
-                      .map((d) => `${d.field} (${d.detail ?? d.reason.replace(/_/g, ' ')})`)
-                      .join(', ')}
-                  </p>
-                ) : null}
-                {decision ? (
-                  <p
-                    data-testid="record-write-decision"
-                    data-state={decision.state}
-                    className={
-                      'inline-flex flex-wrap items-center gap-1.5 text-xs ' +
-                      (decision.state === 'error'
-                        ? 'text-destructive'
-                        : decision.state === 'success'
-                          ? 'text-emerald-700 dark:text-emerald-400'
-                          : decision.state === 'held'
-                            ? 'text-amber-700 dark:text-amber-400'
-                            : 'text-muted-foreground')
-                    }
-                  >
-                    {decision.state === 'error' ? (
-                      <>
-                        <XCircle className="size-3.5" />
-                        {decision.message}
-                      </>
-                    ) : decision.state === 'held' ? (
-                      <>
-                        <Hourglass className="size-3.5" />
-                        {heldForApprovalLabel}
-                      </>
-                    ) : decision.state === 'pending' ? (
-                      <>
-                        <Loader2 className="size-3.5 animate-spin" />
-                        {recordWriteSubmittingLabel}
-                      </>
-                    ) : decision.decision === 'rejected' ? (
-                      recordWriteCancelledLabel
-                    ) : (
-                      <>
-                        <CheckCircle2 className="size-3.5" />
-                        {recordWriteWrittenLabel}
-                        {(() => {
-                          const written = writtenRecordOf(decision.result);
-                          return written && onOpenRecord ? (
-                            <button
-                              type="button"
-                              onClick={() => onOpenRecord(written)}
-                              data-testid="record-write-open-written"
-                              className="underline underline-offset-2 hover:text-foreground"
-                            >
-                              {written.label ?? written.recordId}
-                            </button>
-                          ) : null;
-                        })()}
-                      </>
-                    )}
-                  </p>
-                ) : null}
-                {isAwaitingApproval ? (
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => onToolApprove?.(tool.toolCallId, true)}
-                      data-testid="record-write-confirm"
-                      className="inline-flex h-7 items-center rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90"
-                    >
-                      {recordWriteConfirmLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        onToolApprove?.(tool.toolCallId, false, recordWriteOpenFormReason);
-                        onOpenRecordForm?.(tool.recordWrite!);
-                      }}
-                      disabled={!onOpenRecordForm}
-                      data-testid="record-write-open-form"
-                      className="inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {recordWriteOpenFormLabel}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onToolApprove?.(tool.toolCallId, false, recordWriteCancelReason)}
-                      data-testid="record-write-cancel"
-                      className="inline-flex h-7 items-center rounded-md border bg-background px-3 text-xs font-medium hover:bg-accent"
-                    >
-                      {recordWriteCancelLabel}
-                    </button>
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            {/* cloud#1658 — the record hand-off: the agent resolved the record a
-                write request names but has no action to perform the change, so
-                the card lands the user exactly there. No superseded logic on
-                purpose: unlike a build prompt, an older record link stays
-                correct — the record does not go stale because a newer hand-off
-                exists. */}
-            {tool.recordHandoff ? (
-              <div
-                className="flex flex-col gap-2 border-t bg-muted/20 px-3 py-2.5"
-                data-testid="record-handoff"
-              >
-                <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground/80">
-                  <Sparkles className="size-3.5" />
-                  {recordHandoffTitleLabel}
-                </span>
-                <p className="text-xs text-muted-foreground">
-                  {tool.recordHandoff.label ?? tool.recordHandoff.objectName}
-                  {tool.recordHandoff.reason ? ` — ${tool.recordHandoff.reason}` : ''}
-                </p>
-                <button
-                  type="button"
-                  onClick={() => onOpenRecord?.(tool.recordHandoff!)}
-                  disabled={!onOpenRecord}
-                  data-testid="record-handoff-open"
-                  className="inline-flex w-fit items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {recordHandoffOpenLabel}
-                </button>
-              </div>
-            ) : null}
-          </ToolContent>
-        </Tool>
-      );
+    const toolDetailCtx: ToolDetailContext = {
+      toolDecisions,
+      onToolApprove,
+      processVisibility,
+      tt,
+      L,
+      toolStatusLabels,
+      heldForApprovalLabel,
+      toolApproveLabel,
+      toolDenyLabel,
+      toolDenyReason,
+      sampleDataCleanupTitleLabel,
+      sampleDataCleanupIrreversibleLabel,
+      sampleDataCleanupEditedLabel,
+      sampleDataCleanupAbsentLabel,
+      packageRemovalTitleLabel,
+      packageRemovalRowsLabel,
+      packageRemovalDraftLabel,
+      packageRemovalRowsUnknownLabel,
+      packageRemovalItemTypeLabel,
+      packageRemovalTotalLabel,
+      packageRemovalUncountedLabel,
+      packageRemovalPermanentLabel,
+      packageRemovalKeptLabel,
+      packageRemovalRemovedLabel,
+      packageRemovalPartialLabel,
+      detectPackageRemovedResult,
+      recordWriteCreateTitle,
+      recordWriteUpdateTitle,
+      recordWriteDroppedLabel,
+      recordWriteSubmittingLabel,
+      recordWriteWrittenLabel,
+      recordWriteCancelledLabel,
+      recordWriteConfirmLabel,
+      recordWriteOpenFormLabel,
+      recordWriteOpenFormReason,
+      recordWriteCancelLabel,
+      recordWriteCancelReason,
+      onOpenRecordForm,
+      onOpenRecord,
+      recordHandoffTitleLabel,
+      recordHandoffOpenLabel,
     };
 
     return (
@@ -1033,7 +685,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 : 'px-4 py-3',
             )}
           >
-            {messages.length === 0 ? (
+            {messages.length === 0 && renderEmptyState ? (
+              <div data-testid="chat-empty-state-host">{renderEmptyState(emptyStateActions)}</div>
+            ) : messages.length === 0 ? (
               <ConversationEmptyState className="gap-3 px-0 py-8">
                 <div className="flex size-9 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
                   {assistantAvatarUrl ? (
@@ -1121,6 +775,11 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 // streaming cursor rides the last text run, where it sat when
                 // the charts always trailed the text.
                 const answerBlocks = isUser ? undefined : layoutAnswer(message.content, message.charts);
+                // The question this turn ended on, drawn from its envelope in
+                // place of its plain-text reply.
+                const threadQuestion = isUser ? undefined : questionsByMessage.get(message.id);
+                const questionPending =
+                  threadQuestion !== undefined && pendingQuestion?.toolCallId === threadQuestion.toolCallId;
                 let lastTextBlock = -1;
                 answerBlocks?.forEach((block, i) => {
                   if (block.kind === 'text') lastTextBlock = i;
@@ -1177,7 +836,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                         </Reasoning>
                       ) : null}
                       {!isUser && detailedTools.length > 0
-                        ? detailedTools.map((tool) => renderToolDetail(tool))
+                        ? detailedTools.map((tool) => renderToolDetail(tool, toolDetailCtx))
                         : null}
                       {isUser ? (
                         message.content ? (
@@ -1204,7 +863,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                           {L.agentActivity}
                         </span>
                       ) : null}
-                      {answerBlocks ? (
+                      {threadQuestion ? (
+                        <QuestionMessage envelope={threadQuestion.envelope} pending={questionPending} />
+                      ) : answerBlocks ? (
                         // objectui#13492 — the answer's text and charts in
                         // stream order (see `layoutAnswer`). A turn with no
                         // showable prose still draws its charts here, so a
@@ -1290,7 +951,8 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                             <Copy className="size-3.5" />
                           )}
                         </MessageAction>
-                        {onReload ? (
+                        {/* A pending question is answered, not regenerated. */}
+                        {onReload && !questionPending ? (
                           <MessageAction
                             label={L.regenerate}
                             tooltip={L.regenerate}
@@ -1404,6 +1066,20 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               ))}
             </div>
           ) : null}
+          <ComposerGate
+            open={pendingQuestion !== null}
+            holder={
+              cardQuestion ? (
+                <QuestionCard
+                  key={cardQuestion.toolCallId}
+                  questions={cardQuestion.envelope.questions}
+                  announce={pendingQuestion !== null}
+                  onAnswer={(text) => answerQuestion(cardQuestion, text)}
+                  onSkip={() => skipPendingQuestion(cardQuestion)}
+                />
+              ) : null
+            }
+          >
           <PromptInput
             accept={acceptedFileTypes}
             fileInputLabel={L.uploadFiles}
@@ -1501,6 +1177,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
               />
             </PromptInputFooter>
           </PromptInput>
+          </ComposerGate>
         </div>
         )}
 

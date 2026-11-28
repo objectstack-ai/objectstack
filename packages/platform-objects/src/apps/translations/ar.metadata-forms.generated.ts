@@ -1645,7 +1645,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "الحجم",
-        helpText: "فئة حجم الطبقة العلوية لتفاصيل الدرج الجانبي: 'auto' (الافتراضي — يشتقه العارض من عدد الحقول ومساحة العرض؛ ولا يكتب الذكاء الاصطناعي شيئًا) أو تجاوز تقريبي sm/md/lg/xl/full. فضّله على `width` بالبكسل؛ ويتجاهله وضع page."
+        helpText: "فئة عرض الدرج الجانبي للسجل: 'auto' (الافتراضي) يُبقي العرض الافتراضي الثابت للمضيف، وهو نفسه لكل كائن أيًا كان عدد حقوله (تُفتح اللوحة الجانبية للسجل في وحدة التحكم بعرض 460px)، أو تجاوز تقريبي sm/md/lg/xl/full (حد أقصى 480/720/960/1200/1600px، مقيّد دائمًا بمساحة العرض). العرض الذي يسحبه القارئ يتقدّم على كليهما. فضّله على `width` بالبكسل؛ ولا أثر له حيث يُفتح السجل كصفحة (في وحدة التحكم، كل سجل على الهاتف)، ولا على شاشة بعرض الهاتف حيث يملؤها الدرج."
       },
       "navigation.width": {
         label: "العرض",
@@ -1661,7 +1661,7 @@ export const arMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "الكائن"

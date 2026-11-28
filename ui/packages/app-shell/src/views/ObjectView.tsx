@@ -126,6 +126,7 @@ import { changeOwnerEligibleRows, changeOwnerObjectOffer, useListChangeOwnerOffe
 import { parseListStateParams } from './userFilterUrlState.js';
 import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
 import { kanbanDraftToSave } from './objectViewOptions.js';
+import { loadCapabilityAudience } from './capabilityAudience.js';
 
 // objectstack#25992 slice 1: these module-level helpers moved to the sibling
 // `objectView*.ts` modules above. Every name this file exported stays
@@ -270,6 +271,11 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
     // ADR-0034: runtime view edits persist via the metadata draft/publish
     // model (the `sys_view` table is retired).
     const metadataClient = useMetadataClient();
+    // objectstack#34908 — the catalog behind a shared view's 「Who sees this
+    // view」 in the create card: the capabilities the environment knows, the
+    // permission sets granting each and the positions holding them. The card
+    // reads it only once the reader picks Shared.
+    const loadViewAudience = useCallback(() => loadCapabilityAudience(metadataClient), [metadataClient]);
 
     // ADR-0037: in draft-preview mode (`?preview=draft`), `listViews()` reads
     // the draft-overlaid world so a view just created via "Add View" shows up
@@ -1247,6 +1253,7 @@ function ObjectViewInner({ dataSource, objects, onEdit, externalRefreshKey }: Co
             canCreatePersonal: canCreatePersonalView,
             canCreateShared: canManageViews,
             hasUnsavedConditions: listDraftParts.some((part) => part === 'filters' || part === 'sort'),
+            loadAudience: loadViewAudience,
         },
         onRenamePersonalView: personalViewsReady && personalGrant('update')
             ? (id: string) => setPersonalViewDialog({ mode: 'rename', viewId: id })

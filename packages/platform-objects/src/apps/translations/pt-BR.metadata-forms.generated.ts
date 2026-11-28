@@ -1645,7 +1645,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "Tamanho",
-        helpText: "Faixa de tamanho da sobreposição para o detalhe no painel lateral: 'auto' (padrão — o renderizador deriva da quantidade de campos + viewport; a IA não grava nada) ou uma substituição aproximada sm/md/lg/xl/full. Prefira isto à `width` em pixels; o modo page o ignora."
+        helpText: "Faixa de largura do painel lateral do registro: 'auto' (padrão) mantém a largura padrão fixa do host, a mesma para todo objeto, qualquer que seja a quantidade de campos (o painel lateral de registros do console abre com 460px), ou uma substituição aproximada sm/md/lg/xl/full (um limite de 480/720/960/1200/1600px, sempre restrito ao viewport). Uma largura que o leitor arrasta prevalece sobre ambas. Prefira isto à `width` em pixels; não tem efeito onde o registro abre como página (no console, todo registro em um celular), nem em uma tela da largura de um celular, que o painel preenche."
       },
       "navigation.width": {
         label: "Largura",
@@ -1661,7 +1661,7 @@ export const ptBRMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "Objeto"

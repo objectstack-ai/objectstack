@@ -1645,7 +1645,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "navigation.size": {
         label: "크기",
-        helpText: "드로어 세부 정보의 오버레이 크기 구간: 'auto'(기본값, 렌더러가 필드 수 + 뷰포트에서 도출하며 AI는 아무것도 쓰지 않음) 또는 대략적인 재정의 sm/md/lg/xl/full입니다. 픽셀 `width`보다 이 값을 권장하며, page 모드에서는 무시됩니다."
+        helpText: "레코드 드로어의 너비 구간: 'auto'(기본값)는 호스트의 고정 기본 너비를 유지하며, 필드 수와 관계없이 모든 객체에서 같습니다(콘솔의 레코드 사이드 패널은 460px로 열림). 또는 대략적인 재정의 sm/md/lg/xl/full(각각 480/720/960/1200/1600px 상한, 항상 뷰포트 안으로 제한)입니다. 읽는 사람이 드래그한 너비가 둘 다보다 우선합니다. 픽셀 `width`보다 이 값을 권장합니다. 레코드가 페이지로 열리는 곳(콘솔에서는 휴대폰의 모든 레코드)과 드로어가 화면을 가득 채우는 휴대폰 너비 화면에서는 효과가 없습니다."
       },
       "navigation.width": {
         label: "너비",
@@ -1661,7 +1661,7 @@ export const koMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       requiredPermissions: {
         label: "Required Permissions",
-        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you can no longer open this view either."
+        helpText: "Who sees this view: the capabilities a person must hold, every one listed. Permission sets grant capabilities, and a position passes on the ones its permission sets grant. Leave it empty and everyone who can see the list sees this view. To show it to several groups, pick one capability and grant it to each group's permission set. The server enforces it: anyone else does not find the view in the list and is refused if they open it directly. The gate applies to you too: list a capability you do not hold, or misspell one, and you no longer see this view in the list either."
       },
       object: {
         label: "객체"

@@ -59,6 +59,8 @@ import {
   buildLockKey,
   emptyBuildProgress,
   fencedCall,
+  RECONCILE_MAX_WAIT_MS,
+  RECONCILE_QUIET_MS,
   startBuildFence,
   type KnowledgeBuildFence,
   type KnowledgeBuildLock,
@@ -67,7 +69,16 @@ import {
   type KnowledgeBuildRecord,
   type KnowledgeBuildTrigger,
   type KnowledgeIndexReading,
+  type KnowledgeReconcileEntry,
+  type KnowledgeReconcileReport,
+  type KnowledgeReconcileRequest,
 } from './knowledge-build.js';
+import {
+  readRecordSyncMessage,
+  type KnowledgeRecordSyncMessage,
+  type KnowledgeRecordSyncOutcome,
+  type KnowledgeRecordSyncReason,
+} from './knowledge-record-sync-queue.js';
 
 /**
  * Minimal logger shape; falls back to no-op when none is provided.
@@ -95,6 +106,20 @@ export interface KnowledgeServiceOptions {
   dataEngine?: IDataEngine;
   /** Optional structured logger. */
   logger?: KnowledgeLogger;
+  /**
+   * [ADR-0161 K4 ◆] The deployment's adapter: the id of the store the
+   * runtime mounted beside this service for the `knowledge` capability
+   * (`pgvector` on PostgreSQL, `turso` otherwise — `resolveCapabilityArgument`
+   * in `@objectstack/core` sets it on the plugin it constructs). A source
+   * that names no `adapter` binds to it while an adapter of that id is
+   * registered. Only the runtime that mounts the store sets it: an adapter
+   * application code registers is never the deployment's by registering
+   * (`registerAdapter` takes no such mark). A service option, not an
+   * adapter-contract member (ADR-0161 K8, "What counts as a member").
+   * Omitted (a host that mounts the service itself), a source that names
+   * no adapter binds to the only adapter registered.
+   */
+  deploymentAdapter?: string;
   /**
    * The `security` service, resolved at search time, for the field gate
    * (`knowledge-source-admission.ts`). Answers `undefined` when the host
@@ -193,10 +218,21 @@ export class KnowledgeService implements IKnowledgeService {
   private readonly freshnessRepairs = new Set<string>();
   /** The last build of each source on this node (`knowledge-build.ts`), by index key. */
   private readonly builds = new Map<string, KnowledgeBuildRecord>();
-  /** Set by {@link stopBuilds}: the boot pass starts no further build. */
+  /** Set by {@link stopBuilds}: the boot pass and the reconcile start no further build. */
   private buildsStopped = false;
+  /** Sources the reconcile has said, once, it cannot walk because their store lists no documents (by index key). */
+  private readonly reconcileUnlistedReported = new Set<string>();
+  /** The reconcile each predicate write asked for, pending its quiet period ({@link requestReconcile}), by index key. */
+  private readonly pendingReconciles = new Map<string, { timer: ReturnType<typeof setTimeout>; firstAt: number }>();
+  /** The tail of the reconcile passes on this node: one pass runs at a time ({@link reconcileSources}). */
+  private reconcileTail: Promise<void> = Promise.resolve();
   /** Told after the set of registered sources changed ({@link onSourcesChanged}). */
   private readonly sourceListeners = new Set<() => void>();
+  /**
+   * Where record syncs are published while they run through the queue
+   * ({@link routeRecordSyncs}); `undefined` while they run inline.
+   */
+  private recordSyncPublisher: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined;
 
   constructor(private readonly options: KnowledgeServiceOptions = {}) {
     this.defaultTopK = options.defaultTopK ?? 10;
@@ -216,6 +252,60 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * The id of the adapter `source` binds to, read now (ADR-0161 K4 ◆):
+   *
+   * 1. the `adapter` the source names — mounted or not: a named adapter that
+   *    is not mounted is {@link getAdapter}'s refusal;
+   * 2. else the deployment's adapter ({@link KnowledgeServiceOptions.deploymentAdapter}),
+   *    while an adapter of that id is registered;
+   * 3. else the only adapter registered.
+   *
+   * With none registered, throws `503 SERVICE_UNAVAILABLE`; with several and
+   * none the deployment's, `400 VALIDATION_ERROR` naming them, as the source's
+   * registration is refused ({@link refuseUnplacedSource}). Never cached:
+   * adapters register in their plugins' `start()`, after a source registered
+   * in code at `init()`, so the answer is taken where it is used.
+   */
+  adapterIdFor(source: KnowledgeSource): string {
+    if (source.adapter !== undefined) return source.adapter;
+    const deployment = this.options.deploymentAdapter;
+    if (deployment !== undefined && this.adapters.has(deployment)) return deployment;
+    const registered = this.listAdapters();
+    if (registered.length === 1) return registered[0]!;
+    if (registered.length === 0) throw noAdapterMountedError(this.label(source), deployment);
+    throw unplacedSourceError(this.label(source), registered);
+  }
+
+  /** The adapter `source` binds to ({@link adapterIdFor}), registered; throws the coded refusal otherwise. */
+  adapterFor(source: KnowledgeSource): IKnowledgeAdapter {
+    return this.getAdapter(this.adapterIdFor(source));
+  }
+
+  /** {@link adapterIdFor}, or `undefined` where it refuses: for a log line or a status answer. */
+  boundAdapterId(source: KnowledgeSource): string | undefined {
+    try {
+      return this.adapterIdFor(source);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Refuse, at registration, a source that names no adapter where the answer
+   * cannot become one: several adapters are registered and the runtime marked
+   * none the deployment's (ADR-0161 K4 ◆). With a mark, or with one adapter
+   * or none registered yet, the source is taken and placed where it is used:
+   * a store registers in its own `start()`, after a source registered at
+   * `init()`, so "none yet" is no verdict (AGENTS.md, startup registry reads).
+   */
+  private refuseUnplacedSource(source: KnowledgeSource, door: string): void {
+    if (source.adapter !== undefined || this.options.deploymentAdapter !== undefined) return;
+    const registered = this.listAdapters();
+    if (registered.length < 2) return;
+    throw unplacedSourceError(source.name, registered, ` ${door} did not register it.`);
+  }
+
+  /**
    * Say once, at `error`, which registered sources name an adapter nothing
    * registered — the boot's reading, taken by the plugin at
    * `kernel:bootstrapped`, once every plugin has started and registered its
@@ -224,15 +314,28 @@ export class KnowledgeService implements IKnowledgeService {
    */
   reportUnmountedAdapters(): string[] {
     const mounted = this.listAdapters();
-    const unmounted = this.describeSources().filter(({ source }) => !this.adapters.has(source.adapter));
-    for (const { id, source } of unmounted) {
+    const named: string[] = [];
+    for (const { id, source } of this.describeSources()) {
+      if (source.adapter === undefined) {
+        // [ADR-0161 K4 ◆] A source that names no adapter, which this boot
+        // cannot place: no adapter at all, or several and none the deployment's.
+        try {
+          this.adapterIdFor(source);
+        } catch (err) {
+          this.options.logger?.error?.(`${errorText(err)} Indexing and searching it answer that refusal.`);
+          named.push(id);
+        }
+        continue;
+      }
+      if (this.adapters.has(source.adapter)) continue;
       this.options.logger?.error?.(
         `[knowledge] source '${id}' names adapter '${source.adapter}', which is not mounted ` +
           `(mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}). Indexing and searching it answer ` +
           `${UNMOUNTED_ADAPTER_CODE} until its adapter is one of those, or the '${source.adapter}' store is mounted.`,
       );
+      named.push(id);
     }
-    return unmounted.map(({ id }) => id);
+    return named;
   }
 
   listAdapters(): string[] {
@@ -266,6 +369,7 @@ export class KnowledgeService implements IKnowledgeService {
         `[knowledge] registerSource refused the source${describeName(source)}: ${parsed.message}`,
       );
     }
+    this.refuseUnplacedSource(parsed.source, 'registerSource');
     const packageId = packageIdOfItem(parsed.source);
     if (packageId !== undefined) {
       throw codedError(
@@ -278,7 +382,7 @@ export class KnowledgeService implements IKnowledgeService {
     }
     const { entry, replaced } = this.registry.register(parsed.source, 'code');
     if (replaced) this.options.logger?.warn?.(`[knowledge] source overwritten: ${entry.face}`);
-    this.options.logger?.info?.(`[knowledge] source registered: ${entry.face} (adapter=${entry.authored.adapter})`);
+    this.options.logger?.info?.(`[knowledge] source registered: ${entry.face} (adapter=${this.adapterLabel(entry.authored)})`);
     this.sourcesChanged();
   }
 
@@ -291,9 +395,10 @@ export class KnowledgeService implements IKnowledgeService {
    * caller holding `IKnowledgeService`.
    */
   registerMetadataSource(source: KnowledgeSource, holder: KnowledgeSourceHolder = {}): KnowledgeSourceEntry {
+    this.refuseUnplacedSource(source, 'The knowledge_source loader');
     const { entry, replaced } = this.registry.register(source, 'metadata', holder);
     this.options.logger?.info?.(
-      `[knowledge] source ${replaced ? 'reloaded' : 'registered'}: ${entry.face} (adapter=${entry.authored.adapter}` +
+      `[knowledge] source ${replaced ? 'reloaded' : 'registered'}: ${entry.face} (adapter=${this.adapterLabel(entry.authored)}` +
         `${entry.packageId === undefined ? '' : `, package=${entry.packageId}`})`,
     );
     this.sourcesChanged();
@@ -360,20 +465,27 @@ export class KnowledgeService implements IKnowledgeService {
   async dropMetadataSource(key: string): Promise<KnowledgeSourceEntry | undefined> {
     const entry = this.registry.byIndexKey(key);
     if (!entry || entry.door !== 'metadata') return undefined;
+    // Placed before the entry is forgotten: an unnamed adapter is placed
+    // among the adapters registered now, as every other use places it.
+    const adapterId = this.boundAdapterId(entry.handed);
     this.forget(entry);
     const kept = (why: string): void => {
       this.options.logger?.warn?.(
         `[knowledge] source '${entry.face}' was removed, and its index was not dropped: ${why} ` +
-          `What adapter '${entry.authored.adapter}' holds under the key '${entry.key}' stays until it is removed there.`,
+          `What adapter '${adapterId ?? this.adapterLabel(entry.authored)}' holds under the key '${entry.key}' stays until it is removed there.`,
       );
     };
-    const adapter = this.adapters.get(entry.authored.adapter);
+    const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
     if (!adapter) {
-      kept(`adapter '${entry.authored.adapter}' is not mounted.`);
+      kept(
+        adapterId === undefined
+          ? 'it names no adapter, and none could be placed for it.'
+          : `adapter '${adapterId}' is not mounted.`,
+      );
       return entry;
     }
     if (typeof adapter.dropSource !== 'function') {
-      kept(`adapter '${entry.authored.adapter}' has no dropSource.`);
+      kept(`adapter '${adapterId}' has no dropSource.`);
       return entry;
     }
     try {
@@ -390,6 +502,8 @@ export class KnowledgeService implements IKnowledgeService {
     this.registry.remove(entry.key);
     this.builds.delete(entry.key);
     this.whereUnenforceableReported.delete(entry.key);
+    this.reconcileUnlistedReported.delete(entry.key);
+    this.cancelPendingReconcile(entry.key);
     this.sourcesChanged();
   }
 
@@ -434,6 +548,13 @@ export class KnowledgeService implements IKnowledgeService {
 
   private handedSources(): KnowledgeSource[] {
     return this.registry.entries().map((entry) => entry.handed);
+  }
+
+  /** How a log line names a source's adapter: the one it names, else the one it is placed on now. */
+  private adapterLabel(source: KnowledgeSource): string {
+    if (source.adapter !== undefined) return source.adapter;
+    const placed = this.boundAdapterId(source);
+    return placed === undefined ? "the deployment's, not placed yet" : `${placed}, the deployment's`;
   }
 
   /** How a log line or an answer names a handed source: its face. */
@@ -623,7 +744,7 @@ export class KnowledgeService implements IKnowledgeService {
     progress?: (step: KnowledgeBuildProgress) => void,
     fence?: KnowledgeBuildFence,
   ): Promise<KnowledgeReindexResult> {
-    const adapter = this.getAdapter(source.adapter);
+    const adapter = this.adapterFor(source);
 
     const engine = this.options.dataEngine;
     if (!engine) {
@@ -1082,7 +1203,7 @@ export class KnowledgeService implements IKnowledgeService {
       return reading('not-built-here', false, 'no data engine is bound, so the source cannot be walked.');
     }
     try {
-      const adapter = this.getAdapter(source.adapter);
+      const adapter = this.adapterFor(source);
       const plan = await this.planIndex(source, adapter);
       const ctx = plan.context('reindex');
       if (typeof adapter.indexStatus === 'function') {
@@ -1172,8 +1293,9 @@ export class KnowledgeService implements IKnowledgeService {
    * - The lock held by another node, or not answering, starts nothing
    *   (`not-run`).
    * - A `boot` or `reload` build re-reads the adapter once it holds the lock
-   *   and builds only when a build is still due; an `operator` build always
-   *   walks.
+   *   and builds only when a build is still due; an `operator` or `reconcile`
+   *   build always walks (the reconcile's walk is what keeps a current index
+   *   correct: it skips what is unchanged and purges what is stale).
    * - The walk is {@link reindexSource} with no `limit` and no `dryRun`: a
    *   complete build, with `beginBuild` and `completeBuild`.
    * - The walk runs under the build's fence (`knowledge-build.ts`): a lost
@@ -1263,7 +1385,7 @@ export class KnowledgeService implements IKnowledgeService {
       },
     });
     try {
-      if (opts.trigger !== 'operator') {
+      if (opts.trigger === 'boot' || opts.trigger === 'reload') {
         const reading = await this.readIndexStateOf(entry);
         if (!reading.due) {
           const message = `nothing to build once the lock was held: ${reading.detail}`;
@@ -1296,7 +1418,7 @@ export class KnowledgeService implements IKnowledgeService {
       if ('stop' in raced) {
         logger?.warn(
           `${label} was cancelled: ${raced.stop.message} The adapter keeps what it held; ` +
-            'the next boot or an operator rebuild builds again.',
+            'the next reconcile, boot or operator rebuild builds again.',
         );
         return finish(raced.stop.reason, raced.stop.message);
       }
@@ -1315,7 +1437,7 @@ export class KnowledgeService implements IKnowledgeService {
       if (!result.ok) {
         logger?.warn(
           `${label} did not finish (${totals}): ${result.message ?? 'no reason given'} ` +
-            'The adapter keeps what it held; the next boot or an operator rebuild builds again.',
+            'The adapter keeps what it held; the next reconcile, boot or operator rebuild builds again.',
         );
         return finish(stop?.reason ?? 'failed', result.message, result);
       }
@@ -1323,7 +1445,7 @@ export class KnowledgeService implements IKnowledgeService {
       return finish('done', result.message, result);
     } catch (err) {
       const message = `the build threw: ${operatorText(err)}`;
-      logger?.warn(`${label} did not finish: ${message} The adapter keeps what it held; the next boot or an operator rebuild builds again.`);
+      logger?.warn(`${label} did not finish: ${message} The adapter keeps what it held; the next reconcile, boot or operator rebuild builds again.`);
       return finish('failed', message);
     } finally {
       fence.close();
@@ -1345,7 +1467,9 @@ export class KnowledgeService implements IKnowledgeService {
    * trigger `boot`). A source with `refresh.onRecordChange: false` is left
    * alone — an external indexer owns its index — and so is one whose state
    * builds nothing; a state that cannot be read or seen is logged at `warn`,
-   * once. Resolves when the pass is done; never rejects. Run in the
+   * once. A source whose adapter is not mounted is skipped without a line:
+   * {@link reportUnmountedAdapters} names it at boot, so it is said once.
+   * Resolves when the pass is done; never rejects. Run in the
    * background by `KnowledgeServicePlugin`, so the boot never waits for it.
    */
   async buildSourcesAtBoot(): Promise<void> {
@@ -1383,6 +1507,15 @@ export class KnowledgeService implements IKnowledgeService {
         logger?.debug?.(`[knowledge] source '${entry.face}': refresh.onRecordChange is false, so an external indexer owns its index; it is not built ${when}.`);
         return;
       }
+      // A source whose adapter is not mounted is named once at boot, at
+      // `error`, by the boot's reading (`reportUnmountedAdapters`); the pass
+      // adds no second line for it. On reload no reading runs, so the line
+      // below is the one that names it. A source that names no adapter and
+      // cannot be placed is named by the same reading.
+      if (trigger === 'boot') {
+        const adapterId = this.boundAdapterId(entry.handed);
+        if (adapterId === undefined || !this.adapters.has(adapterId)) return;
+      }
       const reading = await this.readIndexStateOf(entry);
       if (reading.due) {
         logger?.info?.(`[knowledge] source '${entry.face}' is built now: ${reading.detail}`);
@@ -1403,9 +1536,223 @@ export class KnowledgeService implements IKnowledgeService {
     }
   }
 
-  /** Stop the boot pass from starting another build. A build already walking runs to its end. */
+  /**
+   * Stop the boot pass and the reconcile from starting another build, and
+   * drop every reconcile a predicate write asked for that has not started. A
+   * build already walking runs to its end.
+   */
   stopBuilds(): void {
     this.buildsStopped = true;
+    for (const key of [...this.pendingReconciles.keys()]) this.cancelPendingReconcile(key);
+  }
+
+  // ── The reconcile (ADR-0161 K1, K3 item 3) ───────────────────────
+
+  /**
+   * Reconcile the registered sources: walk each one the reconcile covers,
+   * completely, so its index ends equal to its source (ADR-0161 K1: "Events
+   * keep an index fresh; a reconcile pass keeps it correct").
+   *
+   * The walk is the complete build ({@link rebuildSource}, trigger
+   * `reconcile`): the same cluster lease and fence, the same skip of what the
+   * store holds unchanged, the same purge of what it holds stale and the same
+   * `completeBuild`. Nothing else walks or purges. So a reconcile writes the
+   * documents of rows inserted or changed since the index last saw them (a
+   * lost event, a sync that failed, a row changed while the embedder was
+   * down), and removes those of rows deleted or moved out of `where` (a
+   * predicate write, an insert that rolled back) — and embeds nothing for a
+   * row whose document is unchanged.
+   *
+   * Which sources it walks: an `object` source whose `refresh.onRecordChange`
+   * is not `false` (an external indexer owns that index), with a data engine
+   * bound, on an adapter that has `listDocuments`. An adapter without it can
+   * neither skip nor purge, so a walk would re-embed every document and remove
+   * nothing: the source is left alone, said once per source at `warn`, naming
+   * the operator's rebuild.
+   *
+   * It is the third moment the service reads a source's index state
+   * ({@link readIndexState}), beside the boot and a source reload: a source
+   * whose state reads `nothing`, `new-fingerprint`, `recipe-changed` or
+   * `no-recipe-hash` is built exactly as the boot pass would build it (a new
+   * generation for a new fingerprint), so a split or embedder setting saved
+   * while the server runs is picked up by the next reconcile. The build's
+   * start line says what it costs, as every build's does.
+   *
+   * Sources are walked one after another, and one pass runs at a time on a
+   * node (a second pass waits for the first). A build of the source another
+   * node holds is `not-run` here, as for every build. `sources` names the
+   * sources to consider (faces or bare names, as {@link rebuildSource} takes
+   * them); a name that resolves to no source is skipped. Never rejects; the
+   * report names every walk that did not finish.
+   */
+  reconcileSources(opts: { sources?: string[] } = {}): Promise<KnowledgeReconcileReport> {
+    const names = opts.sources;
+    return this.enqueueReconcile(() =>
+      names === undefined
+        ? this.registry.entries()
+        : names.map((name) => this.registry.resolve(name)).filter((e): e is KnowledgeSourceEntry => e !== undefined),
+    );
+  }
+
+  /** Queue one reconcile pass over the entries `select` answers when its turn comes. */
+  private enqueueReconcile(select: () => KnowledgeSourceEntry[]): Promise<KnowledgeReconcileReport> {
+    const pass = this.reconcileTail.then(() => this.reconcilePass(select));
+    this.reconcileTail = pass.then(() => undefined, () => undefined);
+    return pass;
+  }
+
+  /** One pass of {@link reconcileSources}; runs after the pass before it. */
+  private async reconcilePass(select: () => KnowledgeSourceEntry[]): Promise<KnowledgeReconcileReport> {
+    const startedAt = new Date().toISOString();
+    const report: KnowledgeReconcileReport = { startedAt, finishedAt: startedAt, sources: [], unfinished: [] };
+    let entries: KnowledgeSourceEntry[];
+    try {
+      entries = select();
+    } catch (err) {
+      this.options.logger?.warn(`[knowledge] the reconcile could not list the sources (${operatorText(err)}); none was reconciled.`);
+      report.unfinished.push({ sourceId: '*', status: 'failed', message: `the sources could not be listed (${operatorText(err)})` });
+      report.finishedAt = new Date().toISOString();
+      return report;
+    }
+    for (const entry of entries) {
+      if (this.buildsStopped) break;
+      // A source removed while the pass ran is not walked.
+      if (this.registry.byIndexKey(entry.key) !== entry) continue;
+      const done = await this.reconcileOf(entry);
+      report.sources.push(done);
+      const status = done.record?.status;
+      if (status === 'failed' || status === 'lease-lost' || status === 'timed-out') {
+        report.unfinished.push({ sourceId: entry.face, status, ...(done.record?.message === undefined ? {} : { message: done.record.message }) });
+      }
+    }
+    report.finishedAt = new Date().toISOString();
+    return report;
+  }
+
+  /** One source of a reconcile pass. Never rejects. */
+  private async reconcileOf(entry: KnowledgeSourceEntry): Promise<KnowledgeReconcileEntry> {
+    const logger = this.options.logger;
+    const left = (why: string): KnowledgeReconcileEntry => ({ sourceId: entry.face, left: why });
+    try {
+      const why = this.reconcileExclusion(entry);
+      if (why !== undefined) {
+        if (why.unlisted) {
+          if (!this.reconcileUnlistedReported.has(entry.key)) {
+            this.reconcileUnlistedReported.add(entry.key);
+            logger?.warn(`[knowledge] source '${entry.face}' is not reconciled: ${why.text}`);
+          }
+        } else {
+          logger?.debug?.(`[knowledge] source '${entry.face}' is not reconciled: ${why.text}`);
+        }
+        return left(why.text);
+      }
+      const reading = await this.readIndexStateOf(entry);
+      logger?.info?.(
+        reading.due
+          ? `[knowledge] source '${entry.face}' is built by the reconcile now: ${reading.detail}`
+          : `[knowledge] source '${entry.face}' is reconciled now (${reading.state}): ${reading.detail}`,
+      );
+      return { sourceId: entry.face, record: await this.rebuildOf(entry, { trigger: 'reconcile' }) };
+    } catch (err) {
+      const message = `the reconcile failed for it (${operatorText(err)}).`;
+      logger?.warn(`[knowledge] source '${entry.face}': ${message}`);
+      const now = new Date().toISOString();
+      return {
+        sourceId: entry.face,
+        record: { sourceId: entry.face, trigger: 'reconcile', status: 'failed', startedAt: now, finishedAt: now, progress: emptyBuildProgress(), message },
+      };
+    }
+  }
+
+  /**
+   * Why the reconcile does not walk `entry`, or `undefined` when it does.
+   * `unlisted` marks the one exclusion said at `warn`: a store that lists no
+   * documents. An adapter that is not mounted is walked, so its build fails
+   * and names it.
+   */
+  private reconcileExclusion(entry: KnowledgeSourceEntry): { text: string; unlisted: boolean } | undefined {
+    if ((entry.authored.refresh?.onRecordChange ?? true) === false) {
+      return { text: 'refresh.onRecordChange is false, so an external indexer owns its index.', unlisted: false };
+    }
+    if (!this.options.dataEngine) {
+      return { text: 'no data engine is bound, so the source cannot be walked.', unlisted: false };
+    }
+    const adapterId = this.boundAdapterId(entry.handed);
+    const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
+    if (adapter && typeof adapter.listDocuments !== 'function') {
+      return {
+        text:
+          `its adapter '${adapter.id}' does not list its documents (no listDocuments), so a walk could neither skip ` +
+          'an unchanged document nor purge a stale one: it would send every document to the embedding provider again ' +
+          'and remove nothing. Rows deleted or changed without an event stay as they are in its index until an ' +
+          'operator rebuild (os knowledge rebuild).',
+        unlisted: true,
+      };
+    }
+    return undefined;
+  }
+
+  /**
+   * Ask for a reconcile of every source over `object` that the reconcile
+   * covers ({@link reconcileSources}): what a predicate write (`multi: true`)
+   * asks, since its aggregate event names no record. One request per source
+   * however many predicate writes arrive: the reconcile starts once no further
+   * request for the source arrived for {@link RECONCILE_QUIET_MS}, and at the
+   * latest {@link RECONCILE_MAX_WAIT_MS} after the first one it gathers. A
+   * reconcile that comes due while a build of the source is running waits one
+   * more quiet period, so the walk it starts begins after the write. Answers
+   * the sources asked for and those over the object no reconcile can repair
+   * (no `listDocuments`, or no data engine); a source an external indexer
+   * owns is in neither.
+   */
+  requestReconcile(object: string): KnowledgeReconcileRequest {
+    const request: KnowledgeReconcileRequest = { scheduled: [], unreconcilable: [] };
+    if (this.buildsStopped) return request;
+    for (const entry of this.registry.entries()) {
+      if (entry.handed.source.object !== object) continue;
+      const why = this.reconcileExclusion(entry);
+      if (why !== undefined) {
+        // An external indexer's index is not this service's to call stale.
+        if (why.unlisted || !this.options.dataEngine) request.unreconcilable.push(entry.face);
+        continue;
+      }
+      this.armReconcile(entry.key, Date.now());
+      request.scheduled.push(entry.face);
+    }
+    return request;
+  }
+
+  /** (Re)arm the pending reconcile of the source under `key`; `now` is when the request arrived. */
+  private armReconcile(key: string, now: number): void {
+    const pending = this.pendingReconciles.get(key);
+    const firstAt = pending?.firstAt ?? now;
+    if (pending) clearTimeout(pending.timer);
+    const wait = Math.max(0, Math.min(RECONCILE_QUIET_MS, firstAt + RECONCILE_MAX_WAIT_MS - now));
+    const timer = setTimeout(() => {
+      this.pendingReconciles.delete(key);
+      const entry = this.registry.byIndexKey(key);
+      if (!entry || this.buildsStopped) return;
+      // A build of the source running now may have read past the rows the
+      // write changed: wait for it, then walk again.
+      if (this.builds.get(key)?.status === 'running') {
+        this.armReconcile(key, Date.now());
+        return;
+      }
+      void this.enqueueReconcile(() => {
+        const current = this.registry.byIndexKey(key);
+        return current === undefined ? [] : [current];
+      }).catch(() => undefined);
+    }, wait);
+    (timer as { unref?: () => void }).unref?.();
+    this.pendingReconciles.set(key, { timer, firstAt });
+  }
+
+  /** Drop the pending reconcile of the source under `key`, if any. */
+  private cancelPendingReconcile(key: string): void {
+    const pending = this.pendingReconciles.get(key);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingReconciles.delete(key);
   }
 
   // ── The `search_knowledge` AI tool (ADR-0149 D2) ──────────────────
@@ -1808,7 +2155,16 @@ export class KnowledgeService implements IKnowledgeService {
    * in system context, in this process and NOT awaited — the search that found
    * it answers without it. Single-flight per document, and at most once per
    * document until a later search finds its hash matching. Never throws into
-   * the search. Moves to the scheduled reconcile's queue when that lands.
+   * the search. The scheduled reconcile does not take it over: the reconcile
+   * walks whole sources, and this repairs one document now. That is the
+   * inline path.
+   *
+   * While record syncs run through the queue ({@link routeRecordSyncs}) the
+   * repair is a record-sync message with reason `freshness`, for this source
+   * alone: it survives a restart of the process that searched and is retried
+   * like any other sync. A message that could not be published is reported
+   * at `error` and the document is left to the next search that finds it
+   * stale.
    *
    * A source with `refresh.onRecordChange: false` is never repaired: it is
    * asked through {@link objectSourcesFor}, the one predicate that keeps the
@@ -1820,6 +2176,10 @@ export class KnowledgeService implements IKnowledgeService {
     const docId = documentIdFor(source.name, recordId);
     if (this.freshnessRepairs.has(docId)) return;
     this.freshnessRepairs.add(docId);
+    if (this.recordSyncPublisher) {
+      this.publishRecordSyncs([source], objSource.object, recordId, 'freshness', () => this.freshnessRepairs.delete(docId));
+      return;
+    }
     void this.serializeRecordSync(docId, () => this.syncRecord(source, objSource.object, recordId, { id: recordId }));
   }
 
@@ -1836,7 +2196,8 @@ export class KnowledgeService implements IKnowledgeService {
     let target: Promise<number | undefined> | undefined;
     const chunkTarget = (): Promise<number | undefined> => (target ??= this.readChunkTarget());
     for (const entry of admitted) {
-      const adapter = this.adapters.get(entry.source.adapter);
+      const adapterId = this.boundAdapterId(entry.source);
+      const adapter = adapterId === undefined ? undefined : this.adapters.get(adapterId);
       if (!adapter) {
         out.push(entry);
         continue;
@@ -1873,12 +2234,17 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<Map<string, { hits: KnowledgeHit[]; answered: number }>> {
     const out = new Map<string, { hits: KnowledgeHit[]; answered: number }>();
     for (const { source, organizationIds, fingerprint, scope } of sources) {
-      const adapter = this.adapters.get(source.adapter);
-      if (!adapter) {
-        // Refused like an adapter that cannot serve: the caller is told which
-        // source was not searched and why; the boot said so at `error`
-        // (`reportUnmountedAdapters`), so no line per search.
-        const coded = codedRefusalOf(unmountedAdapterError(source.adapter, this.listAdapters()));
+      // Refused like an adapter that cannot serve: the caller is told which
+      // source was not searched and why; the boot said so at `error`
+      // (`reportUnmountedAdapters`), so no line per search. A source that
+      // names no adapter is placed here, as everywhere (`adapterIdFor`).
+      let adapterId: string;
+      let adapter: IKnowledgeAdapter;
+      try {
+        adapterId = this.adapterIdFor(source);
+        adapter = this.getAdapter(adapterId);
+      } catch (err) {
+        const coded = codedRefusalOf(err);
         if (coded !== undefined) refused.push({ sourceId: source.name, ...coded });
         continue;
       }
@@ -1900,12 +2266,12 @@ export class KnowledgeService implements IKnowledgeService {
         const foreign = hits.length - served.length;
         if (foreign > 0) {
           this.options.logger?.warn?.(
-            `[knowledge] adapter '${source.adapter}' answered ${foreign} hit(s) for source '${this.label(source)}' that name ` +
+            `[knowledge] adapter '${adapterId}' answered ${foreign} hit(s) for source '${this.label(source)}' that name ` +
               'another source; dropped — a hit is served only as the source it was searched for.',
           );
         }
         out.set(source.name, {
-          hits: scope === undefined ? served : this.checkScope(served, scope, source),
+          hits: scope === undefined ? served : this.checkScope(served, scope, source, adapterId),
           answered: hits.length,
         });
       } catch (err) {
@@ -1920,7 +2286,7 @@ export class KnowledgeService implements IKnowledgeService {
           continue;
         }
         this.options.logger?.error?.(
-          `[knowledge] adapter '${source.adapter}' search failed for source '${this.label(source)}': ${(err as Error).message}`,
+          `[knowledge] adapter '${adapterId}' search failed for source '${this.label(source)}': ${(err as Error).message}`,
         );
       }
     }
@@ -1971,14 +2337,19 @@ export class KnowledgeService implements IKnowledgeService {
    * the rest are dropped, and the first time an adapter's answer loses a hit
    * here it is reported once, at `warn` ({@link searchRound}).
    */
-  private checkScope(hits: KnowledgeHit[], terms: readonly AdapterScopeTerm[], source: KnowledgeSource): KnowledgeHit[] {
+  private checkScope(
+    hits: KnowledgeHit[],
+    terms: readonly AdapterScopeTerm[],
+    source: KnowledgeSource,
+    adapterId: string,
+  ): KnowledgeHit[] {
     const inScope = scopeCheck(terms);
     const kept = hits.filter(inScope);
     const dropped = hits.length - kept.length;
-    if (dropped > 0 && !this.scopeIgnoredReported.has(source.adapter)) {
-      this.scopeIgnoredReported.add(source.adapter);
+    if (dropped > 0 && !this.scopeIgnoredReported.has(adapterId)) {
+      this.scopeIgnoredReported.add(adapterId);
       this.options.logger?.warn?.(
-        `[knowledge] adapter '${source.adapter}' answered ${dropped} hit(s) for source '${this.label(source)}' outside the ` +
+        `[knowledge] adapter '${adapterId}' answered ${dropped} hit(s) for source '${this.label(source)}' outside the ` +
           "search's scope; dropped. The adapter does not apply AdapterSearchOptions.scope before ranking, or answers " +
           "hits without the document's metadata, so its scoped searches may answer fewer than topK. " +
           'Reported once for this adapter.',
@@ -1987,13 +2358,151 @@ export class KnowledgeService implements IKnowledgeService {
     return kept;
   }
 
-  // ── Sync entrypoints (called by the host plugin's event bridge) ───
+  // ── Sync entrypoints (called by the host plugin's triggers and worker) ───
+
+  /**
+   * Run record syncs through a queue (ADR-0161 K1): from now on
+   * {@link enqueueRecordSync} and the freshness repair publish one
+   * {@link KnowledgeRecordSyncMessage} per source through `publish`, and the
+   * host's worker hands each message to {@link processRecordSync}.
+   * `undefined` returns to the inline sync. `KnowledgeServicePlugin` calls it
+   * in `kernel:ready`, when the composed `queue` service is durable and a
+   * data engine is bound (the worker re-reads the row, so it needs one).
+   */
+  routeRecordSyncs(publish: ((message: KnowledgeRecordSyncMessage) => Promise<unknown>) | undefined): void {
+    this.recordSyncPublisher = publish;
+  }
+
+  /** Whether record syncs run through the queue ({@link routeRecordSyncs}). */
+  get recordSyncQueued(): boolean {
+    return this.recordSyncPublisher !== undefined;
+  }
+
+  /**
+   * A record of `object` was created, updated, restored or deleted: ask for
+   * the sync of its document in every source that indexes `object` on record
+   * change ({@link objectSourcesFor}) — one message per source, carrying the
+   * source's index key, the object, the record id and the reason, never a
+   * field value. Nothing is synced here: the worker re-reads the row when it
+   * processes the message, so a create, an update and a delete ask for the
+   * same thing (the document follows the row as it is then, or leaves the
+   * index when no row matches).
+   *
+   * The messages are published once the unit of work open here commits, and
+   * never when it rolls back (`runAfterOpenUnitsCommit` of the ObjectQL
+   * engine): a trigger runs inside the write, before the write's own unit or
+   * a caller's `transaction()` commits, so a message published at once could
+   * be processed before the commit, and one for a write that rolls back would
+   * be processed at all. With no unit open they are published at once,
+   * outside every unit. Never awaited and never throws: a publish that fails
+   * is reported at `error` (the save stands, its document is stale until the
+   * record's next save, a search that finds it stale, or the reconcile).
+   *
+   * Requires {@link routeRecordSyncs}; inline, the triggers call
+   * {@link handleRecordUpsert} / {@link handleRecordDelete} instead.
+   */
+  enqueueRecordSync(object: string, recordId: string | number, reason: KnowledgeRecordSyncReason = 'event'): void {
+    if (!isRecordId(recordId)) return;
+    const sources = this.sourcesForObject(object);
+    if (sources.length === 0) return;
+    this.publishRecordSyncs(sources, object, String(recordId), reason);
+  }
+
+  /**
+   * Publish one record-sync message per source in `sources`, once the unit
+   * open here commits ({@link enqueueRecordSync}). `onFailed` runs for each
+   * message that could not be published.
+   */
+  private publishRecordSyncs(
+    sources: KnowledgeSource[],
+    object: string,
+    recordId: string,
+    reason: KnowledgeRecordSyncReason,
+    onFailed?: () => void,
+  ): void {
+    const publish = this.recordSyncPublisher;
+    if (!publish) return;
+    const send = (): void => {
+      for (const source of sources) {
+        const message: KnowledgeRecordSyncMessage = { source: source.name, object, recordId, reason };
+        void Promise.resolve()
+          .then(() => publish(message))
+          .catch((err: unknown) => {
+            onFailed?.();
+            const report =
+              `[knowledge] the sync of record '${recordId}' of source '${this.label(source)}' could not be queued ` +
+              `(${errorText(err)}): the write stands, and the record's document stays as it was until the record's ` +
+              'next save, a search that finds it stale, or the reconcile.';
+            if (this.options.logger?.error) this.options.logger.error(report);
+            else this.options.logger?.warn?.(report);
+          });
+      }
+    };
+    const engine = this.options.dataEngine as { runAfterOpenUnitsCommit?(body: () => void): void } | undefined;
+    if (typeof engine?.runAfterOpenUnitsCommit === 'function') engine.runAfterOpenUnitsCommit(send);
+    else send();
+  }
+
+  /**
+   * The worker's body: sync the document one {@link KnowledgeRecordSyncMessage}
+   * names. The source is resolved by its index key now, at processing time,
+   * and the row re-read under the source's `where` as the system identity
+   * ({@link handleRecordUpsert}, "What decides a document"): a row comes back →
+   * its document is written; none → its document is deleted. Serialized with
+   * every other sync of the same document in this process.
+   *
+   * A failure that a retry can change — the re-read, the split, the
+   * embedding call, the store write — is THROWN, so the queue retries the
+   * message on its backoff and, once its attempts are spent, keeps it as a
+   * dead letter. Every other outcome completes the message and is answered
+   * ({@link KnowledgeRecordSyncOutcome}).
+   */
+  async processRecordSync(data: unknown): Promise<KnowledgeRecordSyncOutcome> {
+    const message = readRecordSyncMessage(data);
+    if (!message) {
+      this.options.logger?.warn?.(
+        `[knowledge] a message on the record-sync queue is not a record-sync message (${describeValue(data)}); completed without a sync.`,
+      );
+      return 'malformed';
+    }
+    const source = this.handed(message.source);
+    if (!source) {
+      this.options.logger?.debug?.(
+        `[knowledge] record sync of '${message.recordId}' skipped: source '${message.source}' is no longer registered.`,
+      );
+      return 'source-gone';
+    }
+    if (objectSourcesFor([source], message.object).length === 0) return 'not-synced';
+    const engine = this.options.dataEngine;
+    if (!engine) {
+      this.options.logger?.warn?.(
+        `[knowledge] record sync of '${message.recordId}' for source '${this.label(source)}' skipped: no data engine is ` +
+          'bound to re-read the row.',
+      );
+      return 'not-synced';
+    }
+    // The source's adapter is resolved now ({@link adapterFor}): the one it
+    // names, else the deployment's store, else the only one registered. Where
+    // none can be resolved it throws its coded refusal — the named adapter is
+    // not mounted, no adapter is mounted (`503 SERVICE_UNAVAILABLE`), or
+    // several are and none is the deployment's (`400 VALIDATION_ERROR`) — so
+    // the message is retried: a store that registers late is met by a later
+    // attempt, and one that never does leaves a dead letter naming the source
+    // and the record.
+    const adapter = this.adapterFor(source);
+    await chainAfter(this.recordSyncTails, documentIdFor(source.name, message.recordId), () =>
+      this.syncRow(source, adapter, message.object, message.recordId, engine),
+    );
+    return 'synced';
+  }
 
   /**
    * Apply an ObjectQL `data.record.created`, `data.record.updated` or
    * `data.record.restored` event to every source bound to the
-   * matching object. `record` is the event payload's `after`; its `id` names
+   * matching object, inline. `record` is the event payload's `after`; its `id` names
    * the row. Failures are logged but never thrown — sync must not block writes.
+   * The plugin calls this only where record syncs do not run through the
+   * queue ({@link routeRecordSyncs}).
    *
    * ## What decides a document (ADR-0049: a declared key holds on every path)
    *
@@ -2018,32 +2527,38 @@ export class KnowledgeService implements IKnowledgeService {
    *
    * ## When this runs, measured against the engine
    *
-   * The engine publishes `data.record.created` / `data.record.updated` from
-   * inside the write's engine body (`insert` / `update`), after its `after*`
-   * hooks, and so BEFORE any unit of work around the write commits — the
-   * write's own unit (opened when a metadata hook can abort it) or a caller's
-   * `engine.transaction(…)`. The in-process realtime service awaits each
-   * subscriber in turn, so this handler runs inside the write's async context,
-   * and its system-context re-read rides the same open transaction through the
-   * engine's ambient transaction store: it sees the row the write just made.
+   * Only on the inline path: a kernel whose `queue` service is not durable
+   * (the kernel's own fallback queue), or a service with no data engine.
+   * There the realtime subscription calls this from inside the write: the
+   * engine publishes `data.record.created` / `data.record.updated` from the
+   * write's engine body, after its `after*` hooks and BEFORE any unit of work
+   * around the write commits — the write's own unit (opened when a metadata
+   * hook can abort it) or a caller's `engine.transaction(…)` — and the
+   * in-process realtime service awaits each subscriber, so the save waits for
+   * the re-read, the split, the embedding call and the store write, and the
+   * re-read rides the open transaction through the engine's ambient store.
    * If that unit then rolls back, the index is wrong in one of two ways: on a
    * match, the document stays built from a row that never committed; on a
-   * miss, the uncommitted row did not match and the document was deleted, so
-   * the committed row — which may still match — is missing from the index.
-   * The row's next event or a `reindexSource` repairs a row that still exists;
-   * a document built from an INSERT that rolled back has no row left to
-   * repair it from — it stays until a complete `reindexSource` purges it.
+   * miss, the document was deleted although the committed row may still
+   * match. The reconcile, a later event of the row or a `reindexSource`
+   * repairs it. The after-write hooks (the trigger on a kernel with no
+   * `realtime` service) start this once the unit commits and never on a
+   * rollback, off the write's response (`knowledge-record-hooks.ts`).
    * `data.record.restored` is published after the restore's own unit has
    * committed. Bulk events (`data.records.*`) carry a count, not records, and
    * are not synced here — see the plugin's event bridge.
    *
+   * Through the queue none of this holds: the triggers publish a message once
+   * the write's unit commits and nothing for one that rolls back, the save
+   * does not wait for the sync, and a failed sync is retried
+   * ({@link enqueueRecordSync}, {@link processRecordSync}).
+   *
    * Syncs of one document are serialized in this process
    * ({@link serializeRecordSync}), so two opposite events for one row cannot
    * interleave: each sync re-reads after the previous one finished, and the
-   * last one leaves the index agreeing with the database. The chain is awaited
-   * inline, so a write's sync can wait behind an earlier in-flight sync of the
-   * same document (on a single-connection pool, up to the pool's acquire
-   * timeout); the index still ends consistent.
+   * last one leaves the index agreeing with the database. Inline, the chain
+   * is awaited, so a write's sync can wait behind an earlier in-flight sync
+   * of the same document; the index still ends consistent.
    */
   async handleRecordUpsert(object: string, record: Record<string, unknown>): Promise<void> {
     const recordId = record.id;
@@ -2056,7 +2571,8 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
-   * One source's sync of one row — see {@link handleRecordUpsert}. Never throws.
+   * One source's inline sync of one row — see {@link handleRecordUpsert}.
+   * Never throws: a failure is one `warn` line.
    */
   private async syncRecord(
     source: KnowledgeSource,
@@ -2066,7 +2582,7 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<void> {
     const objSource = source.source;
     try {
-      const adapter = this.getAdapter(source.adapter);
+      const adapter = this.adapterFor(source);
       const engine = this.options.dataEngine;
       if (!engine) {
         if (objSource.where !== undefined) {
@@ -2084,18 +2600,36 @@ export class KnowledgeService implements IKnowledgeService {
         );
         return;
       }
-      const row = await rereadRow(engine, objSource, recordId);
-      if (row) {
-        const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
-        await this.writeSynced(source, adapter, doc, recordId);
-      } else {
-        const plan = await this.planIndex(source, adapter);
-        await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
-      }
+      await this.syncRow(source, adapter, object, recordId, engine);
     } catch (err) {
       this.options.logger?.warn?.(
         `[knowledge] event-sync failed for source '${this.label(source)}': ${(err as Error).message}`,
       );
+    }
+  }
+
+  /**
+   * THE sync of one row's document, both paths' ({@link syncRecord} inline,
+   * {@link processRecordSync} from the queue): re-read the row under the
+   * source's `where` as the system identity ({@link rereadRow}) and write its
+   * document, or delete the document when no row matches. Throws what the
+   * re-read, the split, the embedding call or the store throws.
+   */
+  private async syncRow(
+    source: KnowledgeSource,
+    adapter: IKnowledgeAdapter,
+    object: string,
+    recordId: string | number,
+    engine: IDataEngine,
+  ): Promise<void> {
+    const objSource = source.source;
+    const row = await rereadRow(engine, objSource, recordId);
+    if (row) {
+      const doc = recordToDocument(source, objSource, row, this.schemaFor(object), await this.readTenancyPosture());
+      await this.writeSynced(source, adapter, doc, recordId);
+    } else {
+      const plan = await this.planIndex(source, adapter);
+      await adapter.delete([documentIdFor(source.name, String(recordId))], plan.context('event-sync'));
     }
   }
 
@@ -2180,7 +2714,7 @@ export class KnowledgeService implements IKnowledgeService {
       const docId = documentIdFor(source.name, recordId);
       await this.serializeRecordSync(docId, async () => {
         try {
-          const adapter = this.getAdapter(source.adapter);
+          const adapter = this.adapterFor(source);
           await adapter.delete([docId], (await this.planIndex(source, adapter)).context('event-sync'));
         } catch (err) {
           this.options.logger?.warn?.(
@@ -2371,6 +2905,14 @@ export class KnowledgeService implements IKnowledgeService {
           'allowed to search what their source indexes. Nothing was written; try again.',
       );
     if (!ctx) return refuse(403, 'PERMISSION_DENIED', `${named}: the save carries no identity, and a missing identity is not a grant of authority.`);
+    // [ADR-0161 K4 ◆] A source that names no adapter where this deployment
+    // cannot place one is refused at its save as at its registration, so the
+    // author hears it: several adapters registered, none the deployment's.
+    const authoredAdapter = (item as { adapter?: unknown } | null | undefined)?.adapter;
+    const registeredAdapters = this.listAdapters();
+    if (authoredAdapter === undefined && this.options.deploymentAdapter === undefined && registeredAdapters.length > 1) {
+      return refuse(400, 'VALIDATION_ERROR', `${named}: it ${unplacedSourceText(registeredAdapters)}`);
+    }
     const engine = this.options.dataEngine;
     if (!engine) return unavailable('the knowledge service has no data engine');
 
@@ -2665,6 +3207,44 @@ function unmountedAdapterError(id: string, mounted: readonly string[]): Error {
   );
 }
 
+/**
+ * [ADR-0161 K4 ◆] The refusal of a source that names no adapter where no
+ * adapter is registered: ADR-0112 `SERVICE_UNAVAILABLE` (503), as for a named
+ * adapter that is not mounted. Names the deployment's store when the runtime
+ * marked one.
+ */
+function noAdapterMountedError(source: string, deployment: string | undefined): Error {
+  return Object.assign(
+    new Error(
+      `[knowledge] source '${source}' names no adapter, and no adapter is mounted` +
+        `${deployment === undefined ? '' : ` (the deployment's store '${deployment}' is not mounted)`}. ` +
+        "Mount a knowledge store — `requires: ['knowledge']` mounts the deployment's — or name the source's adapter.",
+    ),
+    { code: UNMOUNTED_ADAPTER_CODE, status: 503 },
+  );
+}
+
+/**
+ * [ADR-0161 K4 ◆] The refusal of a source that names no adapter where several
+ * are registered and none is the deployment's: ADR-0112 `VALIDATION_ERROR`
+ * (400), naming the choices. The source must say which store holds it.
+ */
+function unplacedSourceError(source: string, registered: readonly string[], tail = ''): Error {
+  return Object.assign(new Error(`[knowledge] source '${source}' ${unplacedSourceText(registered)}${tail}`), {
+    code: 'VALIDATION_ERROR',
+    status: 400,
+  });
+}
+
+/** Why a source that names no adapter cannot be placed among `registered`, and what to write. */
+function unplacedSourceText(registered: readonly string[]): string {
+  return (
+    `names no adapter, and ${registered.length} adapters are registered (${registered.join(', ')}) with none the ` +
+    "deployment's store, so which one holds its index cannot be told. Name one of " +
+    `${registered.map((id) => `'${id}'`).join(', ')} as the source's \`adapter\`.`
+  );
+}
+
 function codedRefusalOf(err: unknown): Omit<KnowledgeSearchRefusal, 'sourceId'> | undefined {
   if (err === null || typeof err !== 'object') return undefined;
   const { code, status } = err as { code?: unknown; status?: unknown };
@@ -2932,8 +3512,8 @@ export interface PurgeDocumentsOutcome {
  * object schema does not say which ids are numeric. Platform-minted ids are
  * text on every driver, so the limit needs a caller-supplied numeric id.
  *
- * The caller decides when a purge may run at all (a complete reindex walk;
- * the scheduled reconcile reuses this function) and computes the candidates.
+ * The caller decides when a purge may run at all (a complete reindex walk,
+ * which is also what the reconcile runs) and computes the candidates.
  */
 export async function purgeDocuments(input: PurgeDocumentsInput): Promise<PurgeDocumentsOutcome> {
   const { source, objSource, adapter, engine } = input;

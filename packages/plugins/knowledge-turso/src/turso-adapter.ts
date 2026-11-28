@@ -17,11 +17,20 @@ import {
   GENERATION_TABLE,
   METADATA_VALUE_JSON,
   SCOPE_SCALAR_TYPES,
+  TRIGRAM_MIN_CHARS,
+  type KeywordIndexShape,
   type TableShape,
   tableShape,
   assertSourceId,
+  containsPattern,
+  dropKeywordIndexDdl,
+  ftsPhrase,
   generationDdl,
   generationTable,
+  keywordIndexDdl,
+  keywordIndexShape,
+  keywordNames,
+  keywordTerms,
   legacyTable,
   passageTableDdl,
   quoted,
@@ -79,6 +88,12 @@ const SEARCH_ATTEMPTS = 3;
 /** The standard ADR-0112 code of a search whose source's index was switched under it on every attempt. */
 const CONCURRENT_MODIFICATION = 'CONCURRENT_MODIFICATION';
 
+/** The standard ADR-0112 code of a build's call refused because the generation it began is gone, as pgvector answers. */
+const LOCK_CONFLICT = 'LOCK_CONFLICT';
+
+/** The `k` of reciprocal rank fusion: a passage at rank `r` of a leg adds `1 / (k + r)` to its score. */
+export const RRF_K = 60;
+
 /** A generation row: one index of one source under one fingerprint. */
 interface GenerationRow {
   generation: number;
@@ -86,6 +101,24 @@ interface GenerationRow {
   recipeHash: string | null;
   dim: number;
   state: 'active' | 'building';
+  /** When the row was made (`created_at`): with the number, what tells a generation from a later one of that number. */
+  createdAt: string;
+}
+
+/**
+ * The generation a build began, as `beginBuild` read it. Generation numbers
+ * are reused — the next one is the source's highest plus one, so after a drop
+ * or a replaced build a new generation can take the number again — so the
+ * build knows its generation by the number, the time its row was made and its
+ * fingerprint.
+ */
+type BuildMark = Pick<GenerationRow, 'generation' | 'createdAt' | 'fingerprint'>;
+
+/** Whether `g` is the generation `mark` names: the one the build began, not a later one under its number. */
+function isBuildGeneration(g: GenerationRow | undefined, mark: BuildMark): g is GenerationRow {
+  return (
+    g !== undefined && g.generation === mark.generation && g.createdAt === mark.createdAt && g.fingerprint === mark.fingerprint
+  );
 }
 
 /** A source's generations: the active one, and the one under construction. */
@@ -184,11 +217,31 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *
  * ## Search
  *
- * An exact scan by cosine distance, no approximate index: the organization
- * filter (ADR-0161 K8, item 9) and the metadata-equality `filter` run in the
- * same `WHERE`, before ranking, which libSQL's DiskANN index (`vector_top_k`)
- * cannot do — it ranks first. A passage whose cosine similarity is not
- * positive is not a hit.
+ * Two legs, merged by reciprocal rank fusion (`k` = {@link RRF_K}) before the
+ * knowledge service re-checks each hit as the caller. Each leg ranks at most
+ * `topK` passages; a passage's score is the sum of `1 / (k + rank)` over the
+ * legs that rank it, divided by the score of a passage first in both, so it
+ * lies in `(0, 1]`.
+ *
+ * - The vector leg: an exact scan by cosine distance, no approximate index. A
+ *   passage whose cosine similarity is not positive is not ranked by it.
+ * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
+ *   characters or more is matched as one FTS5 phrase in the passage table's
+ *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
+ *   (「出差」), which a trigram index cannot match, by `content LIKE` over the
+ *   rows in scope. A passage's keyword score sums, over the terms it holds,
+ *   the term's BM25 inverse document frequency among the rows in scope, so a
+ *   term most passages hold weighs little.
+ *
+ * The organization filter (ADR-0161 K8, item 9), the record scope (item 17)
+ * and the metadata-equality `filter` are one `WHERE`, run in both legs before
+ * either ranks — which libSQL's DiskANN index (`vector_top_k`) cannot do: it
+ * ranks first.
+ *
+ * The keyword index of a passage table is made with the table, and for a
+ * table made before it existed, by the first search of that table, from the
+ * rows it holds, in one transaction ({@link keywordIndexDdl}). Triggers keep
+ * it in step with every write, removal and drop of the table's rows.
  *
  * ## Generations (ADR-0161 K7; K8, item 8)
  *
@@ -197,7 +250,12 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  * source, by a unique index on the generation table. That index does not
  * refuse a second builder: a second build under the same fingerprint joins
  * the one under way, and one under another fingerprint replaces it (the first
- * builder's writes are then refused). A write
+ * builder's writes are then refused). A build's writes, listing and
+ * completion go to the generation that build began and to no other: when it
+ * is gone — the source was dropped, in this process or another, or another
+ * build replaced it — the build ends and the call is refused `LOCK_CONFLICT`
+ * (409), so a build never opens a generation and never brings a dropped
+ * source back. A write
  * carrying `ctx.index` goes to the generation of that fingerprint and is
  * refused `KNOWLEDGE_REBUILD_REQUIRED` when neither holds it; a search
  * carrying another fingerprint than the active one's is refused the same way
@@ -240,8 +298,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly resolveEmbedder: () => IEmbedder | undefined;
   private readonly queryPrefix: string;
   private isReady = false;
+  /**
+   * The builds this adapter began and has not ended, by source id: the
+   * generation each one builds into, as begun. A build's writes, listing and
+   * completion go to that generation and to no other (`writeTarget`).
+   */
+  private readonly builds = new Map<string, BuildMark>();
   /** Sources whose legacy table is known to be absent. */
   private readonly noLegacy = new Set<string>();
+  /** Passage tables whose keyword index is known to be complete. */
+  private readonly keyed = new Set<string>();
 
   constructor(opts: TursoKnowledgeAdapterOptions) {
     this.id = opts.id ?? 'turso';
@@ -348,11 +414,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
 
     return this.queued(client, () =>
       this.transaction(async (tx) => {
-        // The generation may have been switched or abandoned while the embedder
-        // answered: write only into the one that was planned.
+        // The generation may have been switched, abandoned or dropped while the
+        // embedder answered: write only into the one that was planned, never a
+        // later one under its number (its row made at another time).
         const still = await tx.execute({
-          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND dim = ?`,
-          args: [sourceId, target.generation, target.fingerprint, target.dim],
+          sql: `SELECT 1 FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ? AND fingerprint IS ? AND dim = ? AND created_at = ?`,
+          args: [sourceId, target.generation, target.fingerprint, target.dim, target.createdAt],
         });
         if (still.rows.length === 0) return { commit: false, value: `${sourceId}#generation-${target.generation}` };
         // One request per document (its DELETE and its passages, as one batch
@@ -505,8 +572,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           `vector, and this source's index holds ${active.dim}-wide vectors.`,
       );
     }
-    if (vector.every((x) => x === 0)) return [];
+    const vectorLeg = !vector.every((x) => x === 0);
+    const terms = keywordTerms(query);
+    if (!vectorLeg && terms.length === 0) return [];
 
+    // One WHERE for both legs: the organization filter, the record scope and
+    // the metadata filter, each bound as values. ?1 is the query vector.
     const args: unknown[] = [vectorLiteral(vector)];
     const where: string[] = [];
     if (opts.organizationIds !== undefined) {
@@ -520,24 +591,24 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // compared with the stored keys (never put into a JSON path). A
       // `metadata` term holds for a stored string or number equal to an id as
       // text, or a list with such an element; any other value holds for nothing.
-      const terms: string[] = [];
+      const scopeTerms: string[] = [];
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         args.push(JSON.stringify(term.ids));
         const ids = `(SELECT value FROM json_each(?${args.length}))`;
         if (term.kind === 'record') {
-          terms.push(`source_record_id IN ${ids}`);
+          scopeTerms.push(`source_record_id IN ${ids}`);
           continue;
         }
         args.push(term.field);
-        terms.push(
+        scopeTerms.push(
           `EXISTS (SELECT 1 FROM json_each(metadata) AS m WHERE m.key = ?${args.length} AND (` +
             `(m.type IN ${SCOPE_SCALAR_TYPES} AND CAST(m.value AS TEXT) IN ${ids}) OR ` +
             `(m.type = 'array' AND EXISTS (SELECT 1 FROM json_each(m.value) AS e ` +
             `WHERE e.type IN ${SCOPE_SCALAR_TYPES} AND CAST(e.value AS TEXT) IN ${ids}))))`,
         );
       }
-      where.push(`(${terms.join(' OR ')})`);
+      where.push(`(${scopeTerms.join(' OR ')})`);
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       args.push(key, JSON.stringify(value === undefined ? null : value));
@@ -545,22 +616,64 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         `EXISTS (SELECT 1 FROM json_each(metadata) WHERE key = ?${args.length - 1} AND ${METADATA_VALUE_JSON} = json(?${args.length}))`,
       );
     }
+    const inScope = where.length === 0 ? 'TRUE' : where.join(' AND ');
     args.push(topK);
-    const table = quoted(generationTable(opts.source.name, active.generation));
+    const limit = `?${args.length}`;
+    const tableName = generationTable(opts.source.name, active.generation);
+    const table = quoted(tableName);
+
+    const legs: string[] = [];
+    const ctes: string[] = [];
+    if (vectorLeg) {
+      ctes.push(`vec AS (
+        SELECT chunk_id, row_number() OVER (ORDER BY distance, chunk_id) AS pos FROM (
+          SELECT chunk_id, vector_distance_cos(embedding, vector32(?1)) AS distance FROM ${table} WHERE ${inScope}
+        ) WHERE distance < 1 ORDER BY distance, chunk_id LIMIT ${limit})`);
+      legs.push('SELECT chunk_id, pos AS vpos, NULL AS kpos FROM vec');
+    }
+    if (terms.length > 0) {
+      // A term's match: the trigram index for three characters or more, LIKE
+      // over the rows in scope below that.
+      const { map, fts } = keywordNames(tableName);
+      const matches = terms.map((term) => {
+        if ([...term].length >= TRIGRAM_MIN_CHARS) {
+          args.push(ftsPhrase(term));
+          return `(chunk_id IN (SELECT k.chunk_id FROM ${quoted(fts)} JOIN ${quoted(map)} k ON k.id = ${quoted(fts)}.rowid
+                     WHERE ${quoted(fts)} MATCH ?${args.length}))`;
+        }
+        args.push(containsPattern(term));
+        return `(content LIKE ?${args.length} ESCAPE '\\')`;
+      });
+      const idf = matches
+        .map((_, i) => `h${i} * ln(1.0 + (stats.n - stats.d${i} + 0.5) / (stats.d${i} + 0.5))`)
+        .join(' + ');
+      // Passages of equal keyword score are ranked by cosine distance, so the
+      // keyword leg never reorders by chunk id what the vector leg ranks.
+      const distance = vectorLeg ? 'vector_distance_cos(embedding, vector32(?1))' : '0';
+      ctes.push(
+        `cand AS (SELECT chunk_id, ${distance} AS distance, ${matches.map((m, i) => `${m} AS h${i}`).join(', ')}
+           FROM ${table} WHERE ${inScope} AND (${matches.join(' OR ')}))`,
+        `stats AS (SELECT (SELECT count(*) FROM ${table} WHERE ${inScope}) AS n,
+           ${matches.map((_, i) => `coalesce(sum(h${i}), 0) AS d${i}`).join(', ')} FROM cand)`,
+        `kw AS (
+          SELECT chunk_id, row_number() OVER (ORDER BY score DESC, distance, chunk_id) AS pos FROM (
+            SELECT cand.chunk_id, cand.distance, ${idf} AS score FROM cand, stats
+          ) ORDER BY score DESC, distance, chunk_id LIMIT ${limit})`,
+      );
+      legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
+    }
     const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
       const now = await this.generations(opts.source.name);
       if (now.active?.generation !== active.generation) return undefined;
+      if (terms.length > 0) await this.ensureKeywordIndex(tableName);
       return client.execute({
-        sql: `SELECT * FROM (
-                SELECT chunk_id, document_id, source_record_id, content, title, metadata, doc_hash, heading_path,
-                       vector_distance_cos(embedding, vector32(?1)) AS distance
-                  FROM ${table}
-                 ${where.length === 0 ? '' : `WHERE ${where.join(' AND ')}`}
-              ) ranked
-              WHERE distance < 1
-              ORDER BY distance, chunk_id
-              LIMIT ?${args.length}`,
+        sql: `WITH ${ctes.join(',\n')}
+              SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
+                     p.heading_path, u.vpos, u.kpos
+                FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
+                       GROUP BY chunk_id) u
+                JOIN ${table} p ON p.chunk_id = u.chunk_id`,
         args: args as InArgs,
       });
     });
@@ -574,14 +687,14 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       }
       return this.searchAttempt(query, opts, attempt + 1);
     }
-    return result.rows.map((r) => {
+    return fuse(result.rows, topK).map(({ row: r, score }) => {
       const headingPath = parseJson(r.heading_path);
       return {
         chunkId: String(r.chunk_id),
         documentId: String(r.document_id),
         sourceId: opts.source.name,
         ...(r.source_record_id === null ? {} : { sourceRecordId: String(r.source_record_id) }),
-        score: 1 - Number(r.distance),
+        score,
         snippet: String(r.content),
         ...(r.title === null ? {} : { title: String(r.title) }),
         metadata: asRecord(parseJson(r.metadata)),
@@ -612,29 +725,40 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     assertSourceId(ctx.source.name);
     const embedder = this.requireEmbedder();
     await this.ready();
-    await this.queued(client, async () => {
-      const legacy = await this.hasLegacy(ctx.source.name);
-      await this.transaction(async (tx) => {
-        const { active, building } = await this.generations(ctx.source.name, tx);
-        const fits = (g: GenerationRow | undefined) =>
-          g !== undefined && g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
-        // Rebuilt inside the active generation, or the build under way taken up.
-        if (fits(active) || fits(building)) return { commit: true, value: undefined };
-        if (building) {
-          // A build of another fingerprint left unfinished: replaced, one per source.
-          await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, building.generation))}`);
-          await tx.execute({
-            sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
-            args: [ctx.source.name, building.generation],
-          });
-        }
-        // A source that holds nothing takes the fingerprint as its active one;
-        // beside an active generation, or a legacy table, it is built aside.
-        const state = active === undefined && !legacy ? 'active' : 'building';
-        await this.openGeneration(tx, ctx.source.name, index.fingerprint, embedder, state);
-        return { commit: true, value: undefined };
+    // The generation taken is the one this build writes into, lists and
+    // completes; a build that does not begin ends any this adapter had.
+    try {
+      await this.queued(client, async () => {
+        const legacy = await this.hasLegacy(ctx.source.name);
+        const begun = await this.transaction(async (tx) => {
+          const { active, building } = await this.generations(ctx.source.name, tx);
+          const fits = (g: GenerationRow): boolean => g.fingerprint === index.fingerprint && g.dim === embedder.dimensions;
+          // The build under way taken up, or rebuilt inside the active generation.
+          if (building !== undefined && fits(building)) return { commit: true, value: building };
+          if (active !== undefined && fits(active)) return { commit: true, value: active };
+          if (building) {
+            // A build of another fingerprint left unfinished: replaced, one per source.
+            await this.dropGenerationTable(tx, ctx.source.name, building.generation);
+            await tx.execute({
+              sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ? AND generation = ?`,
+              args: [ctx.source.name, building.generation],
+            });
+          }
+          // A source that holds nothing takes the fingerprint as its active one;
+          // beside an active generation, or a legacy table, it is built aside.
+          const state = active === undefined && !legacy ? 'active' : 'building';
+          return { commit: true, value: await this.openGeneration(tx, ctx.source.name, index.fingerprint, embedder, state) };
+        });
+        this.builds.set(ctx.source.name, {
+          generation: begun.generation,
+          createdAt: begun.createdAt,
+          fingerprint: begun.fingerprint,
+        });
       });
-    });
+    } catch (err) {
+      this.builds.delete(ctx.source.name);
+      throw err;
+    }
   }
 
   async completeBuild(ctx: AdapterContext): Promise<void> {
@@ -647,9 +771,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(ctx.source.name, tx);
         const t = quoted(GENERATION_TABLE);
+        // A build this adapter began completes the generation it began and no
+        // other: gone (the source was dropped, in any process) or replaced by
+        // another build, it switches, records and drops nothing.
+        const mine = this.builds.get(ctx.source.name);
+        const target =
+          building?.fingerprint === index.fingerprint ? building : active?.fingerprint === index.fingerprint ? active : undefined;
+        if (mine !== undefined && !isBuildGeneration(target, mine)) throw buildEnded(ctx.source.name);
         if (building?.fingerprint === index.fingerprint) {
           if (active) {
-            await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(ctx.source.name, active.generation))}`);
+            await this.dropGenerationTable(tx, ctx.source.name, active.generation);
             await tx.execute({ sql: `DELETE FROM ${t} WHERE source_id = ? AND generation = ?`, args: [ctx.source.name, active.generation] });
           }
           await tx.execute({
@@ -671,7 +802,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         return { commit: true, value: undefined };
       });
       if (legacy) this.noLegacy.add(ctx.source.name);
-    });
+    }).finally(() => this.builds.delete(ctx.source.name));
   }
 
   /**
@@ -679,7 +810,14 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * write transaction: the table and the row of each generation — the active
    * one and one under construction — and the table of the store's earlier
    * releases, when the source still has one. A source it holds nothing for is
-   * no error.
+   * no error. A table the store did not make under a generation's name is
+   * refused and nothing is removed (`dropGenerationTable`).
+   *
+   * A build of the source under way, in this process or another, does not
+   * hold the drop back: its generation is dropped with the rest, and its next
+   * write, listing or completion is refused `LOCK_CONFLICT` and ends it (see
+   * `writeTarget`), so it never brings the source back. A build that begins
+   * after the drop builds the source from nothing.
    */
   async dropSource(ctx: AdapterContext): Promise<void> {
     const client = this.requireClient();
@@ -691,7 +829,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       await this.transaction(async (tx) => {
         const { active, building } = await this.generations(sourceId, tx);
         for (const g of [active, building]) {
-          if (g !== undefined) await tx.execute(`DROP TABLE IF EXISTS ${quoted(generationTable(sourceId, g.generation))}`);
+          if (g !== undefined) await this.dropGenerationTable(tx, sourceId, g.generation);
         }
         await tx.execute({ sql: `DELETE FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`, args: [sourceId] });
         if (legacy) await tx.execute(`DROP TABLE IF EXISTS ${quoted(legacyTable(sourceId))}`);
@@ -738,7 +876,11 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   /**
    * Make the store ready once: WAL on a file (a store written by two
    * processes without it loses writes), the vector functions proven present,
-   * then the generation table. Until that succeeds the next call tries again.
+   * then the generation table — made, or found with exactly its columns. A
+   * table of that name the store did not make (in a database shared with
+   * object tables, one an object of that name owns) is never taken for it and
+   * never touched: the store is not ready, naming the table. Until that
+   * succeeds the next call tries again.
    */
   private async ready(): Promise<void> {
     if (this.isReady) return;
@@ -768,6 +910,17 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
             'a plain SQLite build has neither.',
         );
       }
+      // `CREATE TABLE IF NOT EXISTS` passes over any table of the name, so the
+      // shape is read first; its indexes would otherwise be added to that table.
+      const shape = await this.shapeOf(client, GENERATION_TABLE);
+      if (shape !== 'none' && shape !== 'generation') {
+        throw notReady(
+          `a table it did not make holds the name of its generation table, '${GENERATION_TABLE}'`,
+          `The database holds a table '${GENERATION_TABLE}' whose columns are not those of this store's generation ` +
+            'table, so the store cannot keep its index generations there; that table is left as it is. Rename or ' +
+            'remove it, or keep the store in a database of its own.',
+        );
+      }
       try {
         for (const statement of generationDdl()) await client.execute(statement);
       } catch (err) {
@@ -783,7 +936,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   /** The active generation of a source and the one under construction. */
   private async generations(sourceId: string, tx?: Transaction): Promise<SourceGenerations> {
     const found = await (tx ?? this.requireClient()).execute({
-      sql: `SELECT generation, fingerprint, recipe_hash, dim, state FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`,
+      sql: `SELECT generation, fingerprint, recipe_hash, dim, state, created_at FROM ${quoted(GENERATION_TABLE)} WHERE source_id = ?`,
       args: [sourceId],
     });
     const out: SourceGenerations = {};
@@ -794,6 +947,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         recipeHash: r.recipe_hash === null ? null : String(r.recipe_hash),
         dim: Number(r.dim),
         state: r.state === 'building' ? 'building' : 'active',
+        createdAt: String(r.created_at),
       };
       out[row.state === 'active' ? 'active' : 'building'] = row;
     }
@@ -820,6 +974,88 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     return tableShape(columns.rows.map((r) => ({ name: r.name, type: r.type })));
   }
 
+  /**
+   * Drops the passage table of one generation of a source, by the name its
+   * generation row gives — only when that table is one of this store's
+   * passage tables (or there is none). A table of any other shape under that
+   * name, one the store did not make in a database shared with object tables,
+   * is refused and never dropped; the transaction `tx` belongs to is rolled
+   * back with the refusal, so nothing of the call is removed.
+   */
+  private async dropGenerationTable(tx: Transaction, sourceId: string, generation: number): Promise<void> {
+    const table = generationTable(sourceId, generation);
+    const shape = await this.shapeOf(tx, table);
+    if (shape !== 'none' && shape !== 'passage') {
+      throw notReady(
+        `a table it did not make, '${table}', holds the name of generation ${generation} of source '${sourceId}'`,
+        `The database holds a table '${table}' that is not one of this store's generation tables, so it is not ` +
+          `dropped, and generation ${generation} of source '${sourceId}' cannot be replaced or removed. Rename or ` +
+          'remove that table, or keep the store in a database of its own.',
+      );
+    }
+    await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
+    await tx.execute(`DROP TABLE IF EXISTS ${quoted(table)}`);
+    for (const statement of dropKeywordIndexDdl(table)) await tx.execute(statement);
+    this.keyed.delete(table);
+  }
+
+  /** The shape of the keyword index of the passage table `table` (`keywordIndexShape`). */
+  private async keywordShapeOf(db: Pick<Client, 'execute'>, table: string): Promise<KeywordIndexShape> {
+    const { map, fts, triggers } = keywordNames(table);
+    const names = [map, fts, ...triggers];
+    const rows = await db.execute({
+      sql: `SELECT type, name, tbl_name, sql FROM sqlite_master WHERE name IN (${names.map(() => '?').join(', ')})`,
+      args: names,
+    });
+    const columns = await db.execute({ sql: 'SELECT name FROM pragma_table_info(?)', args: [map] });
+    return keywordIndexShape(table, rows.rows, columns.rows);
+  }
+
+  /**
+   * Refuses, naming it, an object under one of the keyword-index names of
+   * `table` that this store did not make; the transaction is rolled back with
+   * the refusal, so nothing of the call is removed.
+   */
+  private async assertKeywordIndexOurs(db: Pick<Client, 'execute'>, table: string, sourceId: string, generation: number): Promise<void> {
+    if ((await this.keywordShapeOf(db, table)) !== 'other') return;
+    const { map, fts } = keywordNames(table);
+    throw notReady(
+      `an object it did not make holds a name of the keyword index of generation ${generation} of source '${sourceId}'`,
+      `The database holds a table or trigger under '${map}', '${fts}' or a '${table}-kw-*' trigger that is not this ` +
+        `store's keyword index, so it is not dropped, and generation ${generation} of source '${sourceId}' cannot be ` +
+        'built, replaced or removed. Rename or remove it, or keep the store in a database of its own.',
+    );
+  }
+
+  /**
+   * Makes the keyword index of an active passage table made before the store
+   * kept one, from the rows the table holds, in one write transaction, and
+   * never touches an object of those names the store did not make. Runs inside
+   * the client's queue; known complete tables are skipped.
+   */
+  private async ensureKeywordIndex(table: string): Promise<void> {
+    if (this.keyed.has(table)) return;
+    const client = this.requireClient();
+    if ((await this.keywordShapeOf(client, table)) !== 'complete') {
+      await this.transaction(async (tx) => {
+        // Made by another process between the read and this transaction: kept.
+        const shape = await this.keywordShapeOf(tx, table);
+        if (shape === 'complete') return { commit: false, value: undefined };
+        if (shape === 'other') {
+          throw notReady(
+            `an object it did not make holds a name of the keyword index of '${table}'`,
+            `The database holds a table or trigger under a name of the keyword index of '${table}' that is not this ` +
+              "store's, so the keyword index cannot be made and the table is not searched. Rename or remove it, or " +
+              'keep the store in a database of its own.',
+          );
+        }
+        for (const statement of keywordIndexDdl(table)) await tx.execute(statement);
+        return { commit: true, value: undefined };
+      });
+    }
+    this.keyed.add(table);
+  }
+
   /** Opens the next generation of a source: its row, and its table made afresh. */
   private async openGeneration(
     tx: Transaction,
@@ -840,7 +1076,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // source can share the name (`knowledge_<a>_g1` is source `a_g1`'s), and
     // so can a table the store did not make, in a shared database.
     const shape = await this.shapeOf(tx, table);
-    if (shape === 'legacy' || shape === 'other') {
+    if (shape !== 'none' && shape !== 'passage') {
       throw notReady(
         `a table it did not make holds the name of source '${sourceId}''s next index`,
         `The database holds a table '${table}' that is not one of this store's generation tables, so generation ` +
@@ -848,12 +1084,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           'the store in a database of its own.',
       );
     }
+    await this.assertKeywordIndexOurs(tx, table, sourceId, generation);
     for (const statement of passageTableDdl(table, embedder.dimensions)) await tx.execute(statement);
+    this.keyed.add(table);
     await tx.execute({
       sql: `INSERT INTO ${quoted(GENERATION_TABLE)} (source_id, generation, fingerprint, dim, model, state) VALUES (?, ?, ?, ?, ?, ?)`,
       args: [sourceId, generation, fingerprint ?? null, embedder.dimensions, embedder.model ?? null, state],
     });
-    return { generation, fingerprint: fingerprint ?? null, recipeHash: null, dim: embedder.dimensions, state };
+    // Read back, so the row carries the time it was made (`created_at`): the
+    // unique indexes hold one row of each state per source, this one.
+    return (await this.generations(sourceId, tx))[state]!;
   }
 
   /**
@@ -863,6 +1103,13 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    * embedder's width is not the generation's, or — outside a build — when the
    * source still has a legacy table. A source that holds nothing gets its first
    * generation (`create`), or none. Runs inside the client's queue.
+   *
+   * A call of a build this adapter began (`ctx.reason === 'reindex'`) goes to
+   * the generation that build began and to no other: when it is no longer
+   * active or under construction — the source was dropped, by this process or
+   * another, or another build replaced it — the build is ended and the call
+   * refused `LOCK_CONFLICT`, so a build never opens a generation and never
+   * brings a dropped source back.
    */
   private async writeTarget(
     ctx: AdapterContext,
@@ -876,6 +1123,16 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (embedder.dimensions !== g.dim) throw rebuildRequired(sourceId, false);
       return g;
     };
+    const build = ctx.reason === 'reindex' ? this.builds.get(sourceId) : undefined;
+    if (build !== undefined) {
+      const mine = [building, active].find((g) => isBuildGeneration(g, build));
+      if (mine === undefined) {
+        this.builds.delete(sourceId);
+        throw buildEnded(sourceId);
+      }
+      if (fingerprint !== undefined && mine.fingerprint !== fingerprint) throw rebuildRequired(sourceId, false);
+      return checked(mine);
+    }
     if (building !== undefined && fingerprint !== undefined && building.fingerprint === fingerprint) return checked(building);
     if (active === undefined) {
       if (await this.hasLegacy(sourceId)) throw rebuildRequired(sourceId, building !== undefined);
@@ -912,6 +1169,30 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       tx.close();
     }
   }
+}
+
+/**
+ * Reciprocal rank fusion of the two legs' rows (`vpos`, `kpos`: a row's rank
+ * in each leg, or null): best first, at most `topK`; a tie goes to the better
+ * vector rank, then to the chunk id. The score is the fused sum divided by
+ * that of a row first in both legs.
+ */
+function fuse<R extends Record<string, unknown>>(
+  rows: readonly R[],
+  topK: number,
+): Array<{ row: R; score: number }> {
+  const best = 2 / (RRF_K + 1);
+  const leg = (pos: unknown) => (pos === null || pos === undefined ? 0 : 1 / (RRF_K + Number(pos)));
+  const vectorRank = (row: R) => (row.vpos === null || row.vpos === undefined ? Infinity : Number(row.vpos));
+  return rows
+    .map((row) => ({ row, score: (leg(row.vpos) + leg(row.kpos)) / best }))
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        vectorRank(a.row) - vectorRank(b.row) ||
+        (String(a.row.chunk_id) < String(b.row.chunk_id) ? -1 : 1),
+    )
+    .slice(0, topK);
 }
 
 /** The passages of a document: the service's `chunks`, or the whole text as one. Empty passages are not stored. */
@@ -954,6 +1235,26 @@ function rebuildRequired(sourceId: string, building: boolean): Error {
       'Run a complete reindex of the source. The store builds the new index beside the old one and switches to it ' +
       'when the reindex completes; the old index is then dropped.',
   });
+}
+
+/**
+ * A build's write, listing or completion refused because the generation the
+ * build began is gone: the source was dropped, or another build replaced it.
+ * The same code and status as the pgvector store's.
+ */
+function buildEnded(sourceId: string): Error {
+  return Object.assign(
+    new Error(
+      `The index this build of knowledge source '${sourceId}' began was dropped or replaced while it ran; this build writes and completes nothing more.`,
+    ),
+    {
+      code: LOCK_CONFLICT,
+      status: 409,
+      remedy:
+        'The source was removed (its index dropped), or another build of it under another fingerprint replaced this ' +
+        'one. Start a reindex again if the source is still served and no build of it is running.',
+    },
+  );
 }
 
 /**

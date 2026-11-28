@@ -1,0 +1,122 @@
+---
+title: Ask Question schema — AI Protocol reference
+navTitle: Ask Question
+description: "The ask-question envelope — the structured result a question tool returns when the AI ends its turn on a clarifying question."
+---
+
+{/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
+
+The ask-question envelope — the structured result a question tool returns
+when the AI ends its turn on a clarifying question, and the one shape the
+console reads to draw a clickable question card in the composer's place
+(question-card topic #37871, decisions D1 and D2).
+
+## Who writes it, who reads it
+
+- **Producer:** the question tool in the AI service. It ends the turn the way
+  `ask_which` does (`ctx.requestTurnEnd(reply)`); `reply` is the plain-text
+  question it ended the turn with, which is what model history, the
+  conversation list and evals read. The tool result carries this envelope
+  beside it.
+- **Reader:** the console's chat. It peels the stream's
+  `{ type: 'text', value }` wrapper itself (`parseResultEnvelope` in
+  `@object-ui/plugin-chatbot`), then hands the object to
+  `parseAskQuestionEnvelope`. A `null` answer means "no card": the
+  message renders as the text it already is.
+
+The answer to a question is an ordinary next user message. Nothing here is
+stored as turn state and no endpoint takes an answer (D1).
+
+## What is not in the envelope
+
+- "Type something else" is not an option: the console always offers it.
+- No multi-select in v1: options are mutually exclusive.
+
+## The legacy `asked_which` result
+
+Until the question tool emits this envelope, the one producer in the field
+is `ask_which`'s existing result,
+`{ success: true, status: 'asked_which', question, readings, reply }`.
+`parseAskQuestionEnvelope` reads it as one question whose options are
+the readings, with no description, under the envelope's limits with one
+exception: a reading is a whole sentence-sized phrase, not a short label, so
+it is held to its own limit, `ASK_QUESTION_LIMITS.legacyReadingMaxLength`,
+and the card wraps it. Every other limit is the envelope's, so a legacy
+result the card cannot draw (a reading over its limit, one reading or more
+than four, a duplicate) answers `null` and stays text, as it renders today.
+Stored conversations keep their old results, so this reading stays as long
+as those rows can be shown.
+
+<Callout type="info">
+**Source:** `packages/spec/src/ai/ask-question.zod.ts`
+</Callout>
+
+## TypeScript Usage
+
+```typescript
+import { AskQuestionSchema, AskQuestionEnvelopeSchema, AskQuestionOptionSchema } from '@objectstack/spec/ai';
+import type { AskQuestion, AskQuestionEnvelope, AskQuestionOption } from '@objectstack/spec/ai';
+
+// Validate data
+const result = AskQuestionSchema.parse(data);
+```
+
+---
+
+## AskQuestion
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **header** | `string` | optional | A short name for the question, used to compose a two-question answer |
+| **question** | `string` | ✅ | The question |
+| **options** | `{ label: string; description?: string; recommended?: boolean }[]` | ✅ | Two to four mutually exclusive options; labels unique, at most one recommended |
+
+### Nested Shape: `AskQuestion.options[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | What the option says, and the answer text sent when it is picked. Unique within its question |
+| **description** | `string` | optional | One line under the label saying what picking it means |
+| **recommended** | `boolean` | optional | Marks the option the AI recommends. At most one per question |
+
+
+---
+
+## AskQuestionEnvelope
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `true` | ✅ | Always true: a question is a successful tool result |
+| **status** | `'asked'` | ✅ | `asked`: the turn ended on this question |
+| **reply** | `string` | ✅ | The plain text the turn ended with. The console draws the card only when this equals the last assistant text |
+| **preface** | `string` | optional | One lead-in sentence above the questions |
+| **questions** | `{ header?: string; question: string; options: object[] }[]` | ✅ | One or two questions |
+
+### Nested Shape: `AskQuestionEnvelope.questions[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **header** | `string` | optional | A short name for the question, used to compose a two-question answer |
+| **question** | `string` | ✅ | The question |
+| **options** | `{ label: string; description?: string; recommended?: boolean }[]` | ✅ | Two to four mutually exclusive options; labels unique, at most one recommended |
+
+
+---
+
+## AskQuestionOption
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **label** | `string` | ✅ | What the option says, and the answer text sent when it is picked. Unique within its question |
+| **description** | `string` | optional | One line under the label saying what picking it means |
+| **recommended** | `boolean` | optional | Marks the option the AI recommends. At most one per question |
+
+
+---
+
