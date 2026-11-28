@@ -111,18 +111,6 @@ export interface AuthoringGateHost {
     formRestoreRefusal: (type: string, item: unknown, name: string, binding: string | null) => Promise<Error | undefined>;
     /** [#34776] The automation engine's sealed node-type vocabulary ({@link sealedFlowNodeTypeVocabulary}). */
     sealedFlowNodeTypeVocabulary: () => readonly string[] | undefined;
-    /**
-     * The names of every flow the automation engine holds
-     * ({@link automationFlowNames}). Optional: a host that does not state it
-     * gets no `subflow` / `map` target judgement at the publish gate.
-     */
-    automationFlowNames?: () => Promise<readonly string[] | undefined>;
-    /**
-     * The environment's `sys_metadata` rows, read as the stored-collection
-     * fold reads them. Optional for the same reason; read by
-     * {@link deploymentFlowNamesOf} for the stored flows of every state.
-     */
-    findEnvironmentRows?: ObjectStackProtocolImplementation['findEnvironmentRows'];
 }
 
 /** The body of `ObjectStackProtocolImplementation#restoredBodyDerivation`; the method's docblock there is its contract. */
@@ -354,7 +342,15 @@ export function withTargetFoldedWithout(
  * The members {@link judgeRuntimeAuthoringRules} reads: the host facts and
  * collections every judgement of the shared rules is made against.
  */
-type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'automationFlowNames' | 'engine' | 'findEnvironmentRows' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'>;
+type RuntimeRulesHost = Pick<AuthoringGateHost, 'authoringChannel' | 'engine' | 'foldStoredCollection' | 'hierarchyResolverMounted' | 'orgWallEnforced' | 'resolveSduiManifest' | 'resolveWritePackageScope' | 'rlsMembershipResolverKeys' | 'sealedFlowNodeTypeVocabulary' | 'tenancyPostureInForce'> & {
+    /**
+     * [#35143] The protocol's services registry reader, read per call and
+     * recorded nowhere: {@link deploymentFlowNamesOf} asks its `automation`
+     * service for the flows the engine holds. Optional: a host that does not
+     * state it gets no `subflow` / `map` target judgement at the publish gate.
+     */
+    servicesRegistry?: () => (() => Map<string, any>) | undefined;
+};
 
 /** The body of `ObjectStackProtocolImplementation#assertRuntimeAuthoringRules`; the method's docblock there is its contract. */
 export async function assertRuntimeAuthoringRules(
@@ -730,16 +726,16 @@ export async function judgeRuntimeAuthoringRules(
  *
  * Union only: every source can only make more names resolvable, never fewer.
  * `undefined`, and so no judgement, when the host cannot state one of the
- * sources: no stored-row reader or engine reader, or a read that fails (said
+ * sources: no store or no automation service, or a read that fails (said
  * once, at `warn`). Judging against a partial universe would refuse a call to
  * a flow the missing source holds.
  */
 async function deploymentFlowNamesOf(
-    this: Pick<AuthoringGateHost, 'automationFlowNames' | 'findEnvironmentRows'>,
+    this: Pick<RuntimeRulesHost, 'engine' | 'servicesRegistry'>,
     registered: readonly unknown[],
 ): Promise<readonly string[] | undefined> {
-    if (typeof this.findEnvironmentRows !== 'function' || typeof this.automationFlowNames !== 'function') return undefined;
-    const engineNames = await this.automationFlowNames();
+    if (typeof this.engine?.find !== 'function') return undefined;
+    const engineNames = await automationFlowNames.call({ getServicesRegistry: this.servicesRegistry?.() });
     if (engineNames === undefined) return undefined;
     const names = new Set<string>(engineNames);
     for (const item of registered) {
@@ -748,12 +744,13 @@ async function deploymentFlowNamesOf(
     }
     try {
         for (const type of ['flow', 'flows']) {
-            // [ADR-0131 D6] The environment's rows, every state, as the
-            // stored-collection fold reads them (that fold reads `active` only).
-            const rows = await this.findEnvironmentRows('sys_metadata', {
+            // Every state (the stored-collection fold reads `active` only).
+            // Unfiltered for legacy organization rows: a name too many can
+            // only let a call through, never refuse one.
+            const rows = await this.engine.find('sys_metadata', {
                 where: { type },
                 context: { isSystem: true },
-            });
+            } as never);
             for (const row of (rows ?? []) as Array<{ name?: unknown }>) {
                 if (typeof row?.name === 'string' && row.name !== '') names.add(row.name);
             }
@@ -1064,7 +1061,7 @@ function draftConnectorAdvisories(
  * `undefined` when no automation service is registered (no flow runs here at
  * all) or its read fails; then no `subflow` / `map` call is judged.
  */
-export async function automationFlowNames(
+async function automationFlowNames(
     this: { readonly getServicesRegistry?: () => Map<string, any> },
 ): Promise<readonly string[] | undefined> {
     let automation: unknown;

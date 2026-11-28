@@ -273,7 +273,6 @@ import {
     restoredBodyWriter,
     runAuthoringGate,
     sealedFlowNodeTypeVocabulary,
-    automationFlowNames,
 } from './protocol-authoring-gate.js';
 // [#25467 cut 9] The credential carry-forward and the credential channel lookup.
 import {
@@ -1934,8 +1933,6 @@ export class ObjectStackProtocolImplementation implements
             resolveWritePackageScope: (...a) => this.resolveWritePackageScope(...a),
             rlsMembershipResolverKeys: (...a) => this.rlsMembershipResolverKeys(...a),
             sealedFlowNodeTypeVocabulary: (...a) => this.sealedFlowNodeTypeVocabulary(...a),
-            automationFlowNames: (...a) => this.automationFlowNames(...a),
-            findEnvironmentRows: (...a) => this.findEnvironmentRows(...a),
             tenancyPostureInForce: (...a) => this.tenancyPostureInForce(...a),
             servicesRegistry: () => this.getServicesRegistry,
         };
@@ -2232,15 +2229,6 @@ export class ObjectStackProtocolImplementation implements
             get getServicesRegistry() { return readGetServicesRegistry(); },
         };
         return rlsMembershipResolverKeys.call(host);
-    }
-
-    /** [#35143] The names of every flow the automation engine holds; the body's docblock is its contract. */
-    private automationFlowNames(): Promise<readonly string[] | undefined> {
-        const readGetServicesRegistry = () => this.getServicesRegistry;
-        const host: ThisParameterType<typeof automationFlowNames> = {
-            get getServicesRegistry() { return readGetServicesRegistry(); },
-        };
-        return automationFlowNames.call(host);
     }
 
     /** [#34776] The automation engine's sealed node-type vocabulary; the body's docblock is its contract. */
