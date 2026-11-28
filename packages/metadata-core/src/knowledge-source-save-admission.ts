@@ -48,7 +48,8 @@
  * with the remedy: declare the token, restart, then save
  * ({@link noKnowledgeServiceRefusal}). `503 SERVICE_UNAVAILABLE`: the save
  * needs a service this deployment does not run, the code the knowledge
- * service itself answers for a store that is not mounted. Nothing was written.
+ * service answers at index and search for a store that is not mounted.
+ * Nothing was written.
  *
  * ## Fail direction
  *
