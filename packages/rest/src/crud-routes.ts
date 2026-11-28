@@ -71,7 +71,7 @@ import type {
     DeleteDataRequest,
 } from '@objectstack/spec/api';
 import { zodIssuesToFields } from '@objectstack/spec/api';
-import { validationFailure } from '@objectstack/types';
+import { answerVariesByLanguage, LOCALIZED_ANSWER_VARY, validationFailure } from '@objectstack/types';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { applyDroppedFieldsHeader, logUnexpectedRouteError, mapDataError } from './error-response.js';
 import { earnedWriteDespiteStaleSummary } from './stale-summary-answer.js';
@@ -97,6 +97,19 @@ export interface CrudRouteHost {
     resolveExecCtx: RestServer['resolveExecCtx'];
     enforceAuth: RestServer['enforceAuth'];
     enforceApiAccess: RestServer['enforceApiAccess'];
+}
+
+/**
+ * [#37828] Answer a `/data` READ route's mapped refusal, saying it varies by
+ * `Accept-Language` when its body carries a `userMessage` (the by-id read's
+ * `404 RECORD_NOT_FOUND` is the one a cache stores by default). The token goes
+ * on in the contract's multi-value form, which the hosts APPEND, so a `Vary`
+ * another layer adds keeps its tokens. The rule and its reasons are
+ * `answerVariesByLanguage`'s (`@objectstack/types`).
+ */
+function sendReadRefusal(res: any, mapped: { status: number; body: unknown }): void {
+    if (answerVariesByLanguage(mapped.body)) res.header('Vary', [LOCALIZED_ANSWER_VARY]);
+    res.status(mapped.status).json(mapped.body);
 }
 
 /**
@@ -167,7 +180,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                 } catch (error: any) {
                     const mapped = mapDataError(error, req.params?.object);
                     logUnexpectedRouteError(error, mapped);
-                    res.status(mapped.status).json(mapped.body);
+                    sendReadRefusal(res, mapped);
                 }
             },
             metadata: {
@@ -239,7 +252,7 @@ export function registerCrudEndpoints(this: CrudRouteHost, basePath: string): vo
                     // for any id (`data-record-read-malformed-query-door.test.ts`).
                     const mapped = mapDataError(error, req.params?.object);
                     logUnexpectedRouteError(error, mapped);
-                    res.status(mapped.status).json(mapped.body);
+                    sendReadRefusal(res, mapped);
                 }
             },
             metadata: {
