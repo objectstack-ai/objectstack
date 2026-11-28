@@ -52,7 +52,7 @@ function wrap(node: React.ReactElement) {
   );
 }
 
-const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_header'] };
+const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_page'] };
 
 interface Block {
   /** The registered type, which is what the report must name. */

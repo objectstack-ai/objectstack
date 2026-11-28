@@ -75,7 +75,7 @@ describe('ActionSchema — `undoable: true` is refused where no runtime fulfils 
         ...base,
         type: 'api',
         target: 'lead',
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
         params: [{ field: 'assigned_to', required: true }],
         undoable: true,
         successMessage: 'Lead reassigned.',

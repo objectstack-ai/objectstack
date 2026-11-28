@@ -2376,7 +2376,29 @@ const ja = {
           availableObjects: "利用できるデータオブジェクトを一覧にしてください。",
           recentActivity: "最近の自分の活動を要約してください。",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'このレコードを要約',
+            related: 'このレコードに関連するものは？',
+          },
+          list: {
+            summarize: 'この一覧のレコードを要約',
+            recent: '今週追加されたレコードは？',
+          },
+          dashboard: {
+            explain: 'このダッシュボードは何を示していますか？',
+            standOut: 'このダッシュボードで目立つ点は？',
+          },
+          report: {
+            summarize: 'このレポートを要約',
+            takeaways: 'このレポートの要点は？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'おすすめの質問',
       discussing: "表示中: {{target}}",
       focus: {
         pin: "このレコードについて質問し続ける",
@@ -4135,10 +4157,12 @@ const ja = {
       slugTaken: 'そのスラッグはすでに使用されています。',
       notAllowedToCreate: '新しい組織を作成する権限がありません。',
       organizationLimitReached: '作成できる組織の数が上限に達しました。招待されて参加した組織は上限に含まれません。',
+      unpaidOrganizationLimitReached: 'アカウントごとに所有できる無料の組織の上限に達しています。さらに作成するには、そのうちの一つを有料プランにアップグレードするか、サポートにお問い合わせください。招待されて参加した組織は数えられません。',
       notTheRecipient: 'この招待の宛先はあなたではありません。',
       invitationNotFound: 'この招待はすでに使用済みか、有効期限切れか、取り消されています。承認済みの場合は、組織一覧にその組織があります。',
       unknown: '問題が発生しました。もう一度お試しください。',
     },
+    viewPlans: 'プランを見てアップグレード',
     backToList: "組織一覧に戻る",
     notFound: "組織が見つかりません",
     notFoundDescription: "この組織は存在しないか、アクセス権がありません。",
@@ -5472,6 +5496,7 @@ const ja = {
       toggleFailed: "アプリの状態の切り替えに失敗しました：{{reason}}",
       setDefaultDone: "{{name}} をデフォルトに設定しました",
       setDefaultFailed: "デフォルトアプリの設定に失敗しました：{{reason}}",
+      restoreDefaultFailed: "{{name}} をデフォルトアプリに戻せなかったため、デフォルトではなくなりました：{{reason}}",
       appDeleted: "{{name}} を削除しました",
       deleteFailed: "アプリの削除に失敗しました：{{reason}}",
       nothingToDelete: "{{name}} に削除するものはありません：{{reason}}",

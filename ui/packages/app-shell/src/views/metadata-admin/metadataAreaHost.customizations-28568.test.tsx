@@ -11,10 +11,11 @@
  * only `fetch` and the metadata client are stubbed. Pinned, each against a
  * control:
  *
- *  - the translation list marks the served override "Customized (HotCRM)" and
- *    the "only customizations" filter shows it alone;
- *  - the email-template list holds the pair's item beside the base's, marked
- *    "Added", and an override of ANOTHER member of a name marks no row;
+ *  - the translation list shows the served override as "Modified", naming
+ *    HotCRM's pair, and the source filter's "modified and new" shows it alone
+ *    (the App Studio list's Source, objectstack#37918);
+ *  - the email-template list holds the pair's item beside the base's, shown
+ *    "New", and an override of ANOTHER member of a name marks no row;
  *  - the directory's object tile counts the extension, and the header the base's total;
  *  - a failed read draws no mark, no filter and no number, with the server's sentence;
  *  - a base without a pair is unchanged, and Setup (no area) never reads;
@@ -30,7 +31,7 @@ import '@objectstack/lint';
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
-import { render, screen, cleanup, within, fireEvent } from '@testing-library/react';
+import { render, screen, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 // The switch column waits on `audienceAnchorsOf`'s dynamic import of this exact
 // specifier (see `ResourceListPage.environmentScope-7611.test.tsx`).
@@ -214,37 +215,49 @@ const marksOf = (rowName: string) =>
   within(screen.getByTestId(`metadata-row-${rowName}`))
     .queryAllByTestId('customization-mark')
     .map((m) => `${m.getAttribute('data-kind')}:${m.textContent}`);
+/** objectstack#37918 — the App Studio list's Source badge of a row: its kind and its words. */
+const sourceOf = (rowName: string) => {
+  const badge = within(screen.getByTestId(`metadata-row-${rowName}`).closest('tr') as HTMLElement).queryByTestId(
+    'metadata-row-source',
+  );
+  return badge ? `${badge.getAttribute('data-source-kind')}:${badge.textContent}` : null;
+};
 const customizationReads = () =>
   fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/customizations')).map(([u]) => String(u));
 
 describe('the All metadata lists mark a base\'s customizations (objectstack#28568)', () => {
-  it('the translation list marks the served override "Customized (HotCRM)", and the filter shows it alone', async () => {
+  it('the translation list shows the served override as "Modified" of HotCRM\'s pair, and "modified and new" shows it alone', async () => {
     mountList(area(BASE), 'translation', `?package=${BASE}`);
-    const only = await screen.findByTestId('metadata-only-customizations');
     // The grid draws its rows once its table is ready (objectstack#36897).
     await screen.findByTestId('metadata-row-crm_en');
-    expect(marksOf('crm_en')).toEqual([`customized:${tFormat('engine.customizationMark.customized', 'en-US', { baseName: 'HotCRM' })}`]);
-    expect(marksOf('crm_en')).toEqual(['customized:Customized (HotCRM)']);
-    // CONTROL: the base's item the read does not list carries no mark.
-    expect(marksOf('crm_de')).toEqual([]);
+    await vi.waitFor(() => expect(sourceOf('crm_en')).toBe(`modified:${t('engine.list.source.modified', 'en-US')}`));
+    const badge = within(screen.getByTestId('metadata-row-crm_en').closest('tr') as HTMLElement).getByTestId('metadata-row-source');
+    expect(badge).toHaveAttribute(
+      'title',
+      tFormat('engine.customizationMark.customizedTitle', 'en-US', { baseName: 'HotCRM', pair: PAIR }),
+    );
+    // CONTROL: the base's item the read does not list is system-shipped.
+    expect(sourceOf('crm_de')).toBe(`system:${t('engine.list.source.system', 'en-US')}`);
     // Another package's row stays out of the base's list, as before.
     expect(screen.queryByTestId('metadata-row-plain_en')).toBeNull();
+    // "Only customizations" is the source filter's "modified and new" here.
+    expect(screen.queryByTestId('metadata-only-customizations')).toBeNull();
+    cleanup();
 
-    expect(only).toHaveTextContent(tFormat('engine.list.customizations.only', 'en-US', { marked: 1 }));
-    fireEvent.click(only);
-    expect(screen.getByTestId('metadata-row-crm_en')).toBeInTheDocument();
-    expect(screen.queryByTestId('metadata-row-crm_de')).toBeNull();
-    fireEvent.click(only);
-    expect(screen.getByTestId('metadata-row-crm_de')).toBeInTheDocument();
+    mountList(area(BASE), 'translation', `?package=${BASE}&source=runtime`);
+    await screen.findByTestId('metadata-row-crm_en');
+    await vi.waitFor(() => expect(screen.queryByTestId('metadata-row-crm_de')).toBeNull());
+    expect(screen.getByTestId('metadata-source-filter')).toHaveTextContent(
+      tFormat('engine.list.sourceFilter.changed', 'en-US', { count: 1 }),
+    );
   });
 
-  it('the email-template list holds the pair\'s item beside the base\'s, marked "Added"', async () => {
+  it('the email-template list holds the pair\'s item beside the base\'s, shown "New"', async () => {
     mountList(area(BASE), 'email_template', `?package=${BASE}`);
-    await screen.findByTestId('metadata-only-customizations');
     await screen.findByTestId('metadata-row-renewal_notice');
-    expect(marksOf('renewal_notice')).toEqual([`added:${t('engine.customizationMark.added', 'en-US')}`]);
+    await vi.waitFor(() => expect(sourceOf('renewal_notice')).toBe(`new:${t('engine.list.source.new', 'en-US')}`));
     // The read overrides `welcome` in zh-CN only: the en member is the base's own.
-    expect(marksOf('welcome')).toEqual([]);
+    expect(sourceOf('welcome')).toBe(`system:${t('engine.list.source.system', 'en-US')}`);
   });
 
   it('a failed read draws no mark and no filter, and says the server\'s sentence', async () => {
@@ -374,8 +387,9 @@ describe('objectstack#37236 — "customized" is overrides + extensions, never an
     expect(screen.getByTestId('ordered')).toHaveTextContent(/^arranged_en$/);
   });
 
-  it('CONTROL: for HotCRM, whose pair overrides, the same ‹ › names keep only the customized row', async () => {
-    mountOrdered(area(BASE), 'translation', '?customized=1');
+  it('CONTROL: for HotCRM, whose pair overrides, the ‹ › names under "modified and new" keep only the customized row', async () => {
+    // objectstack#37918 — the App Studio list folds "only customizations" into its source filter.
+    mountOrdered(area(BASE), 'translation', '?source=runtime');
     await vi.waitFor(() => expect(screen.getByTestId('ordered')).toHaveAttribute('data-status', 'ready'));
     expect(screen.getByTestId('ordered')).toHaveTextContent(/^crm_en$/);
   });

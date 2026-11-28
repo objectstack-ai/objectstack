@@ -21,7 +21,7 @@
 - 失效单向:exit 0(是祖先)自证,任何检出里都作数;只有 exit 1 要控制腿。
 - 还没发布、不在 main 上、`Blocked-by` 已落地这些前提核验,要的恰是 exit 1。
 - 阴性读数按两条腿写:同一检出、同一目标 ref 上再跑一个已知在其历史里的 commit。
-- 它必须答 exit 0;否则阴性作废,`git fetch --deepen` / `--unshallow` 到控制腿转 0 再重读。
+- 它必须答 exit 0;否则阴性作废,加深到控制腿转 0 重读;现读 `git-history.mjs ancestor`。
 - ⛔ 控制腿别挑浅窗内的近亲:控制 commit 至少与被测那个同深;两条腿的退出码都进报告。
 - `--is-shallow-repository` 是便宜的触发器不是判据,判据是控制腿。
 

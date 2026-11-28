@@ -9,7 +9,7 @@
 /**
  * `page:header` — ADR-0066 D4 `requiredPermissions` gate (framework#3923).
  *
- * `record_header` / `record_more` actions render through THIS component, which
+ * `record` / `record_page` actions render through THIS component, which
  * filters its own action list rather than calling
  * `ActionEngine.getActionsForLocation`. So the engine's capability gate never
  * ran on the one surface those locations exist on: an action declaring a
@@ -39,8 +39,8 @@ const schema = {
   type: 'page:header',
   title: 'Invoice',
   actions: [
-    { name: 'gated', locations: ['record_header'], label: 'Set Parallel Reviewers', type: 'api', requiredPermissions: ['ehr_probe_capability'] },
-    { name: 'plain', locations: ['record_header'], label: 'Print', type: 'api' },
+    { name: 'gated', locations: ['record_page'], label: 'Set Parallel Reviewers', type: 'api', requiredPermissions: ['ehr_probe_capability'] },
+    { name: 'plain', locations: ['record_page'], label: 'Print', type: 'api' },
   ],
 };
 
@@ -71,7 +71,7 @@ describe('page:header — ADR-0066 D4 capability gate (#3923)', () => {
           schema={{
             type: 'page:header',
             title: 'Invoice',
-            actions: [{ name: 'both', locations: ['record_header'], label: 'Needs Both', type: 'api', requiredPermissions: ['a', 'b'] }],
+            actions: [{ name: 'both', locations: ['record_page'], label: 'Needs Both', type: 'api', requiredPermissions: ['a', 'b'] }],
           }}
         />
       </ActionProvider>,

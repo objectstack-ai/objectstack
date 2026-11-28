@@ -2729,7 +2729,29 @@ const zhHant = {
           availableObjects: '列出可用的資料物件。',
           recentActivity: '總結我的最近動態。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '總結這條記錄',
+            related: '這條記錄關聯了哪些內容？',
+          },
+          list: {
+            summarize: '總結這個列表裡的記錄',
+            recent: '本週新增了哪些記錄？',
+          },
+          dashboard: {
+            explain: '這個儀表盤展示了什麼？',
+            standOut: '這個儀表盤裡有什麼值得注意的？',
+          },
+          report: {
+            summarize: '總結這份報表',
+            takeaways: '這份報表的要點是什麼？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推薦問題',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -4387,10 +4409,12 @@ const zhHant = {
       slugTaken: '該標識已被佔用。',
       notAllowedToCreate: '您無權建立新組織。',
       organizationLimitReached: '您建立的組織數量已達上限。被邀請加入的組織不計入此上限。',
+      unpaidOrganizationLimitReached: '你擁有的免費組織已達到每個賬號的上限。要再建立組織，請把其中一個升級為付費套餐，或聯絡支援。被邀請加入的組織不計入。',
       notTheRecipient: '您不是該邀請的收件人。',
       invitationNotFound: '該邀請已被使用、已過期或已撤銷。如果您已接受過該邀請，可在組織列表中找到該組織。',
       unknown: '出了點問題，請重試。',
     },
+    viewPlans: '檢視套餐並升級',
     backToList: '返回組織列表',
     notFound: '未找到組織',
     notFoundDescription: '該組織不存在，或您沒有訪問權限。',
@@ -5516,6 +5540,7 @@ const zhHant = {
       toggleFailed: '切換應用狀態失敗：{{reason}}',
       setDefaultDone: '{{name}} 已設為預設',
       setDefaultFailed: '設定預設應用失敗：{{reason}}',
+      restoreDefaultFailed: '無法將 {{name}} 恢復為預設應用，因此它已不再是預設應用：{{reason}}',
       appDeleted: '{{name}} 已刪除',
       deleteFailed: '刪除應用失敗：{{reason}}',
       nothingToDelete: '{{name}} 無可刪除：{{reason}}',

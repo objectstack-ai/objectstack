@@ -2313,15 +2313,27 @@ export class ProtocolPackageCommitsFacet {
         // save and the delete ask ({@link packagelessHolderRefusal}, its
         // disabled-holders judgment only), after the D11 close above, and is
         // refused with the enable as the remedy, nothing written.
-        if (request.packageId === undefined && rollbackPackageId === null) {
+        //
+        // [#37851 ruling A] Whether or not a package-unbound row is stored
+        // now: with none stored but its history kept, the restore inserted
+        // the package-unbound row again, the same customization, so it is
+        // refused with the same remedy. And a rollback naming no package that
+        // restores a disabled package's OWN row (the binding read above names
+        // it) wrote that row, which the next enable served, while the bare
+        // save of the item is refused: it is asked the judgment's first state
+        // ({@link disabledHoldersOnlyRefusal}, the `?package=` remedy, which
+        // the rollback naming that package reaches).
+        if (request.packageId === undefined) {
             const active = await host.packagelessAddress(singularType, request.name, member, 'active');
-            if (active.unbound) {
-                const holderRefusal = packagelessHolderRefusal(
-                    host, 'rollback', request.type, singularType, request.name, member,
-                    { candidates: active.candidates, unbound: true }, 'disabled-holders',
-                );
-                if (holderRefusal) throw holderRefusal;
-            }
+            const holderRefusal = packagelessHolderRefusal(
+                host, 'rollback', request.type, singularType, request.name, member,
+                {
+                    candidates: [...new Set([...active.candidates, ...(rollbackPackageId !== null ? [rollbackPackageId] : [])])],
+                    unbound: rollbackPackageId === null,
+                },
+                'disabled-holders',
+            );
+            if (holderRefusal) throw holderRefusal;
         }
         // [ADR-0146 D2] A rollback of the base's paired `.custom` row is the
         // pair's declared override, as its save is: it edits no managed item,

@@ -39,7 +39,7 @@ const VENDOR = {
   name: 'crm_lead_convert',
   label: 'Convert',
   objectName: OBJECT,
-  locations: ['record_header'],
+  locations: ['record_page'],
   type: 'script',
   body: { language: 'expression', source: 'true' },
 };
@@ -49,7 +49,7 @@ const KEPT = {
   name: 'crm_lead_action_7',
   label: 'Qualify',
   objectName: OBJECT,
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   operation: 'update',
   patch: { status: 'qualified' },
 };

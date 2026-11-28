@@ -197,7 +197,7 @@ export interface RelatedListProps {
    */
   onRowClick?: (row: any, event?: any, rows?: readonly any[]) => void;
   /**
-   * Child-object row actions (`locations` `list_item`, or `record_related`
+   * Child-object row actions (`locations` `record_row`, or `record_related`
    * inside a parent record — objectui#11270), already localized by the host.
    * Rendered in each row's overflow menu alongside Edit/Delete.
    */
@@ -205,7 +205,7 @@ export interface RelatedListProps {
   /** Execute one of {@link rowActions} against the clicked row. */
   onRowAction?: (action: RelatedRowActionDef, row: any) => void | Promise<void>;
   /**
-   * Child-object list actions (`locations: ['list_toolbar']`), already
+   * Child-object list actions (`locations: ['list']`), already
    * localized by the host. Rendered as header buttons next to Add/New —
    * e.g. `invite_user` on an organization's Invitations list.
    */
@@ -485,14 +485,14 @@ function dropRedactedColumns<T>(cols: T[], redacted: ReadonlySet<string>): T[] {
 }
 
 /**
- * One `list_toolbar` action button on a related-list header (e.g. "Invite
+ * One `list` action button on a related-list header (e.g. "Invite
  * User" on an organization's Invitations list). Extracted into its own
  * component so the action's `visible` CEL predicate can be evaluated with a
  * hook (`useCondition`) without violating the rules-of-hooks inside a `.map()`.
  *
  * The SAME bridge (`RelatedRecordActionsBridge.deriveActions`) feeds both a
- * child object's row actions (`list_item`) and these header toolbar actions
- * (`list_toolbar`), spreading each action's `visible` predicate through
+ * child object's row actions (`record_row`) and these header toolbar actions
+ * (`list`), spreading each action's `visible` predicate through
  * untouched. The row path already honors `visible` (via the data-table's
  * `DataTableRowActionItem`); this brings the toolbar path to parity so e.g.
  * `invite_user` (`visible: "features.organization != false"`) hides when its
@@ -1525,7 +1525,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
   const perms = usePermissions();
 
   /**
-   * [ADR-0066 D4 / objectui#9782] The `list_toolbar` set this header may draw,
+   * [ADR-0066 D4 / objectui#9782] The `list` set this header may draw,
    * with `requiredPermissions` mirrored as a UI hide.
    *
    * `@objectstack/spec` declares the key as "enforced with 403 on every call the
@@ -1533,7 +1533,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * dispatches, and **mirrored as a UI hide**" — a declared same-origin
    * `type: api` action included (ADR-0066 D4 as amended). The
    * same bridge (`RelatedRecordActionsBridge.deriveActions`) feeds the child
-   * object's `list_item` actions and these header buttons, and it filters on
+   * object's `record_row` actions and these header buttons, and it filters on
    * `locations` alone — so before this the toolbar honoured `visible` and
    * nothing else, and an action declaring a capability the caller lacks
    * rendered one surface over from `EnvironmentListToolbar`, which hides it.
@@ -3831,7 +3831,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
         // objectstack#35892 — cell editing as on the list page
         // (objectstack#35683): where the reader may edit the child object.
         ...(tabList ? { editable: tabInlineEdit } : {}),
-        // The host's row actions (`list_item`, and `record_related` inside a
+        // The host's row actions (`record_row`, and `record_related` inside a
         // parent record), already localized — the non-author host key the
         // console's object page hands the same grid. A dispatch from them is
         // routed back to `onRowAction` (`enlargedGridActions`).
@@ -3915,7 +3915,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
           rowEditPredicates,
           rowDeletePredicates,
           onRowClick: handleRowClick,
-          // Child-object row actions (`list_item`, or `record_related` inside a
+          // Child-object row actions (`record_row`, or `record_related` inside a
           // parent record) rendered in the same overflow menu, dispatched with
           // the clicked row as target.
           rowActionDefs: hasCustomRowActions ? rowActions : undefined,
@@ -4732,7 +4732,7 @@ export const RelatedList: React.FC<RelatedListProps> = ({
             )}
           </div>
           <div className="flex items-center gap-1 shrink-0">
-            {/* Child-object list_toolbar actions (e.g. Invite User) — the
+            {/* Child-object list actions (e.g. Invite User) — the
                 related-list equivalent of the object list's toolbar buttons.
                 Rendered before Add/New so the domain action leads. */}
             {onToolbarAction && permittedToolbarActions.map((a) => (

@@ -47,7 +47,7 @@
  * carries the same severity: **error**. It is a genuine dead reference, and —
  * unlike an object name — there is no cross-package escape hatch to soften it
  * with. The runtime ships NO built-in action names (there is no
- * `BUILTIN_ACTIONS` registry; `list_toolbar`/`list_item` are *locations*, not
+ * `BUILTIN_ACTIONS` registry; `list`/`record_row` are *locations*, not
  * actions), so a name resolving nowhere is dead, full stop.
  *
  * Scope note: this rule asks only "is this action defined ANYWHERE in the
@@ -124,8 +124,9 @@ function collectActionNames(stack: AnyRec): Set<string> {
  * What a `record:related_list` draws for an authored action placed at each
  * location of the spec's vocabulary (`ACTION_LOCATIONS`), or `null` where it
  * draws nothing. Read at objectui's `relatedListActions.ts`
- * (`placeAuthoredRelatedListActions`): `list_toolbar` is a header button;
- * `list_item` and `record_related` are a row-menu item. The list renders only
+ * (`placeAuthoredRelatedListActions`): `list` is a header button;
+ * `record`, `record_row` and `record_related` are a row-menu item (`record`
+ * covers each list row). The list renders only
  * inside a parent record, which is the one scope `record_related` names.
  *
  * Keyed by `ActionLocation`, so the vocabulary is read from the spec and never
@@ -133,10 +134,10 @@ function collectActionNames(stack: AnyRec): Set<string> {
  * classified here, instead of leaving a stale pair that silently refuses it.
  */
 const RELATED_LIST_DRAWS: Readonly<Record<ActionLocation, string | null>> = {
-  list_toolbar: 'a header button',
-  list_item: 'a row-menu item',
-  record_header: null,
-  record_more: null,
+  list: 'a header button',
+  record: 'a row-menu item',
+  record_page: null,
+  record_row: 'a row-menu item',
   record_related: 'a row-menu item',
   record_section: null,
 };
@@ -146,10 +147,23 @@ const RELATED_LIST_LOCATIONS: readonly ActionLocation[] = ACTION_LOCATIONS.filte
   (location) => RELATED_LIST_DRAWS[location] !== null,
 );
 
-/** `` `list_toolbar` (a header button), … `` — for a hint. */
-const RELATED_LIST_PLACEMENTS = RELATED_LIST_LOCATIONS.map(
-  (location) => `\`${location}\` (${RELATED_LIST_DRAWS[location]})`,
-).join(', ');
+/**
+ * `` `list` (a header button), `record`, `record_row` or `record_related` (a
+ * row-menu item) `` — for a hint: locations that draw the same thing share
+ * one parenthesis, in the spec's own order, so the one-line fix stays short.
+ */
+const RELATED_LIST_PLACEMENTS = (() => {
+  const groups = new Map<string, ActionLocation[]>();
+  for (const location of RELATED_LIST_LOCATIONS) {
+    const draws = RELATED_LIST_DRAWS[location]!;
+    groups.set(draws, [...(groups.get(draws) ?? []), location]);
+  }
+  return [...groups].map(([draws, locations]) => {
+    const names = locations.map((l) => `\`${l}\``);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}` : names[0];
+    return `${list} (${draws})`;
+  }).join(', ');
+})();
 
 /**
  * The actions a related list resolves an id against, for each object this
@@ -491,7 +505,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
       // refused by the spec on its own, not a reference for this rule to
       // resolve — so only the string elements are checked, each at its
       // AUTHORED index. The header draws an authored action only when it is
-      // placed at `record_header` or `record_more`.
+      // placed at `record` or `record_page`.
       if (type === 'page:header' && Array.isArray(props.actions)) {
         const ids = props.actions as unknown[];
         for (let hi = 0; hi < ids.length; hi++) {
@@ -502,7 +516,7 @@ export function validateActionNameRefs(stack: AnyRec): ActionNameRefFinding[] {
             where,
             `${path}.properties.actions[${hi}]`,
             'Page-header actions',
-            'with `record_header` or `record_more` in its `locations`',
+            'with `record` or `record_page` in its `locations`',
             'the header draws no button for it',
           );
         }

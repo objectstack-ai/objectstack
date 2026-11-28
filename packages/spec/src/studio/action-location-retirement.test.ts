@@ -17,7 +17,7 @@ import {
 //     `commandPalette`), consumed only by `ActionContributionSchema.location`
 //     inside a Studio plugin manifest;
 //   ./ui     — the platform-canonical vocabulary for where an action renders
-//     in a RUNNING APP's UI (`list_toolbar`, …, `record_section`; 7 values at
+//     in a RUNNING APP's UI (`list`, …, `record_section`; 7 values at
 //     the time of this rename, 6 since #6888 retired `global_nav`), whose
 //     docblock declares it "single source of truth for the whole platform".
 //
@@ -76,7 +76,7 @@ describe('studio ActionLocation dual-source retirement', () => {
     //    declared in ui/action.zod.ts. Not just "same declaration everywhere"
     //    — NO other entry may export the bare name at all. A re-export from
     //    ./studio would share the declaration (green to the dual-source gate)
-    //    while telling Studio plugin authors that `list_toolbar` & co. are
+    //    while telling Studio plugin authors that `list` & co. are
     //    valid manifest contribution locations — the C14/C15 lesson: a
     //    re-export can lie about the domain even when the symbol is honest.
     for (const name of ['ActionLocationSchema', 'ActionLocation']) {
@@ -109,14 +109,14 @@ describe('studio ActionLocation dual-source retirement', () => {
     }
     // The two vocabularies were disjoint precisely here — the app-UI values
     // must NOT leak into the Studio contribution enum:
-    expect(() => studio.ActionContributionLocationSchema.parse('list_toolbar')).toThrow();
+    expect(() => studio.ActionContributionLocationSchema.parse('list')).toThrow();
     expect(() => studio.ActionContributionLocationSchema.parse('record_section')).toThrow();
 
     // ui side — untouched by THIS rename, and still the app-UI vocabulary
     // (`global_nav` left it later and separately, #6888).
     expect('ActionLocationSchema' in ui).toBe(true);
     expect('ACTION_LOCATIONS' in ui).toBe(true);
-    for (const loc of ['list_toolbar', 'record_header', 'record_section']) {
+    for (const loc of ['list', 'record_page', 'record_section']) {
       expect(() => ui.ActionLocationSchema.parse(loc)).not.toThrow();
     }
     expect(() => ui.ActionLocationSchema.parse('toolbar')).toThrow();
@@ -137,6 +137,6 @@ describe('studio ActionLocation dual-source retirement', () => {
     // The authored VALUE domain did not move an inch with the TS rename; the
     // SAME document differing only in this one value stays illegal (so this
     // negative cannot pass for an unrelated reason):
-    expect(() => StudioPluginManifestSchema.parse(manifestWith('list_toolbar'))).toThrow();
+    expect(() => StudioPluginManifestSchema.parse(manifestWith('list'))).toThrow();
   });
 });

@@ -72,4 +72,14 @@ export {
   knowledgeSetupNavItem,
   KNOWLEDGE_SETUP_NAV_BUNDLE_ID,
 } from './knowledge-settings-contribution.js';
-export type { KnowledgeSettingsContribution } from './knowledge-settings-contribution.js';
+export type {
+  KnowledgeSettingsContribution,
+  KnowledgeSettingsContributionOptions,
+} from './knowledge-settings-contribution.js';
+export { KNOWLEDGE_RECORD_SYNC_QUEUE, RECORD_SYNC_RETRY_DEFAULTS } from './knowledge-record-sync-queue.js';
+export type {
+  KnowledgeRecordSyncMessage,
+  KnowledgeRecordSyncOutcome,
+  KnowledgeRecordSyncReason,
+  KnowledgeRecordSyncRetry,
+} from './knowledge-record-sync-queue.js';

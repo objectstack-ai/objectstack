@@ -81,7 +81,7 @@ const newTabAction = (name: string, label: string) => ({
   target: TARGET,
   opensInNewTab: true,
   newTabUrl: '/export/{recordId}',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 const urlAction = (name: string, label: string) => ({
@@ -89,7 +89,7 @@ const urlAction = (name: string, label: string) => ({
   label,
   type: 'url',
   target: `https://example.com/${name}`,
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 async function mountRecordPage(actions: unknown[]) {

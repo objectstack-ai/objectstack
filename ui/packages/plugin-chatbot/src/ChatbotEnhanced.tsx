@@ -171,6 +171,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       acceptedFileTypes = 'image/*,.pdf,.doc,.docx,.txt,.csv,.tsv,.xlsx,.xlsm',
       maxFileSize = 10 * 1024 * 1024,
       suggestions,
+      renderEmptyState,
       labels,
       models,
       selectedModelId,
@@ -537,6 +538,24 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
 
     const promptInputWrapRef = React.useRef<HTMLDivElement>(null);
 
+    // objectstack#37862 — a host's empty conversation offers suggestions that
+    // fill the composer rather than send: the text replaces what the box holds
+    // and the caret lands at its end, so the user finishes the question.
+    const fillComposer = React.useCallback((text: string) => {
+      const textarea = promptInputWrapRef.current?.querySelector('textarea');
+      if (!textarea) return;
+      // Through the prototype's setter, so React's value tracker sees a change
+      // and the textarea's `onChange` (the host's `onInputChange`) runs.
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(textarea, text);
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.focus();
+      textarea.setSelectionRange(text.length, text.length);
+    }, []);
+    const emptyStateActions = React.useMemo(
+      () => ({ send: handleSuggestionClick, fill: fillComposer }),
+      [handleSuggestionClick, fillComposer],
+    );
+
     // Restore the composer text when a send was REJECTED before reaching the
     // model (rate-limit / network — `notSent`). The composer's own form.reset
     // clears the box optimistically and the optimistic user bubble was rolled
@@ -666,7 +685,9 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
                 : 'px-4 py-3',
             )}
           >
-            {messages.length === 0 ? (
+            {messages.length === 0 && renderEmptyState ? (
+              <div data-testid="chat-empty-state-host">{renderEmptyState(emptyStateActions)}</div>
+            ) : messages.length === 0 ? (
               <ConversationEmptyState className="gap-3 px-0 py-8">
                 <div className="flex size-9 items-center justify-center rounded-md bg-muted/70 text-muted-foreground">
                   {assistantAvatarUrl ? (

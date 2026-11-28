@@ -813,9 +813,9 @@ function useDataTableRowMenuPlan(schema: DataTableSchema, row: any): DataTableRo
    *
    * This surface filters its own action list instead of routing through
    * `ActionEngine.getActionsForLocation`, so the engine's gate never reached
-   * it. That left `requiredPermissions` INERT on every `list_item` action a
+   * it. That left `requiredPermissions` INERT on every `record_row` action a
    * data-table renders — the record page's related-list panel above all, which
-   * feeds a child object's `list_item` actions in as `rowActionDefs`
+   * feeds a child object's `record_row` actions in as `rowActionDefs`
    * (`RelatedRecordActionsBridge`). The record surface one level up gates the
    * same declaration correctly, off the SAME `<ActionProvider>` this hook
    * reads: the capability was on the page all along, this renderer just never
@@ -937,7 +937,7 @@ const DataTableRowMenuItems: React.FC<{
       />
     )}
     {/* Child-object custom actions (e.g. a related list surfacing the
-        child's `list_item` actions). Dispatched with the clicked row.
+        child's `record_row` actions). Dispatched with the clicked row.
         Separators are placed off the SURVIVING groups, so a suppressed
         group can no longer leave a stray rule behind. */}
     {plan.custom.length > 0 && plan.edit && <DropdownMenuSeparator />}

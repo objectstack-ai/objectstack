@@ -60,9 +60,9 @@ import { toast } from '../../../ui/sonner';
 
 /** Three ordinary toolbar actions — enough to fill the desktop `maxVisible: 3`. */
 const FILLERS = [
-  { name: 'a1', label: 'a1', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a2', label: 'a2', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a3', label: 'a3', type: 'api', locations: ['list_toolbar'] },
+  { name: 'a1', label: 'a1', type: 'api', locations: ['list'] },
+  { name: 'a2', label: 'a2', type: 'api', locations: ['list'] },
+  { name: 'a3', label: 'a3', type: 'api', locations: ['list'] },
 ];
 
 /**
@@ -74,7 +74,7 @@ const CREATE = {
   name: 'create_environment',
   label: 'Create Environment',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 // See action-bodyExtra-forward.test.tsx for why this is not
@@ -100,7 +100,7 @@ function Bar({ actions }: { actions: any[] }) {
   const C = ComponentRegistry.get('action:bar');
   if (!C) throw new Error('action:bar is not registered');
   // eslint-disable-next-line react-hooks/static-components -- ComponentRegistry.get returns a registered renderer (stable reference), not a component created during render
-  return <C schema={{ type: 'action:bar', location: 'list_toolbar', actions }} />;
+  return <C schema={{ type: 'action:bar', location: 'list', actions }} />;
 }
 
 function renderBar(actions: any[]) {
@@ -187,7 +187,7 @@ describe('action:menu consumes autoTrigger for the actions it receives (#4162)',
   it('an overflow action WITHOUT the flag is untouched — nothing runs on mount', async () => {
     // The refusal half. "The menu executes what it is given" would pass every
     // assertion above and fire this one.
-    renderBar([...FILLERS, CREATE, { name: 'a5', label: 'a5', type: 'api', locations: ['list_toolbar'] }]);
+    renderBar([...FILLERS, CREATE, { name: 'a5', label: 'a5', type: 'api', locations: ['list'] }]);
 
     await new Promise((r) => setTimeout(r, 0));
     expect(api).not.toHaveBeenCalled();
@@ -206,7 +206,7 @@ describe('action:menu consumes autoTrigger for the actions it receives (#4162)',
             <C
               schema={{
                 type: 'action:bar',
-                location: 'list_toolbar',
+                location: 'list',
                 actions: [FILLERS[0]],
                 systemActions: [{ ...CREATE, autoTrigger: true }],
               }}
@@ -226,7 +226,7 @@ describe('action:menu consumes autoTrigger for the actions it receives (#4162)',
     renderBar([
       ...FILLERS,
       { ...CREATE, autoTrigger: true },
-      { name: 'sync_now', label: 'Sync now', type: 'api', locations: ['list_toolbar'], autoTrigger: true },
+      { name: 'sync_now', label: 'Sync now', type: 'api', locations: ['list'], autoTrigger: true },
     ]);
 
     await waitFor(() => expect(api).toHaveBeenCalledTimes(2));
@@ -271,7 +271,7 @@ describe('what suppresses an auto-trigger, and what does not (#4162)', () => {
             <C
               schema={{
                 type: 'action:bar',
-                location: 'list_toolbar',
+                location: 'list',
                 visible: NEVER,
                 actions: [
                   { ...CREATE, name: 'inline_flagged', label: 'inline', autoTrigger: true },

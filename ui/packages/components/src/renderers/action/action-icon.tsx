@@ -470,7 +470,7 @@ ComponentRegistry.register('icon', ActionIconRenderer, {
       type: 'array',
       of: 'string',
       description:
-        'The placements the action declares (`list_toolbar`, `list_item`, `record_header`, …). A `script` or `flow` action declared record-scoped (`list_item`, `record_header`, `record_more` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
+        'The placements the action declares (`list`, `record_row`, `record_page`, …). A `script` or `flow` action declared record-scoped (`record_row`, `record`, `record_page` or `record_section`) refuses to run when no record or single selection is in scope, instead of running without one',
     },
     {
       name: 'toast',

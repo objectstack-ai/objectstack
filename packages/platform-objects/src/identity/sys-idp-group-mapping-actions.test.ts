@@ -62,7 +62,7 @@ function offered(source: string, user: Record<string, unknown>): string {
 describe('sys_idp_group_mapping: Map and Delete reach the platform-admin mounts', () => {
   it('Map SSO Group POSTs the save from the list toolbar, naming the provider, with the body keys the save reads', () => {
     const map = action('map_sso_group');
-    expect(map).toMatchObject({ type: 'api', method: 'POST', target: SET_ROUTE, locations: ['list_toolbar'] });
+    expect(map).toMatchObject({ type: 'api', method: 'POST', target: SET_ROUTE, locations: ['list'] });
     const params = paramsOf(map);
     expect(params.map((p) => p.name)).toEqual(['providerId', 'groupExternalId', 'groupDisplayName', 'permissionSet']);
     // The source and the set are required; the group is one of two, judged by the door.
@@ -71,7 +71,7 @@ describe('sys_idp_group_mapping: Map and Delete reach the platform-admin mounts'
 
   it('Map SCIM Group POSTs the save from the list toolbar, naming the connection, with the body keys the save reads', () => {
     const map = action('map_scim_group');
-    expect(map).toMatchObject({ type: 'api', method: 'POST', target: SET_ROUTE, locations: ['list_toolbar'] });
+    expect(map).toMatchObject({ type: 'api', method: 'POST', target: SET_ROUTE, locations: ['list'] });
     const params = paramsOf(map);
     expect(params.map((p) => p.name)).toEqual(['connectionId', 'groupExternalId', 'groupDisplayName', 'permissionSet']);
     expect(params.filter((p) => p.required).map((p) => p.name)).toEqual(['connectionId', 'permissionSet']);
@@ -101,7 +101,7 @@ describe('sys_idp_group_mapping: Map and Delete reach the platform-admin mounts'
       method: 'POST',
       target: DELETE_ROUTE,
       recordIdParam: 'mappingId',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
     });
     // No param dialog: the row is the whole input, so the confirmation is the one dialog.
     expect(del.params ?? []).toEqual([]);

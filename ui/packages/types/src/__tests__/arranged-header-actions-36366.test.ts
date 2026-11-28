@@ -13,16 +13,16 @@ import { describe, expect, it } from 'vitest';
 import { arrangedHeaderActions } from '../ui-action';
 
 const RECORD = [
-  { name: 'edit', locations: ['record_header'], order: 1 },
-  { name: 'clone', locations: ['record_more'] },
-  { name: 'mark_won', locations: ['record_header'], order: 5 },
-  { name: 'archive', locations: ['record_header', 'record_more'], component: 'action:menu' },
+  { name: 'edit', locations: ['record_page'], order: 1 },
+  { name: 'clone', locations: ['record_page'], component: 'action:menu' },
+  { name: 'mark_won', locations: ['record_page'], order: 5 },
+  { name: 'archive', locations: ['record_page'], component: 'action:menu' },
 ];
 
 const LIST = [
-  { name: 'new_lead', locations: ['list_toolbar'] },
-  { name: 'mass_assign', locations: ['list_toolbar'], order: 3 },
-  { name: 'import_csv', locations: ['list_toolbar'], component: 'action:menu' },
+  { name: 'new_lead', locations: ['list'] },
+  { name: 'mass_assign', locations: ['list'], order: 3 },
+  { name: 'import_csv', locations: ['list'], component: 'action:menu' },
 ];
 
 const names = (actions: readonly { name?: unknown }[]) => actions.map((a) => a.name);
@@ -36,20 +36,22 @@ describe('arrangedHeaderActions (objectstack#36366)', () => {
     expect(arrangedHeaderActions(RECORD, { more: ['clone'] }, 'record')).toEqual(RECORD);
   });
 
-  it('record: the pinned ones lead in pin order at record_header; the rest are record_more only', () => {
+  it('record: the pinned ones lead in pin order as buttons; the rest are folded into the ⋯ menu (`action:menu`)', () => {
     const out = arrangedHeaderActions(RECORD, { pinned: ['clone', 'mark_won'] }, 'record');
     expect(names(out)).toEqual(['clone', 'mark_won', 'edit', 'archive']);
     const [clone, markWon, edit, archive] = out;
-    expect(clone.locations).toEqual(['record_more', 'record_header']);
+    expect(clone.component).toBeUndefined();
+    expect(clone.locations).toEqual(['record_page']);
     expect((clone.order as number) < (markWon.order as number)).toBe(true);
-    expect(edit.locations).toEqual(['record_more']);
-    expect(archive.locations).toEqual(['record_more']);
+    expect(edit.component).toBe('action:menu');
+    expect(archive.component).toBe('action:menu');
+    expect(edit.locations).toEqual(['record_page']);
   });
 
   it('record: a pinned action authored into the overflow (`action:menu`) becomes a button', () => {
     const [archive] = arrangedHeaderActions(RECORD, { pinned: ['archive'] }, 'record');
     expect(archive).toMatchObject({ name: 'archive', component: undefined });
-    expect(archive.locations).toContain('record_header');
+    expect(archive.locations).toEqual(['record_page']);
   });
 
   it('list: the pinned ones lead in pin order; the rest are `action:menu`, the bar overflow', () => {
@@ -61,7 +63,7 @@ describe('arrangedHeaderActions (objectstack#36366)', () => {
 
   it('an empty `pinned` draws no button: every action goes to the overflow', () => {
     expect(arrangedHeaderActions(LIST, { pinned: [] }, 'list').every((a) => a.component === 'action:menu')).toBe(true);
-    expect(arrangedHeaderActions(RECORD, { pinned: [] }, 'record').every((a) => !a.locations?.includes('record_header'))).toBe(true);
+    expect(arrangedHeaderActions(RECORD, { pinned: [] }, 'record').every((a) => a.component === 'action:menu')).toBe(true);
   });
 
   it('a name naming no placed action, or a `$` built-in, draws nothing; a name twice counts once', () => {
@@ -77,7 +79,7 @@ describe('arrangedHeaderActions (objectstack#36366)', () => {
     expect((markWon.order as number) < (archive.order as number)).toBe(true);
     expect((archive.order as number) < (clone.order as number)).toBe(true);
     expect((clone.order as number) < (edit.order as number)).toBe(true);
-    expect([archive, clone, edit].every((a) => !a.locations?.includes('record_header'))).toBe(true);
+    expect([archive, clone, edit].every((a) => a.component === 'action:menu')).toBe(true);
   });
 
   it('list: `more` orders the bar overflow the same way', () => {

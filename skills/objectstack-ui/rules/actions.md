@@ -12,7 +12,8 @@ is refused at validate and publish (`action-no-object-binding`; set it, or
 that returns or assigns values writes nothing
 (`action-record-write-discarded`): it calls `ctx.api.object(...).update(...)`
 in `language: 'js'` (an `expression` body has no I/O) with
-`capabilities: ['api.write']`: without it the sandbox throws on a write.
+`capabilities: ['api.write']`; without that grant, a write is refused too
+(`action-body-write-capability-undeclared`).
 
 ## Where Actions Appear (`locations`)
 
@@ -44,7 +45,7 @@ there: a wrong name draws nothing.
 - `visible` — a bare CEL predicate over the current record (prefer the `P\`...\`` template; `record.<field>` resolves identically on every surface, never `${…}`- or `{…}`-wrapped — see `objectstack-formula`); when false it is **hidden**.
 - `disabled` — `boolean` **or** a CEL predicate; when true it **shows but greys out**. A bare field ref in either (`done` for `record.done`) fails `os validate`.
 - `disabledReason` — an I18nLabel (a sentence or an inline locale map) a greyed action shows as its hover title and accessible description. Display-only: never a predicate or a gate (the hook or permission still refuses). Omit it to keep the console's default "Not available for this record"; a blank one is refused, and `disabledMessage` / `disabledTooltip` / `disabledHint` / `disabledText` are refused naming this key. The reason goes here, not in `description`.
-- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused (a constant is a style, not a reader's state), and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
+- `pressed` — a CEL predicate over the same scope as `visible` that marks the action as already done by this reader: while TRUE the record header draws it pressed (`aria-pressed`). Display-only, never a gate; a boolean literal is refused, and `active` / `activeWhen` / `pressedWhen` are refused naming this key. A per-reader fact (the reader's vote) is a block the object declares under `attachedOnRead`, filled per caller by a service or `afterFind` hook, read as `has(record.viewer) && record.viewer.vote == 'helpful'`.
 - `confirmText` — set for any destructive or irreversible operation; the confirm dialog of a param-less action. It gates no AI call: an `ai.exposed` one also sets `ai.requiresConfirmation: true`. A registered action is refused it beside a non-empty `params` (put the question on `description`); a view's `bulkActionDefs` entry pairs the two by its own contract.
 - `submitText` — the verb on the param dialog's submit button ("Send", "Log Call") in place of "Confirm": an I18nLabel, refused blank and refused without a non-empty `params` (no dialog opens); `submitLabel` / `confirmLabel` are refused naming this key.
 - `preflight` — a read the param dialog shows above the params before submit: `{ read: { url }, path?, fields?, seed? }` sends one `GET` (no other `method`, no body or credentials) to a same-origin API path (one leading `/`) whose only holes are `${param.NAME}` (a declared param; re-read when it changes), `${ctx.recordId}` and `${ctx.record.FIELD}`. `path` selects the answer's sub-tree (`data`); `fields` rows are `resultDialog.fields`' (omitted: JSON). Each `seed: [{ param, path }]` entry fills a declared param, drawn read-only and submitted as shown: seeded once, no `defaultValue` / `defaultFromRow` / `carryOver`, read by no hole; mark it `required` so Confirm waits for the answer. Refused without a non-empty `params` and beside `execution: 'aggregate'`. UX, not authorization: the endpoint still checks a seeded value.
@@ -66,7 +67,6 @@ export const ReassignLeadAction = defineAction({
   objectName: 'lead',
   type: 'api',
   target: 'lead',
-  locations: ['record_header', 'list_item'],
   disabled: P`record.status == "converted"`,
   disabledReason: 'A converted lead is reassigned from its opportunity.',
   params: [{ field: 'owner_id', required: true }],
@@ -93,7 +93,6 @@ export const ConvertLeadAction = defineAction({
   icon: 'arrow-right-circle',
   type: 'flow',
   target: 'crm_lead_conversion',
-  locations: ['record_header', 'list_item'],
   visible: P`record.status == "qualified" && record.is_converted == false`,
   confirmText: 'Convert this lead?',
   successMessage: 'Lead converted.',
@@ -177,7 +176,6 @@ export const PrintA3Action = defineAction({
   type: 'url',
   target: '/print/a3?id=${ctx.recordId}',   // interpolated at click
   openIn: 'new-tab',
-  locations: ['record_header'],
 });
 ```
 
@@ -202,7 +200,6 @@ export const OpenInvoicePdfAction = defineAction({
   target: 'crm_open_invoice_pdf',
   opensInNewTab: true,
   newTabUrl: '/api/v1/invoice/{recordId}/pdf',
-  locations: ['record_header'],
 });
 ```
 
@@ -236,7 +233,6 @@ export const AddInvoiceLineAction = defineAction({
   label: 'Add Line',
   objectName: 'invoice',
   type: 'script',
-  locations: ['record_header'],
   params: [
     { field: 'product', objectOverride: 'invoice_line', required: true },
     { field: 'quantity', objectOverride: 'invoice_line', required: true },

@@ -29,7 +29,7 @@ const FLOW_ACTION = {
     objectName: 'crm_lead',
     type: 'flow',
     target: 'schedule_followup',
-    locations: ['record_header'],
+    locations: ['record_page'],
     ai: { exposed: true, description: 'Schedule a follow-up task for this lead.' },
 };
 

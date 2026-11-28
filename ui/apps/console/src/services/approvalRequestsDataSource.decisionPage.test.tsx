@@ -124,12 +124,12 @@ const REQUEST_DEF = {
     {
       name: 'approval_approve', label: 'Approve', type: 'api', method: 'POST',
       target: '/api/v1/approvals/requests/{id}/approve', params: DECISION_PARAMS,
-      visible: DECIDE, locations: ['record_section', 'list_item'], refreshAfter: true,
+      visible: DECIDE, locations: ['record_section', 'record_row'], refreshAfter: true,
     },
     {
       name: 'approval_reject', label: 'Reject', type: 'api', method: 'POST',
       target: '/api/v1/approvals/requests/{id}/reject', params: DECISION_PARAMS,
-      visible: DECIDE, locations: ['record_section', 'list_item'], refreshAfter: true,
+      visible: DECIDE, locations: ['record_section', 'record_row'], refreshAfter: true,
     },
     {
       // The submitter's own control on a pending request: drawn by the same bar,

@@ -261,10 +261,16 @@ export const KnowledgeSourceSchema = lazySchema(() => strictObject(
     /** Optional description. */
     description: z.string().optional(),
     /**
-     * Adapter id this source binds to (e.g. `'pgvector'`, `'memory'`).
-     * Resolved at runtime by `IKnowledgeService.registerAdapter`.
+     * [ADR-0161 K4] Adapter id this source binds to (e.g. `'pgvector'`,
+     * `'memory'`), as an adapter registered it
+     * (`IKnowledgeService.registerAdapter`). Omitted ⇒ the deployment's
+     * adapter: the store the runtime mounted beside the knowledge service
+     * (`pgvector` on PostgreSQL, `turso` otherwise), else the only adapter
+     * registered. With several registered and none the deployment's, an
+     * omitted adapter is refused, naming the ones registered.
      */
-    adapter: z.string().describe('Adapter id'),
+    adapter: z.string().optional()
+      .describe("Adapter id; omitted means the deployment's store (pgvector on PostgreSQL, turso otherwise), else the only adapter registered"),
     /**
      * [ADR-0161 K4, K6] Retired: no adapter reads per-source configuration.
      */

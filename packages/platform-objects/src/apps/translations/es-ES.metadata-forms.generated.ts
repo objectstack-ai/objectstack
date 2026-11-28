@@ -1645,7 +1645,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "navigation.size": {
         label: "Tamaño",
-        helpText: "Categoría de tamaño del panel de detalle: 'auto' (por defecto: el renderizador lo deriva del número de campos y del área visible; la IA no escribe nada) o un ajuste aproximado sm/md/lg/xl/full. Prefiérelo al `width` en píxeles; el modo page lo ignora."
+        helpText: "Categoría de ancho del panel lateral del registro: 'auto' (por defecto) mantiene el ancho fijo por defecto del host, el mismo para todos los objetos sea cual sea su número de campos (el panel lateral de registros de la consola se abre a 460px), o un ajuste aproximado sm/md/lg/xl/full (un tope de 480/720/960/1200/1600px, siempre limitado al área visible). Un ancho que el lector arrastra prevalece sobre ambos. Prefiérelo al `width` en píxeles; no tiene efecto cuando el registro se abre como página (en la consola, todo registro en un teléfono), ni en una pantalla de ancho de teléfono, donde el panel la ocupa entera."
       },
       "navigation.width": {
         label: "Ancho",

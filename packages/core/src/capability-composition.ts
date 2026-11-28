@@ -57,7 +57,7 @@
  * readers: importing this module loads nothing.
  */
 
-import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
+import { PLATFORM_ALWAYS_ON_CAPABILITIES, PLATFORM_CAPABILITY_PROVIDERS } from '@objectstack/spec/kernel';
 import { readEnvWithDeprecation } from '@objectstack/types';
 import { CAPABILITY_PROVIDERS, KNOWLEDGE_STORE_PROVIDERS } from './capability-providers.js';
 import type { CapabilityIdentities, KnowledgeStoreSpec } from './capability-providers.js';
@@ -76,8 +76,31 @@ export interface ServedCapabilities {
    * The tokens the stack itself declares — the "required" intent
    * (#1597): under `serve` a declared token whose provider cannot be provided
    * is a hard boot error, where a token the platform appended is best-effort.
+   * A token the stack's items mount ({@link stackItemCapabilities}) is
+   * declared too: the items ask for their reader as `requires` would.
    */
   readonly declared: ReadonlySet<string>;
+  /** The declared tokens the stack's items mount and its `requires` does not list. */
+  readonly byItems: ReadonlySet<string>;
+}
+
+/**
+ * [ADR-0161 K8, item 12] The capability tokens the stack's ITEMS mount: each
+ * token whose provider row in `PLATFORM_CAPABILITY_PROVIDERS`
+ * (`@objectstack/spec`) names a `mountedBy` collection the stack holds an item
+ * of — the top level, then each package body (`resolveStackCollection`). Today
+ * one row: `knowledge`, by `knowledgeSources`, so a stack shipping a
+ * `knowledge_source` is served the knowledge service and the deployment's
+ * store without `requires: ['knowledge']`. Through the same provider entry as
+ * the token: the item adds the token, and the token's row mounts the provider.
+ */
+export function stackItemCapabilities(stack: unknown): string[] {
+  const tokens: string[] = [];
+  for (const [token, row] of Object.entries(PLATFORM_CAPABILITY_PROVIDERS)) {
+    const collection = row.mountedBy?.collection;
+    if (collection !== undefined && resolveStackCollection(stack, collection).length > 0) tokens.push(token);
+  }
+  return tokens;
 }
 
 /**
@@ -120,9 +143,20 @@ export function resolveServedCapabilities(
     readonly preset?: string;
     /** The host's process-level default tokens, appended before the slate. */
     readonly hostDefaults?: readonly string[];
+    /**
+     * The tokens the stack's items mount ({@link stackItemCapabilities}),
+     * appended after the declared ones and read as declared.
+     */
+    readonly itemTokens?: readonly string[];
   } = {},
 ): ServedCapabilities {
   const tokens = [...new Set(declaredTokens)];
+  const byItems = new Set<string>();
+  for (const token of opts.itemTokens ?? []) {
+    if (tokens.includes(token)) continue;
+    tokens.push(token);
+    byItems.add(token);
+  }
   const declared: ReadonlySet<string> = new Set(tokens);
   if (tokens.includes('auth') && !tokens.includes('email')) tokens.push('email');
   for (const token of opts.hostDefaults ?? []) {
@@ -137,7 +171,7 @@ export function resolveServedCapabilities(
     if (!tokens.includes('queue')) tokens.unshift('queue');
     if (!tokens.includes('job')) tokens.unshift('job');
   }
-  return { tokens, declared };
+  return { tokens, declared, byItems };
 }
 
 /** What {@link resolveCapabilityArgument} reads to build one provider's argument. */
@@ -222,6 +256,13 @@ function providerReader<A extends unknown[]>(
  *    and on a configuration the schema refuses, an inline secret included.
  *  - `storage`: the local adapter at {@link resolveStorageLocalRootEnv}'s root,
  *    else `.objectstack/data/uploads` ({@link resolveStorageCapabilityArg}).
+ *  - `knowledge`: `{ deploymentAdapter }`, the adapter id of the store
+ *    {@link resolveKnowledgeStore} chooses and {@link resolveCapabilityExtras}
+ *    mounts beside the service — the deployment's-store mark (ADR-0161 K4): a
+ *    source that names no adapter binds to it. A service option, not an
+ *    adapter-contract member; the store itself is told nothing. Read from the
+ *    same {@link CapabilityArgumentInput.database} as the store's choice, so
+ *    the two agree.
  *  - any other token: no argument.
  *
  * A throw is the boot's to report: whether it fails the boot or is logged is
@@ -252,6 +293,9 @@ export function resolveCapabilityArgument(token: string, input: CapabilityArgume
   if (token === 'storage') {
     const storage = resolveStorageCapabilityArg(resolveStorageLocalRootEnv());
     return { argument: storage.options, localStorageRoot: storage.localRoot };
+  }
+  if (token === 'knowledge') {
+    return { argument: { deploymentAdapter: resolveKnowledgeStore(input).store.adapterId } };
   }
   return { argument: undefined };
 }

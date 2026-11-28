@@ -2729,7 +2729,29 @@ const zh = {
           availableObjects: '列出可用的数据对象。',
           recentActivity: '总结我的最近动态。',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '总结这条记录',
+            related: '这条记录关联了哪些内容？',
+          },
+          list: {
+            summarize: '总结这个列表里的记录',
+            recent: '本周新增了哪些记录？',
+          },
+          dashboard: {
+            explain: '这个仪表盘展示了什么？',
+            standOut: '这个仪表盘里有什么值得注意的？',
+          },
+          report: {
+            summarize: '总结这份报表',
+            takeaways: '这份报表的要点是什么？',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '推荐问题',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -4387,10 +4409,12 @@ const zh = {
       slugTaken: '该标识已被占用。',
       notAllowedToCreate: '您无权创建新组织。',
       organizationLimitReached: '您创建的组织数量已达上限。被邀请加入的组织不计入此上限。',
+      unpaidOrganizationLimitReached: '你拥有的免费组织已达到每个账号的上限。要再创建组织，请把其中一个升级为付费套餐，或联系支持。被邀请加入的组织不计入。',
       notTheRecipient: '您不是该邀请的收件人。',
       invitationNotFound: '该邀请已被使用、已过期或已撤销。如果您已接受过该邀请，可在组织列表中找到该组织。',
       unknown: '出了点问题，请重试。',
     },
+    viewPlans: '查看套餐并升级',
     backToList: '返回组织列表',
     notFound: '未找到组织',
     notFoundDescription: '该组织不存在，或您没有访问权限。',
@@ -5516,6 +5540,7 @@ const zh = {
       toggleFailed: '切换应用状态失败：{{reason}}',
       setDefaultDone: '{{name}} 已设为默认',
       setDefaultFailed: '设置默认应用失败：{{reason}}',
+      restoreDefaultFailed: '无法将 {{name}} 恢复为默认应用，因此它已不再是默认应用：{{reason}}',
       appDeleted: '{{name}} 已删除',
       deleteFailed: '删除应用失败：{{reason}}',
       nothingToDelete: '{{name}} 无可删除：{{reason}}',

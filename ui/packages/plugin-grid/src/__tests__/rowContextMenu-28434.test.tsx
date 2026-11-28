@@ -52,13 +52,13 @@ const ROWS = [
   { id: 'a3', name: 'Initech', status: 'draft' },
 ];
 
-/** The object's `list_item` actions: one gated per row, one ungated. */
+/** The object's `record_row` actions: one gated per row, one ungated. */
 const SECONDARY_ACTIONS = [
-  { name: 'submit_review', label: 'Submit for review', type: 'api', target: '/api/submit', locations: ['list_item'], visible: "record.status == 'draft'" },
-  { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['list_item'] },
+  { name: 'submit_review', label: 'Submit for review', type: 'api', target: '/api/submit', locations: ['record_row'], visible: "record.status == 'draft'" },
+  { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_row'] },
 ];
 /** A primary: the cell draws it inline, outside the "⋮". */
-const PRIMARY_ACTION = { name: 'promote', label: 'Promote', type: 'api', target: '/api/promote', locations: ['list_item'], variant: 'primary' };
+const PRIMARY_ACTION = { name: 'promote', label: 'Promote', type: 'api', target: '/api/promote', locations: ['record_row'], variant: 'primary' };
 
 function makeHost() {
   return {
@@ -88,7 +88,7 @@ function renderGrid(opts: {
     objectName: OBJECT,
     columns: [{ field: 'name', label: 'Name', link: true }, { field: 'status', label: 'Status' }],
     data: { provider: 'value', items: ROWS },
-    // The host-derived form of the object's `list_item` actions — what
+    // The host-derived form of the object's `record_row` actions — what
     // `ObjectView` hands the grid (`objectDef.actions` filtered by location).
     rowActionDefs: opts.rowActionDefs ?? SECONDARY_ACTIONS,
     ...opts.schema,
@@ -412,11 +412,11 @@ describe('objectstack#28434 · the keyboard opens the same menu, Esc returns foc
 describe('objectstack#36494 · both row menus follow the object\'s `actionLayout.record` order', () => {
   /** Two primaries and three secondaries, declared in this order. */
   const ACTIONS = [
-    { name: 'promote', label: 'Promote', type: 'api', target: '/api/promote', locations: ['list_item'], variant: 'primary' },
-    { name: 'submit_review', label: 'Submit', type: 'api', target: '/api/submit', locations: ['list_item'] },
-    { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['list_item'] },
-    { name: 'escalate', label: 'Escalate', type: 'api', target: '/api/escalate', locations: ['list_item'], variant: 'primary' },
-    { name: 'clone_row', label: 'Clone', type: 'api', target: '/api/clone', locations: ['list_item'] },
+    { name: 'promote', label: 'Promote', type: 'api', target: '/api/promote', locations: ['record_row'], variant: 'primary' },
+    { name: 'submit_review', label: 'Submit', type: 'api', target: '/api/submit', locations: ['record_row'] },
+    { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_row'] },
+    { name: 'escalate', label: 'Escalate', type: 'api', target: '/api/escalate', locations: ['record_row'], variant: 'primary' },
+    { name: 'clone_row', label: 'Clone', type: 'api', target: '/api/clone', locations: ['record_row'] },
   ];
   const customOf = (ids: (string | null)[]) => ids.filter((id) => id?.startsWith('row-action-') && !id.startsWith('row-action-builtin-'));
 

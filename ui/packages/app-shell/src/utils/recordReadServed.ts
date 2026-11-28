@@ -14,7 +14,7 @@
  * ['list']`, a list-only object — has no record surface: its record page and
  * drawer could only answer `OBJECT_API_METHOD_NOT_ALLOWED`. So nothing opens
  * one for it: not its list rows, not a related list, not a link to one of its
- * records. Its row menu (`list_item` actions) is not a record surface and
+ * records. Its row menu (`record_row` actions) is not a record surface and
  * stays.
  *
  * The verdict reads the effective operation set the server hands down

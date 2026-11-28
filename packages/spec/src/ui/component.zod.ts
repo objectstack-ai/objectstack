@@ -607,8 +607,8 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
  * `placedActions: true` beside an authored `actions` list: two answers to the
  * one question of which of the bound object's actions a `page:header` draws.
  * The list is the whole set (#11592's meaning, kept by ruling record
- * 6624172200, letter A); the switch is every action placed at `record_header` /
- * `record_more`, read live. Neither can be read as narrowing the other without
+ * 6624172200, letter A); the switch is every action placed on the record page
+ * (`record` / `record_page`), read live. Neither can be read as narrowing the other without
  * inventing a rule nobody authored, so the pair is refused at authoring and the
  * author keeps one. `placedActions: false` beside a list says nothing new and
  * is not the pair.
@@ -625,7 +625,7 @@ export type PageContainerProps = z.input<typeof PageContainerProps>;
 const PAGE_HEADER_PLACED_ACTIONS_BESIDE_LIST = {
   message:
     'A `page:header` that sets `placedActions: true` draws every action of the bound object placed at '
-    + '`record_header` or `record_more`, read live, so an `actions` list beside it is a second, different '
+    + '`record` or `record_page`, read live, so an `actions` list beside it is a second, different '
     + 'answer to which actions the header draws. Keep one: `actions` for a curated list that is the whole '
     + 'set the header draws, or `placedActions: true` for every placed action, and delete the other key.',
   path: ['placedActions'],
@@ -714,17 +714,17 @@ export const PageHeaderProps = strictObject({
    * declare a header placement. objectui's `PageHeaderRenderer`
    * (`resolvedHeaderActions` then `headerActionPlan`; read points recorded in
    * `liveness/page.json`, row `regions`) resolves each id against the actions declared on the bound object, keeps
-   * those whose `locations` include `record_header` or `record_more`, and draws
+   * those whose `locations` include `record` or `record_page`, and draws
    * no other action of the object:
    *
-   * - an action that declares `record_header` and is NOT named here is not
+   * - an action that declares `record_page` and is NOT named here is not
    *   drawn in this header. Declaring the placement does not add it, so the
    *   list is the author's curation of the header, and a new header action is
    *   added to the list as well as to the object;
    * - with the key omitted, an authored `page:header` draws none of the
    *   object's own actions (the list resolves to empty), unless it sets
    *   `placedActions: true` below: the other, explicit way to say which
-   *   actions, namely every `record_header` / `record_more` action of the
+   *   actions, namely every `record` / `record_page` action of the
    *   object, read live. That is the set the platform's synthesized default
    *   record page, used when no page is assigned, builds its header from;
    * - a named id whose action declares neither location renders nowhere;
@@ -738,11 +738,11 @@ export const PageHeaderProps = strictObject({
    * here and added the switch beside it.
    */
   actions: z.array(z.string()).optional().describe(
-    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record_header` (or `record_more`) in its `locations` but is not named here is not drawn, and a header with neither this key nor `placedActions: true` draws none of the object\'s actions. `placedActions: true` is the other way to say which actions the header draws (every one placed at `record_header` / `record_more`, read live), and the two are refused together. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
+    'Action IDs the header draws, resolved against the actions declared on the page\'s object. An authored list is the whole set: an action that declares `record` or `record_page` in its `locations` but is not named here is not drawn, and a header with neither this key nor `placedActions: true` draws none of the object\'s actions. `placedActions: true` is the other way to say which actions the header draws (every one placed at `record` / `record_page`, read live), and the two are refused together. A named action that declares neither location renders nowhere. The host\'s own Edit / Share / Delete chrome is separate from this list.',
   ),
   /**
    * The explicit opt-in to draw EVERY action of the bound object whose
-   * `locations` include `record_header` or `record_more`, read live from the
+   * `locations` include `record` or `record_page`, read live from the
    * object's metadata, in place of an authored `actions` id list (ruling
    * record 6624172200, letter A). An action another package places on the
    * object is drawn without editing this page, which is what a platform record
@@ -773,7 +773,7 @@ export const PageHeaderProps = strictObject({
    * container).
    */
   placedActions: z.boolean().optional().describe(
-    'Draw every action of the page\'s object whose `locations` include `record_header` or `record_more`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
+    'Draw every action of the page\'s object whose `locations` include `record` or `record_page`, read live from the object\'s metadata, in place of an authored `actions` list: an action added to the object later, by any package, is drawn without editing the page. Omit it, or set false, to keep the `actions` list as the whole set. Refused as `true` beside an authored `actions` list: keep one.',
   ),
   /**
    * Which of the two page-header layouts the renderer builds (#6776).
@@ -2499,7 +2499,7 @@ export const RecordQuickActionsProps = strictObject({
 }, {
   actionNames: z.array(z.string()).optional().describe('Names of actions declared on this object (`actions[]`), in display order. The engine still location-filters named actions. Measured: when omitted (and the host supplies nothing) the bar resolves NO actions and renders its empty placeholder — it does not fall back to "every action at this location", whatever the registration\'s input list claims.'),
   requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
-  location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_header`).'),
+  location: ActionLocationSchema.optional().describe('Which declared action location this bar renders (renderer default: `record_page`). At `record_page` it draws the record page\'s actions that are not folded into its ⋯ menu (`component: \'action:menu\'`); an action placed at `record` is drawn at `record_page` and at `record_row`.'),
   align: z.enum(['start', 'center', 'end']).optional().describe('Horizontal alignment of the button row (renderer default: `end`).'),
   inline: z.boolean().optional().describe('Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot.'),
   variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).optional().describe('Button variant for every action — the Button primitive\'s own vocabulary; a per-action `variant` on the resolved def wins (renderer default: `default`).'),
@@ -4013,7 +4013,7 @@ function refuseRowOnSuccessBesideExecutor(executorKey: 'actionType' | 'type', ow
  *   {@link actionContainerMemberParamsFitType}. Whether the named action
  *   exists, is an `operation: 'update'` action and declares those params is a
  *   cross-reference this row cannot see;
- * - beside it, a `list_toolbar` location — refused at `locations.N`.
+ * - beside it, a `list` location — refused at `locations.N`.
  *
  * Applied first on each row, as the runner reads `operation` first: the row's
  * url-target, executor-alias and `onSuccess`-executor judgments stand down
@@ -4141,7 +4141,7 @@ export const ActionButtonPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape`, `recordIdField` and `onSuccess` are refused, and `list` is not a location'),
   patch: rowPatchRetired("An `action:button`'s"),
   confirmText: actionRowCopy('confirmText').optional()
     .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
@@ -4251,7 +4251,7 @@ export const ActionIconPropsSchema = lazySchema(() => strictObject({
   method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
   bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
   bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+  operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list` is not a location'),
   patch: rowPatchRetired("An `action:icon`'s"),
   confirmText: actionRowCopy('confirmText').optional()
     .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside an object \`params\` (static values, no param dialog)`),
@@ -4410,7 +4410,7 @@ function actionContainerMemberShape() {
     method: z.string().optional().describe('HTTP method for an `api` action, forwarded to the runner'),
     bodyExtra: z.unknown().optional().describe('Static request-body fields for an `api` action, forwarded to the runner'),
     bodyShape: z.unknown().optional().describe('How an `api` action shapes its request body, forwarded to the runner'),
-    operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list_toolbar` is not a location'),
+    operation: actionOperation().optional().describe('Declarative single-record write: `ActionSchema`\'s own `operation`, whose one member is `update`. The row runs the declared action its `name` names. The runner reads `operation` before any executor and posts the row\'s values to the platform action route under that `name`; the route resolves that action by name and writes ITS `patch`, so the row has no `patch` of its own and needs a `name`. What the row\'s `params` supply rides the request as params, written only where that action declares them and otherwise refused by the route. Judged as `ActionSchema` judges it: beside it the executor key is absent or `script`, `target`, `method`, `bodyExtra`, `bodyShape` and `onSuccess` are refused, and `list` is not a location'),
     patch: rowPatchRetired('An `action:group` or `action:menu` member\'s'),
     confirmText: actionRowCopy('confirmText').optional()
       .describe(`${ACTION_ROW_COPY_DESCRIBE.confirmText} Beside a non-empty array \`params\` it is refused — the runner would show the confirm and then the param dialog, two dialogs for one decision; put the question on \`description\` instead. Correct with no \`params\`, beside \`params: []\`, and beside a \`type: 'api'\` member's object \`params\` (its request payload, no param dialog)`),

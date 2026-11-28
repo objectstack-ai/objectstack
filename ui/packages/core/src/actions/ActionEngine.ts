@@ -30,7 +30,7 @@ import { isActionSwitchedOff } from '../utils/action-activation.js';
  */
 export type { ActionLocation } from '@object-ui/types';
 export { ACTION_LOCATIONS } from '@object-ui/types';
-import type { ActionLocation } from '@object-ui/types';
+import { actionRendersAt, type ActionLocation } from '@object-ui/types';
 
 /** Registered action with metadata */
 export interface RegisteredAction {
@@ -228,7 +228,9 @@ export class ActionEngine {
   getActionsForLocation(location: ActionLocation): ActionDef[] {
     const evaluator = this.runner.getEvaluator();
     return Array.from(this.actions.values())
-      .filter(ra => ra.locations.includes(location))
+      // Placement is `actionRendersAt`'s (objectui#3142): `record` is drawn at
+      // `record_page` and at `record_row` (objectstack#36495).
+      .filter(ra => actionRendersAt(ra, location))
       // [objectstack#27504] An action this installation switched off is not
       // offered (the served activation state — see `utils/action-activation`).
       .filter(ra => !isActionSwitchedOff(ra.action))

@@ -357,7 +357,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
         method: 'POST',
         variant: 'secondary',
         refreshAfter: false,
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
       },
       // The #8155 migration's operator-initiated door: one datasource, one
       // click, by a human who is looking at the row. Deliberately NOT a
@@ -381,7 +381,7 @@ export class DatasourceAdminServicePlugin implements Plugin {
         method: 'POST',
         variant: 'secondary',
         refreshAfter: true,
-        locations: ['record_header'],
+        locations: ['record_page'],
       },
     ] as any);
 

@@ -24,7 +24,7 @@
  *  - MIXING RULE: every executor-binding key beside `operation: 'update'` is
  *    refused at ITS path with code `custom` and a message whose first sentence
  *    names the executor the key belongs to; `patch` without the operation and
- *    `operation: 'update'` with nothing to write are refused; `list_toolbar`
+ *    `operation: 'update'` with nothing to write are refused; `list`
  *    is refused; the bulk-only operations are refused with the reason.
  *  - BOUNDARIES: an inline page-element action cannot carry the keys; a
  *    standalone action without `objectName` is refused by `defineStack`; the
@@ -270,13 +270,13 @@ describe('mixing rule: one refusal per contradiction, at the contradicting key',
     }
   });
 
-  it('refuses a `list_toolbar` location — no current record there; the selection bar is the bulk def\'s home', () => {
-    const result = ActionSchema.safeParse({ ...duly, locations: ['record_header', 'list_toolbar'] });
+  it('refuses a `list` location — no current record there; the selection bar is the bulk def\'s home', () => {
+    const result = ActionSchema.safeParse({ ...duly, locations: ['record_page', 'list'] });
     const issue = issueAt(result, 'locations.1');
     expect(issue?.code).toBe('custom');
-    expect(issue?.message).toMatch(/^`list_toolbar` has no current record — an `operation: 'update'` action writes ONE record, the one it runs on\./);
+    expect(issue?.message).toMatch(/^`list` has no current record — an `operation: 'update'` action writes ONE record, the one it runs on\./);
     expect(issueAt(result, 'locations.0')).toBeUndefined();
-    expect(ActionSchema.safeParse({ ...duly, locations: ['list_item', 'record_header', 'record_more', 'record_section'] }).success).toBe(true);
+    expect(ActionSchema.safeParse({ ...duly, locations: ['record', 'record_section'] }).success).toBe(true);
   });
 
   it('refuses the bulk-only operations with the reason, not a bare enum list', () => {

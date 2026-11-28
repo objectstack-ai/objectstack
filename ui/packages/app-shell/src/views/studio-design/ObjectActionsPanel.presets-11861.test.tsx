@@ -81,7 +81,7 @@ const existing = {
   name: 'open_help',
   label: 'Open help',
   objectName: 'invoice',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'url',
   target: 'https://example.com/help',
 };
@@ -217,7 +217,7 @@ describe('the Actions New menu opens on presets (objectui#11861)', () => {
       }
       expect(onPatch).toHaveBeenCalledTimes(1);
       const written = lastWritten(onPatch);
-      expect(written).toMatchObject({ name: 'invoice_action_2', objectName: 'invoice', locations: ['record_header'] });
+      expect(written).toMatchObject({ name: 'invoice_action_2', objectName: 'invoice', locations: ['record_page'] });
       expectSpecAccepts(written, `${id} preset`);
       expect(screen.queryByTestId('action-not-saved')).toBeNull();
     },
@@ -237,7 +237,7 @@ describe('the Actions New menu opens on presets (objectui#11861)', () => {
       name: 'invoice_action_2',
       label: 'Change Status',
       objectName: 'invoice',
-      locations: ['record_header'],
+      locations: ['record_page'],
       operation: 'update',
       params: [{ field: 'status' }],
     });
@@ -271,7 +271,7 @@ describe('the Actions New menu opens on presets (objectui#11861)', () => {
       name: 'invoice_action_2',
       label: 'New action',
       objectName: 'invoice',
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'flow',
       target: 'notify_owner',
     });
@@ -328,7 +328,7 @@ describe('the Actions New menu opens on presets (objectui#11861)', () => {
 });
 
 describe('the preset module’s written-out tables agree with the spec (objectui#11861)', () => {
-  const seed = { name: 'invoice_action_2', label: 'New action', objectName: 'invoice', locations: ['record_header'] };
+  const seed = { name: 'invoice_action_2', label: 'New action', objectName: 'invoice', locations: ['record_page'] };
   const refusedAt = (action: unknown, path: string) => {
     const parsed = ActionSchema.safeParse(action);
     return !parsed.success && parsed.error.issues.some((i) => i.path.join('.') === path);

@@ -1867,7 +1867,7 @@ function reportRefusedPlacedActions(objectName: string | undefined): void {
     `[page:header] \`placedActions: true\` refused beside an authored \`actions\` list` +
     `${objectName ? ` (object "${objectName}")` : ''}. None of the object's actions is rendered. ` +
     'Keep one: `actions` for a curated list that is the whole set, or `placedActions: true` ' +
-    'for every action placed at record_header / record_more.',
+    'for every action placed at record / record_page.',
   );
 }
 
@@ -1962,7 +1962,7 @@ export interface PageHeaderActionsProps {
   actions?: unknown;
   /**
    * `page:header`'s `placedActions` (objectstack#30018): `true` draws every
-   * action of the bound object placed at `record_header` / `record_more`, read
+   * action of the bound object placed at `record` / `record_page`, read
    * live, in place of an `actions` list. Only the boolean `true` opts in.
    */
   placedActions?: unknown;
@@ -2034,8 +2034,8 @@ export interface PageHeaderRefreshItem {
 }
 
 /**
- * A record's header actions: the declared actions placed at `record_header` /
- * `record_more` and the host's system actions (Edit / Share / Delete), gated,
+ * A record's header actions: the declared actions placed on the record page
+ * (`record` / `record_page`) and the host's system actions (Edit / Share / Delete), gated,
  * ordered, split into inline buttons and the `⋯` overflow, and dispatched
  * through the action runner.
  *
@@ -2195,8 +2195,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   //
   // The other way `@objectstack/spec` lets a header say which of the object's
   // actions it draws (ruling record 6624172200 on objectstack#29951, letter A):
-  // every action of the bound object whose `locations` include `record_header`
-  // or `record_more`, in declaration order, read from the object's metadata at
+  // every action of the bound object whose `locations` include `record`
+  // or `record_page`, in declaration order, read from the object's metadata at
   // render time. An action another package places on the object is therefore
   // drawn without editing the page, which a frozen id list cannot do: the
   // platform's own record pages froze one and dropped exactly those actions
@@ -2404,7 +2404,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       //
       // `page:header` filters its own actions rather than going through
       // `ActionEngine.getActionsForLocation`, so the engine's gate never ran on
-      // the ONE surface `record_header` / `record_more` actions live on: a
+      // the ONE surface `record` / `record_page` actions live on: a
       // button declaring a capability nobody holds rendered, and only the
       // server's 403 stopped it — and only for a call the platform action door
       // dispatches, never for a `type: 'api'` action whose `target` is on
@@ -2474,16 +2474,16 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       return true;
     };
     // Placement, for AUTHORED actions only (objectui#3142). The header serves
-    // TWO locations — `record_header` (inline) and `record_more` (the ⋯
-    // overflow menu; see renderHeaderActions, #2358 trap 2) — so declaring
-    // either one places the action here. A missing or empty `locations` used
+    // the record page — `record_page`, and `record`, which `actionRendersAt`
+    // draws there too; an action folded into the ⋯ overflow menu says so with
+    // `component: 'action:menu'` (see renderHeaderActions, #2358 trap 2;
+    // objectstack#36495) — so declaring either word places the action here. A missing or empty `locations` used
     // to mean "show here", which made this header the one surface where an
     // action nobody placed still appeared; `RecordDetailView` pre-filters the
     // same actions strictly, and the synthesizer's own contract already says
-    // "must include `locations: ['record_header']` to render"
+    // "must include `locations: ['record_page']` to render"
     // (buildDefaultPageSchema.ts), so the leniency contradicted both.
-    const placedOnHeader = (a: any): boolean =>
-      actionRendersAt(a, 'record_header') || actionRendersAt(a, 'record_more');
+    const placedOnHeader = (a: any): boolean => actionRendersAt(a, 'record_page');
     // `resolvedHeaderActions` — ids already resolved to defs, inline defs passed
     // through — so this chain is shape-uniform and unchanged by objectui#6252.
     const authored = resolvedHeaderActions.filter(a => placedOnHeader(a) && filterAction(a));
@@ -2580,9 +2580,9 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
   // (the api handler's `{field}` URL-interpolation + record-id source) and
   // surface a spec-shaped `params` ARRAY as `actionParams` (the runner's
   // param-dialog input), reserving `params` for the stash. Without this, a
-  // `record_header` `type:'api'` action targeting `/api/v1/data/:object/{id}`
+  // `record_page` `type:'api'` action targeting `/api/v1/data/:object/{id}`
   // was sent with the literal `{id}` (`%7Bid%7D` on the wire) while the SAME
-  // declaration interpolated fine from `list_item`. Dispatching a fresh object
+  // declaration interpolated fine from `record_row`. Dispatching a fresh object
   // also keeps ActionRunner's collected-params merge (which writes
   // `action.params` in place) from mutating the authored schema node between
   // invocations. Non-record hosts (no RecordContext data) dispatch unchanged.
@@ -2655,17 +2655,15 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // Inline/overflow split (objectui#2361) — up to `maxVisible` actions
     // render side-by-side as buttons; the rest collapse into a `⋯` overflow
     // menu. Which actions stay inline is metadata-driven:
-    //   1. actions declaring ONLY `record_more` (not `record_header`) are the
-    //      spec's "overflow menu under the ⋯ button" location — they are
-    //      always routed into the overflow menu and never occupy an inline
-    //      slot, regardless of how few actions the header has (#2358 trap 2);
-    //   2. `component: 'action:menu'` forces an action into the `⋯` menu
-    //      regardless of the count (chrome actions like Share/Delete);
-    //   3. the remainder is pre-sorted by `order` / `variant: 'primary'`
+    //   1. `component: 'action:menu'` forces an action into the `⋯` menu
+    //      regardless of the count — the record page's fold, what the
+    //      `record_more` location said until protocol 19 (#2358 trap 2,
+    //      objectstack#36495), and chrome actions like Share/Delete;
+    //   2. the remainder is pre-sorted by `order` / `variant: 'primary'`
     //      (see the headerActions memo above); the primary button leads it
     //      (see `primaryAction` below), and the first `maxVisible` of the
     //      page's OWN actions claim the inline slots;
-    //   4. a host button (the record page's Edit) is not one of the page's
+    //   3. a host button (the record page's Edit) is not one of the page's
     //      actions: it takes no slot and never folds (objectui#12617).
     // `maxVisible` / `mobileMaxVisible` are overridable on the page:header
     // schema and default to 3 / 1 (2 in a phone's bottom bar). This keeps the
@@ -2702,18 +2700,8 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       : isMobile
         ? (readMax(rawMobileMaxVisible) ?? 1)
         : (readMax(rawMaxVisible) ?? defaultMaxVisible ?? 3);
-    const isMoreOnly = (a: any): boolean =>
-      Array.isArray(a?.locations) &&
-      a.locations.length > 0 &&
-      a.locations.includes('record_more') &&
-      !a.locations.includes('record_header');
-    const moreOnlyActions = headerActions.filter(isMoreOnly);
-    const menuOnly = headerActions.filter(
-      (a: any) => !isMoreOnly(a) && a?.component === 'action:menu',
-    );
-    const buttonable = headerActions.filter(
-      (a: any) => !isMoreOnly(a) && a?.component !== 'action:menu',
-    );
+    const menuOnly = headerActions.filter((a: any) => a?.component === 'action:menu');
+    const buttonable = headerActions.filter((a: any) => a?.component !== 'action:menu');
     // "Host" is the key test the disabled-reason branch below uses: a key no
     // authored action holds came from `headerSystemActions`. "Destructive" is
     // ONE predicate read everywhere below: the `⋯`'s destructive band and its
@@ -2729,7 +2717,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
       return key !== '' && !authoredHeaderActionKeys.has(key);
     };
     // ONE primary button (objectui#12617). `@objectstack/spec`'s action
-    // contract says "in `record_header` the first visible action becomes the
+    // contract says "in `record_page` the first visible action becomes the
     // primary button", and lets a renderer prefer a `variant: 'primary'`
     // action. So the primary is the first action declaring `variant:
     // 'primary'`, else the first of the `order`-sorted list; it leads the row
@@ -2835,7 +2823,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // an authored action's key is never a host key, so metadata cannot claim
     // the place.
     const leadsMenu = (a: any): boolean => isHostAction(a) && !isDestructiveAction(a) && a?.leadsMenu === true;
-    const overflowPool = [...foldedButtons, ...menuOnly, ...moreOnlyActions];
+    const overflowPool = [...foldedButtons, ...menuOnly];
     const leadingActions = overflowPool.filter(leadsMenu);
     const overflowActions = [
       ...overflowPool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
@@ -3128,7 +3116,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
     // own, the host's chrome, the destructive last), the host's refresh first.
     const stateMenuActions = stateGroup
       ? (() => {
-          const pool = [...ranked, ...menuOnly, ...moreOnlyActions];
+          const pool = [...ranked, ...menuOnly];
           return [
             ...pool.filter((a) => !isDestructiveAction(a) && !isHostAction(a)),
             ...pool.filter((a) => !isDestructiveAction(a) && isHostAction(a) && !leadsMenu(a)),
@@ -3137,7 +3125,7 @@ export const PageHeaderActions: React.FC<PageHeaderActionsProps> = ({
         })()
       : [];
     const stateFirstDestructiveIdx = stateMenuActions.findIndex(isDestructiveAction);
-    const stateLeading = stateGroup ? [...ranked, ...menuOnly, ...moreOnlyActions].filter(leadsMenu) : [];
+    const stateLeading = stateGroup ? [...ranked, ...menuOnly].filter(leadsMenu) : [];
     const toolbarItems = (
       <>
         {stateGroup
@@ -3639,7 +3627,7 @@ const PageHeaderRenderer: React.FC<any> = ({ schema, className, ...props }) => {
     // squeezed into unreadable slivers — so in a `nowrap` row it takes what it
     // needs and the title column, being the only flexible item, absorbs the
     // entire deficit. Measured at a 799px viewport on a Field Zoo record
-    // (3 labelled record_header actions + `⋯` + `⟳`): header 687px, tail
+    // (3 labelled record_page actions + `⋯` + `⟳`): header 687px, tail
     // 641.5px, `gap-4` 16px, leaving the title column **29.5px** for an h1
     // whose `scrollWidth` was 180px — the title rendered as "S…" while the
     // breadcrumb still showed the full "Specimen — Full".
@@ -3820,11 +3808,11 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // map form this description tells the author to write.
     { name: 'title', type: ['string', 'object'], description: 'Supports {field} interpolation and inline translation maps; falls back to the record title' },
     { name: 'subtitle', type: ['string', 'object'], description: 'Same interpolation as Title' },
-    { name: 'actions', type: 'array', of: 'string', description: "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record_header nor record_more in its locations renders nowhere." },
+    { name: 'actions', type: 'array', of: 'string', description: "Action IDS — the names of actions declared on the object's own metadata — rendered in the header before any host-injected system actions. An id whose action declares neither record nor record_page in its locations renders nowhere." },
     // objectstack#30018 (ruling letter A on objectstack#29951): the other way to
     // say which of the object's actions the header draws. Read by
     // `PageHeaderActions` (`drawsPlacedActions`).
-    { name: 'placedActions', type: 'boolean', description: "Set true to draw every action of the object placed at record_header or record_more, read live from the object's metadata, in place of an Actions list: an action another package adds to the object is drawn without editing the page. Refused beside an authored Actions list: keep one." },
+    { name: 'placedActions', type: 'boolean', description: "Set true to draw every action of the object placed at record or record_page, read live from the object's metadata, in place of an Actions list: an action another package adds to the object is drawn without editing the page. Refused beside an authored Actions list: keep one." },
     // No `breadcrumb`: it was declared but NOT read (objectui#11166), and stayed
     // here only while the spec accepted the key. `@objectstack/spec` 17.6.0
     // carries the retirement (objectstack#20758, a tombstone refused by name),
@@ -3854,7 +3842,7 @@ ComponentRegistry.register('header', PageHeaderRenderer, {
     // express the domain: `ComponentInput.type` has no integer/min/max slot, so
     // `description` stays the only authoring-time expression of it, and spec
     // stays the sole judge of values.)
-    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. Two kinds of action are routed to the overflow menu regardless of this budget and never occupy an inline slot: an action whose locations declare record_more without record_header, and any action with component action:menu. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
+    { name: 'maxVisible', type: 'number', description: 'How many header actions render as inline buttons on desktop before the rest fold into the overflow menu. A positive integer, defaulting to 3 — the contract rejects 0 and fractional values. In a record page\'s header bar, actions that do not fit its width fold too, so a narrow drawer shows fewer. An action with component action:menu (the record page\'s fold) is routed to the overflow menu regardless of this budget and never occupies an inline slot. The host\'s own buttons (the record page\'s Edit) take no slot and never fold. The first inline action, or the one declaring variant primary, is the one filled primary button; the others are outline buttons. The host\'s Edit is always an outline button: on a record with no header action of its own the row has no filled button. An action declaring variant danger is never the primary: inline it is a destructive button, and in the overflow menu it is a red row below a separator.' },
     { name: 'mobileMaxVisible', type: 'number', description: 'The same inline-button budget on mobile viewports, where horizontal room is scarce. A positive integer, defaulting to 1, or 2 in a record page\'s bottom action bar on a phone, which holds the page\'s actions (the record\'s Edit is in the top bar\'s overflow menu there); the desktop half is Max Inline Actions, and the overflow routing rules stated there apply unchanged.' },
   ],
 });

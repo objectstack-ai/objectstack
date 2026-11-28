@@ -427,7 +427,7 @@ describe('the early record-id refusal is forwarded to the runner (objectui#13384
     type: 'script',
     name: 'add_to_campaign',
     objectName: 'crm_lead',
-    locations: ['list_toolbar', 'list_item'],
+    locations: ['list', 'record_row'],
     actionParams: [{ name: 'campaign', label: 'Campaign', type: 'text', required: true }],
   };
   const launch = () => JSON.parse(JSON.stringify(ADD_TO_CAMPAIGN));

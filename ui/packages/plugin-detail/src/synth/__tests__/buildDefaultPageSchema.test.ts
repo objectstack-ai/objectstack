@@ -277,7 +277,7 @@ describe('buildDefaultPageSchema', () => {
     it('embeds headerActions into page:header.actions instead of a separate quick_actions node', () => {
       const page = buildDefaultPageSchema(leadDef, {
         headerActions: [
-          { name: 'edit', label: 'Edit', locations: ['record_header'] },
+          { name: 'edit', label: 'Edit', locations: ['record_page'] },
         ],
       });
       const types = page.regions[0].components.map((c: any) => c.type);
@@ -543,7 +543,7 @@ describe('buildDefaultPageSchema', () => {
     it('buildDefaultActions returns a quick_actions node when actions are provided', () => {
       const node = buildDefaultActions(leadDef, [{ id: 'edit', label: 'Edit' }]);
       expect(node?.type).toBe('record:quick_actions');
-      expect(props(node).location).toBe('record_header');
+      expect(props(node).location).toBe('record_page');
       expect(props(node).actions).toHaveLength(1);
     });
 
