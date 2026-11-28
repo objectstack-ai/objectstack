@@ -1,5 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { ErrorCode } from '@objectstack/spec/api';
+
 // [#25467 E0] Part of the module preamble of `protocol.ts`, moved here verbatim: the metadata
 // issue entry and the Zod-issue walk that turns a parse failure into located metadata issues.
 //
@@ -20,6 +22,36 @@ export interface MetadataIssueEntry {
     path: string;
     message: string;
     code: string | undefined;
+    /**
+     * The registered refusal a spec rule stamped on the issue, on the save
+     * door's `422 INVALID_METADATA` only: `params.code` is the ADR-0112 code
+     * (one {@link ErrorCode} accepts) and its siblings say which fix applies —
+     * `CONTROLLED_BY_PARENT_MASTER_INVALID` with its `shape`. zod raises every
+     * such rule with its own issue code `'custom'`, so without this member a
+     * client of the door had only that `'custom'` and the English `message`,
+     * while a local `safeParse` (Studio's path) saw the registered code.
+     *
+     * The contract, and why each limit is there:
+     *
+     * - **Only where asked for** ({@link ZodIssuesToMetadataIssuesOptions}).
+     *   The save door asks. The read path (`_diagnostics.errors[]`) and the
+     *   seed refusal (`seedApplied.issues[]`) do not: their published spec
+     *   schemas (`MetadataValidationResultSchema`, the publish response)
+     *   declare the entry as exactly `path` / `message` / `code`.
+     * - **Only a registered refusal.** An issue whose `params.code` is not a
+     *   string {@link ErrorCode} accepts gets no member: `params` is also where
+     *   spec rules keep internal markers (`readAsWritten`, `refusalHead`,
+     *   `retiredComponentType`) that are not a wire vocabulary.
+     * - **Only JSON scalars** (a string, a finite number, a boolean). Any other
+     *   value is left out, so answering never throws on a value
+     *   `JSON.stringify` cannot write, and the copy shares nothing with the
+     *   issue.
+     *
+     * Absent otherwise, never an empty placeholder. Additive: `code` above
+     * stays zod's own issue code, so a client that matches `'custom'` today
+     * still matches it. Read the registered code from `params.code`.
+     */
+    params?: Record<string, string | number | boolean>;
 }
 
 /**
@@ -121,6 +153,38 @@ interface ZodIssueLike {
     code?: unknown;
     errors?: unknown;
     issues?: unknown;
+    params?: unknown;
+}
+
+/**
+ * The registered refusal an issue carries on `params`, as
+ * {@link MetadataIssueEntry.params} states it: `undefined` unless `params` is
+ * a plain object whose `code` is a string {@link ErrorCode} accepts, and then
+ * only its JSON-scalar members.
+ */
+function refusalParamsOf(issue: ZodIssueLike): Record<string, string | number | boolean> | undefined {
+    const params = issue?.params;
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) return undefined;
+    const code = (params as { code?: unknown }).code;
+    if (typeof code !== 'string' || !ErrorCode.safeParse(code).success) return undefined;
+    const out: Record<string, string | number | boolean> = {};
+    for (const [key, value] of Object.entries(params as Record<string, unknown>)) {
+        if (typeof value === 'string' || typeof value === 'boolean'
+            || (typeof value === 'number' && Number.isFinite(value))) {
+            out[key] = value;
+        }
+    }
+    return out;
+}
+
+/** How {@link zodIssuesToMetadataIssues} renders its entries. */
+export interface ZodIssuesToMetadataIssuesOptions {
+    /**
+     * Carry each issue's registered refusal on {@link MetadataIssueEntry.params}.
+     * The save door's `422 INVALID_METADATA` sets it; a producer whose entry
+     * shape a spec schema declares closed leaves it off.
+     */
+    readonly refusalParams?: boolean;
 }
 
 /** A zod issue path, normalised to the array zod always produces. */
@@ -281,6 +345,7 @@ function collectMetadataIssues(
     depth: number,
     seen: Set<string>,
     out: MetadataIssueEntry[],
+    refusalParams: boolean,
 ): void {
     const path = [...parentPath, ...issuePathOf(issue)];
     const branches: readonly (readonly ZodIssueLike[])[] =
@@ -302,6 +367,8 @@ function collectMetadataIssues(
         message: String(issue?.message ?? 'Invalid value'),
         code: issue?.code === undefined ? undefined : String(issue.code),
     };
+    const params = refusalParams ? refusalParamsOf(issue) : undefined;
+    if (params !== undefined) entry.params = params;
 
     if (!expandable) {
         const key = JSON.stringify([entry.path, entry.code, entry.message]);
@@ -315,7 +382,7 @@ function collectMetadataIssues(
         const below: MetadataIssueEntry[] = [];
         for (const branch of selectUnionBranches(branches)) {
             for (const nested of branch) {
-                collectMetadataIssues(nested, path, depth + 1, seen, below);
+                collectMetadataIssues(nested, path, depth + 1, seen, below, refusalParams);
             }
         }
         // The head stays ahead of what it explains unless BOTH hold: something
@@ -328,7 +395,7 @@ function collectMetadataIssues(
     out.push(entry);
     // Unranked, and every one of them: see {@link CONTAINER_ISSUE_CODES}.
     for (const nested of contained) {
-        collectMetadataIssues(nested, path, depth + 1, seen, out);
+        collectMetadataIssues(nested, path, depth + 1, seen, out, refusalParams);
     }
 }
 
@@ -367,14 +434,23 @@ function collectMetadataIssues(
  * entry below explains it (#35400, on {@link collectMetadataIssues}), so
  * `issues[0]` of a refused view save is the first located cause, not that
  * rootless line. Read entries by `path` and `code`, never by index.
+ *
+ * With `refusalParams` (the save door's 422), an entry also carries its
+ * issue's registered refusal ({@link MetadataIssueEntry.params}): that is where
+ * a spec rule with a registered code says which one it is, since `code` is
+ * zod's `'custom'`. Without it every entry is exactly `path` / `message` /
+ * `code`, the shape the read path and the seed refusal publish.
  */
-export function zodIssuesToMetadataIssues(issues: unknown): MetadataIssueEntry[] {
+export function zodIssuesToMetadataIssues(
+    issues: unknown,
+    options: ZodIssuesToMetadataIssuesOptions = {},
+): MetadataIssueEntry[] {
     if (!Array.isArray(issues)) return [];
     const out: MetadataIssueEntry[] = [];
     for (const issue of issues) {
         // A fresh `seen` per top-level issue: de-duplication is about one
         // union's branches agreeing, never about two independent issues.
-        collectMetadataIssues(issue as ZodIssueLike, [], 0, new Set<string>(), out);
+        collectMetadataIssues(issue as ZodIssueLike, [], 0, new Set<string>(), out, options.refusalParams === true);
     }
     return out;
 }

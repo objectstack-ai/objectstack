@@ -59,12 +59,12 @@ describe('MetadataTypeActions', () => {
   it('renders only actions that declare the requested location', () => {
     const { container } = render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
         entry={{
           actions: [
-            { name: 'here', label: 'Here', type: 'api', target: '/x', locations: ['record_header'] },
-            { name: 'elsewhere', label: 'Elsewhere', type: 'api', target: '/x', locations: ['list_toolbar'] },
+            { name: 'here', label: 'Here', type: 'api', target: '/x', locations: ['record_page'] },
+            { name: 'elsewhere', label: 'Elsewhere', type: 'api', target: '/x', locations: ['list'] },
             { name: 'undeclared', label: 'Undeclared', type: 'api', target: '/x' },
           ],
         }}
@@ -79,7 +79,7 @@ describe('MetadataTypeActions', () => {
   it('renders nothing when no action declares the requested location', () => {
     const { container } = render(
       <MetadataTypeActions
-        location="list_toolbar"
+        location="list"
         entry={{ actions: [{ name: 'undeclared', label: 'Undeclared', type: 'api', target: '/x' }] }}
       />,
     );
@@ -89,9 +89,9 @@ describe('MetadataTypeActions', () => {
   it('runs an api action without params directly (no dialog)', async () => {
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'test_connection', label: 'Test', type: 'api', target: '/api/v1/datasources/${ctx.recordId}/test', locations: ['record_header'] }] }}
+        entry={{ actions: [{ name: 'test_connection', label: 'Test', type: 'api', target: '/api/v1/datasources/${ctx.recordId}/test', locations: ['record_page'] }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Test'));
@@ -104,9 +104,9 @@ describe('MetadataTypeActions', () => {
   it('collects array params via the dialog and sends them as the body', async () => {
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'sync', label: 'Sync', type: 'api', target: '/api/v1/datasources/${ctx.recordId}/sync', locations: ['record_header'], params: [{ name: 'reason', label: 'Reason', type: 'text' }] as unknown[] }] }}
+        entry={{ actions: [{ name: 'sync', label: 'Sync', type: 'api', target: '/api/v1/datasources/${ctx.recordId}/sync', locations: ['record_page'], params: [{ name: 'reason', label: 'Reason', type: 'text' }] as unknown[] }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Sync'));
@@ -122,9 +122,9 @@ describe('MetadataTypeActions', () => {
   it('shows the result dialog when the action declares resultDialog', async () => {
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_header'], resultDialog: { fields: [{ path: 'message' }] } }] }}
+        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_page'], resultDialog: { fields: [{ path: 'message' }] } }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Probe'));
@@ -147,9 +147,9 @@ describe('MetadataTypeActions', () => {
     } as never);
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_header'], resultDialog: { fields: [{ path: 'message' }] } }] }}
+        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_page'], resultDialog: { fields: [{ path: 'message' }] } }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Probe'));
@@ -169,9 +169,9 @@ describe('MetadataTypeActions', () => {
     } as never);
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_header'] }] }}
+        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_page'] }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Probe'));
@@ -190,9 +190,9 @@ describe('MetadataTypeActions', () => {
     } as never);
     render(
       <MetadataTypeActions
-        location="record_header"
+        location="record_page"
         recordId="ds1"
-        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_header'] }] }}
+        entry={{ actions: [{ name: 'probe', label: 'Probe', type: 'api', target: '/api/v1/x', locations: ['record_page'] }] }}
       />,
     );
     fireEvent.click(screen.getByTitle('Probe'));

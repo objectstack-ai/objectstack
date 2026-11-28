@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.0"
+  version: "19.0.0-next.1"
   domain: i18n
   tags: i18n, translation, locale, l10n, bundle, coverage
 ---
@@ -76,7 +76,6 @@ const en: TranslationData = {
             completed: 'Completed',
           },
         },
-        due_date: { label: 'Due Date' },
       },
       _views: {
         all_tasks: {
@@ -101,7 +100,6 @@ const en: TranslationData = {
   },
   messages: {
     'common.save': 'Save',
-    'common.cancel': 'Cancel',
     'welcome.user': 'Welcome, {{userName}}!',
   },
 };
@@ -118,16 +116,11 @@ const zhCN: TranslationData = {
           label: '状态',
           options: { not_started: '未开始', in_progress: '进行中', completed: '已完成' },
         },
-        due_date: { label: '截止日期' },
       },
     },
   },
-  apps: {
-    todo_app: { label: '待办管理', description: '个人任务管理' },
-  },
   messages: {
     'common.save': '保存',
-    'common.cancel': '取消',
     'welcome.user': '欢迎，{{userName}}！',
   },
 };
@@ -163,7 +156,8 @@ All translatable content for a single object is aggregated under
 | `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
-| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Where the paired `.custom` package's `relatedLists` (**objectstack-data**) re-states the entry without a `label`, or hides it, `os validate` refuses the key: drop it, or re-state the entry with the owner's own `label`. Spelled `relatedLists`, the group is refused, naming this one |
+| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Where the paired `.custom` package's `relatedLists` (**objectstack-data**) re-states the entry without a `label`, or hides it, `os validate` refuses the key: drop it, or re-state the entry, shown, with the owner's own `label`. Spelled `relatedLists`, the group is refused, naming this one |
+| `_milestones.{field}.{value}` | `summary`, the timeline sentence of the `activityMilestones` entry firing on that field and value, same `{field}` tokens: composed at read time in the reader's language (a select token as its option label), stored row unchanged, redacted as the stored sentence is |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 | `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
 
@@ -282,8 +276,7 @@ what the runtime implements.)
 ```json
 {
   "messages": {
-    "welcome": "Welcome, {{userName}}!",
-    "pagination": "Showing {{start}} to {{end}} of {{total}} items"
+    "welcome": "Welcome, {{userName}}!"
   }
 }
 ```

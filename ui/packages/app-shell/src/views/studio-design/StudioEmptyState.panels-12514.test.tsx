@@ -157,7 +157,7 @@ describe('objectui#12514 — Actions: the empty block opens the header’s New m
     expect(fromEmpty.length).toBeGreaterThan(0);
     cleanup();
 
-    const one = { ...emptyDraft, actions: [{ name: 'a1', label: 'A1', type: 'script', objectName: 'invoice', locations: ['record_more'] }] };
+    const one = { ...emptyDraft, actions: [{ name: 'a1', label: 'A1', type: 'script', objectName: 'invoice', locations: ['record_page'], component: 'action:menu' }] };
     render(<ObjectActionsPanel draft={one} onPatch={vi.fn()} />);
     expect(screen.queryByTestId('actions-empty')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /^New/ }));

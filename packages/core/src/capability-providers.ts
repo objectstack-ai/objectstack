@@ -245,8 +245,10 @@ export const CAPABILITY_PROVIDERS: Readonly<Record<string, CapabilitySpec>> = {
     identities: ['com.objectstack.service.record-context', 'RecordContextServicePlugin'],
   },
   // ADR-0161: the `knowledge` service, its settings page and its embedder.
-  // Requested, never always-on: without the token no service, no store and no
-  // Knowledge settings page. The token mounts ONE vector store beside it,
+  // Requested, never always-on: the token mounts it, and so does a
+  // `knowledge_source` item in the stack (K8 item 12: `mountedBy` on the spec
+  // row, read by `stackItemCapabilities`); without either, no service, no
+  // store and no Knowledge settings page. The token mounts ONE vector store beside it,
   // chosen by the platform database — see KNOWLEDGE_STORE_PROVIDERS below and
   // `resolveCapabilityExtras`, which every boot reads in place of `extras` for
   // this row. A host that mounts the service in `plugins[]` keeps its own and
@@ -263,7 +265,12 @@ export type KnowledgeStoreSpec = {
   pkg: string;
   export: string;
   identities: CapabilityIdentities;
-  /** The adapter id the store registers: the value a `KnowledgeSource.adapter` names. */
+  /**
+   * The adapter id the store registers: the value a `KnowledgeSource.adapter`
+   * names, and the one the service is handed as the deployment's
+   * (`deploymentAdapter`, `resolveCapabilityArgument`), so a source that
+   * names no adapter binds to this store (ADR-0161 K4).
+   */
   adapterId: string;
   /**
    * The package is an optional dependency of the CLI and of the verification

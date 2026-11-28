@@ -1,6 +1,6 @@
 # @objectstack/knowledge-pgvector
 
-`IKnowledgeAdapter` on PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension — the open vector store for self-hosted ObjectStack deployments. It takes the knowledge service's passages, embeds them with the kernel's `embedder` service, stores passages and vectors in PostgreSQL, and answers `search()` by an exact cosine scan.
+`IKnowledgeAdapter` on PostgreSQL with the [pgvector](https://github.com/pgvector/pgvector) extension — the open vector store for self-hosted ObjectStack deployments. It takes the knowledge service's passages, embeds them with the kernel's `embedder` service, stores passages and vectors in PostgreSQL, and answers `search()` with two legs — an exact cosine scan and a keyword match on a `tsvector` — merged by reciprocal rank fusion.
 
 ```ts
 import { ObjectKernel } from '@objectstack/core';
@@ -53,6 +53,14 @@ CREATE SCHEMA IF NOT EXISTS "os_knowledge";
 ```
 
 The next call retries; no restart is needed. A database the plugin cannot reach is reported as unreachable, with the driver's error and no SQL.
+
+## Search
+
+Two legs in one statement (one snapshot), merged by reciprocal rank fusion (RRF, `k` = 60) before the knowledge service re-checks each hit as the caller. Each leg ranks at most `topK` passages; a hit's `score` is the sum of `1 / (60 + rank)` over the legs that rank it, divided by that of a passage first in both, so it lies in `(0, 1]`: 1 for first in both legs, 0.5 for first in one alone. The organization filter, the record scope and the metadata `filter` are one `WHERE`, run in both legs before either ranks.
+
+- **Keyword leg.** The query is split into terms at white space and punctuation; a hyphen, dot, slash, underscore, `#`, `@` or `+` inside a term keeps it whole, so `X-200` is one term (at most 16 terms). A word of three characters or more is matched as a phrase (`phraseto_tsquery('simple', …)`) on the passage's `to_tsvector('simple', content)`, which a GIN expression index (`knowledge_vec_d<width>_content_tsv`) serves. The `simple` configuration lower-cases and neither stems nor drops stop words, so a code or a name matches as written. A shorter term (「出差」), and a term holding a Han, kana or Hangul character — which the parser never splits, so a `tsvector` holds a whole run of them as one word — is matched by `content ILIKE '%…%'` over the rows in scope, as a substring. A passage's keyword score sums, over the terms it holds, the term's BM25 inverse document frequency among the rows in scope, so a word most passages hold weighs little.
+- **Keyword index.** An expression index: no column is added and no row rewritten, and PostgreSQL keeps it in step with every write. It is made with the passage table; a table made by a release without one gets it from the first write or search of that width (`CREATE INDEX IF NOT EXISTS`, which blocks writes to the table while it builds).
+- **Vector leg.** An exact cosine scan; a passage whose cosine similarity is not positive is not ranked by it.
 
 ## An approximate index is an operator's step
 

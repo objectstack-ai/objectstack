@@ -32,7 +32,7 @@
  *     evaluated on this path.
  *   • `RecordDetailView.headerActionLookupPredicate.test.tsx` (#4641 /
  *     objectstack#8500) drives `os.user.id` against a relation field, but only
- *     through DECLARED `record_header` actions — a different consumption seam
+ *     through DECLARED `record_page` actions — a different consumption seam
  *     (`visible` on an authored action), deliberately not the built-in one.
  *
  * The card sits exactly on the intersection, which is why it could be reported

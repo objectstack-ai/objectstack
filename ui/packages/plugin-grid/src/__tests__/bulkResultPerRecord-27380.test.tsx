@@ -62,7 +62,7 @@ const ADD_TO_CAMPAIGN = {
   label: 'Add to Campaign',
   type: 'script',
   objectName: OBJECT,
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
 };
 
 /** A transport that answers each record from `refusals` (record id → message), 200 otherwise. */

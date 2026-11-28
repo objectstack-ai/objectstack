@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { CORE_PLUGIN_TYPES } from './plugin.zod';
 import { PROTOCOL_MAJOR } from './protocol-version';
 import { SEMVER_2_0_0_VERSION_PATTERN } from './version-grammar';
-import { NAMESPACE_PATTERN } from './address-grammar';
+import { MANIFEST_ID_PATTERN, NAMESPACE_PATTERN } from './address-grammar';
 import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
 import { closedObject, strictObject, strictObjectError } from '../shared/strict-object';
 import { formatSuggestion } from '../shared/suggestions.zod';
@@ -332,33 +332,7 @@ export type PluginIntegrity = z.input<typeof PluginIntegritySchema>;
  *   - "./src/objects/*.object.yml"
  * ```
  */
-/**
- * The reverse-domain identifier rule, declared ONCE.
- *
- * Two surfaces name the same identity — `ManifestSchema.id` here (what an
- * author writes) and `PackageSchema.manifestId` in
- * `../marketplace/package.zod.ts` (what the registry stores and addresses the
- * package by, `manifest_id`). They were two independent declarations and drifted:
- * the registry enforced the shape and the authoring surface accepted any string,
- * so a package that scaffolded, validated and booted was refused at publish.
- * Both sites now reference this constant, which is what makes a future drift a
- * one-line edit rather than a silent divergence.
- *
- * Reads as: two or more lowercase dot-separated segments of letters, digits and
- * inner hyphens. A segment may open with a letter or a digit (`com.163.crm`,
- * `com.example.2app`), never with a hyphen. ⛔ Underscores are NOT admitted —
- * `manifest.namespace` allows them and this key does not, so a namespace is
- * never a legal id by itself.
- *
- * A digit may open a segment because nothing downstream needs it not to: the id
- * is a registry key (`manifest_id`), a runtime package-map key and a
- * grant-source key — never a table name, a JS identifier, a filesystem path or
- * a hostname — and DNS labels themselves may open with a digit. The physical
- * prefix is `manifest.namespace`, which keeps its own leading-letter rule for
- * the SQL-identifier reason; `deriveNamespaceFromPackageId` strips a leading
- * digit run when it derives one from an id.
- */
-export const MANIFEST_ID_PATTERN = /^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/;
+export { MANIFEST_ID_PATTERN };
 
 /**
  * The example ids the refusal shows an author, and the same two the TSDoc on

@@ -418,7 +418,13 @@ export function renderPlatformCatalog(): string {
   );
   for (const token of PLATFORM_CAPABILITY_TOKENS) {
     const provider = PLATFORM_CAPABILITY_PROVIDERS[token];
-    const boot = PLATFORM_ALWAYS_ON_CAPABILITIES.includes(token) ? 'every boot' : 'on `requires`';
+    // A provider an item also mounts (`mountedBy`, read by `stackItemCapabilities`)
+    // says so: only a SHIPPED item of that collection does, never one saved at run time.
+    const boot = PLATFORM_ALWAYS_ON_CAPABILITIES.includes(token)
+      ? 'every boot'
+      : provider?.mountedBy
+        ? `on \`requires\`, or a shipped \`${provider.mountedBy.collection}\` item`
+        : 'on `requires`';
     lines.push(`| \`${token}\` | ${CAPABILITY_ROWS[token]} | ${provider?.edition ?? 'unknown'} | ${boot} |`);
   }
   lines.push('');

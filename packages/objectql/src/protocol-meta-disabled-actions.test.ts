@@ -151,8 +151,8 @@ const SHOWCASE = {
         name: 'da_task', label: 'Task',
         fields: { name: { name: 'name', type: 'text', label: 'Name' } },
         actions: [
-            { name: 'da_mark_done', label: 'Mark Done', type: 'url', target: 'https://example.com/done', locations: ['record_header'] },
-            { name: 'da_snooze', label: 'Snooze', type: 'url', target: 'https://example.com/snooze', locations: ['record_header'] },
+            { name: 'da_mark_done', label: 'Mark Done', type: 'url', target: 'https://example.com/done', locations: ['record_page'] },
+            { name: 'da_snooze', label: 'Snooze', type: 'url', target: 'https://example.com/snooze', locations: ['record_page'] },
         ],
     }],
 };

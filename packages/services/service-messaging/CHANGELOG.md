@@ -1,5 +1,90 @@
 # @objectstack/service-messaging
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- 9b622bb: feat(service-messaging): a keyed notification param can be a list, each item rendered in the recipient's language; the approval "no one can approve" notice names a slate of any size in the reader's language
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  - `EmitInput.keyedText.params` accepts a new value shape, `{ list, separator }`. Each `list` item is `{ key, params?, fallback }`: a catalog sentence with its own `{{hole}}` params, rendered per recipient. An item param can be text, `{ key, fallback }` or `{ object, fallback }`, but not another list. A sentence with no entry falls back to the item's `fallback`. The rendered items are joined by the `separator` entry (`{ key, fallback }`), so a list of any length reads in one language. A list holds 1 to `NOTIFICATION_LIST_PARAM_MAX_ITEMS` (100) items, and `emit()` refuses a malformed one before it writes anything. The new exports are the types `NotificationListParam`, `NotificationListItem` and `NotificationScalarParam`, and the constant `NOTIFICATION_LIST_PARAM_MAX_ITEMS`. Every existing param shape renders as before.
+  - The widening reaches the read side too. `NotificationTextParam` is now `NotificationScalarParam | NotificationListParam`, so the exported channel contract `Notification.keyedText` can carry a list param. A channel that reads `keyedText.params` must handle the list shape.
+  - An older reader does not understand a list row. After a rollback to a version before this one, it reads the row's keys as malformed and delivers or shows the whole notice as its stored English literal, title and body alike. Nothing fails. Within one install this cannot otherwise happen, because the two packages always release together.
+  - The approval submitter's notice for a request no one else can approve now names a slate of two or more slots through this list param, one `approvalNoApproverSlot` clause per slot, joined by `approvalNoApproverSlotSeparator`. Before, a slate of more than 8 slots named its slots in English inside a zh-CN, ja-JP or other non-English sentence. Now every slot reads in the recipient's language. The literal English body is unchanged. A slate of more slots than a list param holds (more than 100) is sent with the slots as one English clause list instead, as before, so `emit()` does not refuse the notice and the submitter is still told.
+  - The `approvalNoApproverHoldingSlots2` to `…Slots8` sentences stay in the packs, because notices already delivered carry those keys and are rendered again whenever the inbox is read.
+- 8071f35: fix(automation): a record-change flow's run history and its notification deliveries land again when the triggering write runs in a unit of work
+  
+  Clause-②: yes (widening) — `ObjectQL` is exported from the `@objectstack/objectql` entry, and it gains two public methods, `runOutsideOpenUnits(body)` and `runAfterOpenUnitsCommit(body)`; `@objectstack/core` gains the root export `wakeAfterOpenUnitsCommit(engine, wake)`; the `@objectstack/service-automation` interface `SuspendedRunStoreEngine` gains the matching optional member `runOutsideOpenUnits`, so an engine that does not supply it still satisfies the interface. No existing signature or accepted input narrows. `DispatchLoop`'s change is to the async context its ticks run in, and the dispatchers' change is to when a wake is sent, not to any API. The level stays `patch` because nothing a metadata author can write changes (`Metadata-protocol: none`).
+  Metadata-protocol: none
+  
+  On 19.0.0-next.0 a record-change flow fired by a write whose object carries a metadata `before*` hook, or a blocking `after*` hook that can abort, finished inside the unit of work the write door opens for that write. Two pieces of work the run starts and does not await then ran on that unit's transaction after it had committed, and the database answered "Transaction query already complete":
+  
+  - the run's terminal history row (`sys_automation_run`) never landed, so the run was missing from the Runs surfaces and from every read of its history, with an `error` line naming the persist;
+  - a `notify` node's outbox wake started the notification dispatcher's tick in the same unit, so the tick's delivery updates failed, and with them the audit rows (`sys_activity`) those updates write.
+  
+  Both now run outside the unit:
+  
+  - `ObjectQL.runOutsideOpenUnits(body)` is new: it runs work its caller starts and does not await outside every unit of work open at the call, the same exit an `async: true` hook's run takes. Its calls run on their own connection, and a rollback of the unit open at the call does not undo them.
+  - The durable run-history store writes a finished run's row through it.
+  - `DispatchLoop` (the notification, HTTP-delivery, database-queue and audit-seal loops) runs every tick in the async context it was constructed in, never in the context of the caller of `start()`, `wake()` or `wakeAt()`.
+  - A wake for a row the open unit just wrote is sent at that unit's commit, and not at all when it rolls back: `ObjectQL.runAfterOpenUnitsCommit(body)` is new, and the notification and HTTP outboxes' wake and the database queue's `publish` and `replay` wake go through it (`wakeAfterOpenUnitsCommit` in `@objectstack/core`). A tick woken inside the unit runs outside it, and on a pooled driver (Postgres, MySQL) it could not see the row yet, so the row would have waited for a later, backed-off tick. A unit opened by `ScopedContext`'s `beginTransaction` trio holds the wake back while an engine call carrying its handle runs; a wake made outside such a call, by code that holds the trio handle only explicitly, goes at once, and on a pooled driver waits one backed-off tick.
+  - A loop's home is the context it is constructed in, so a loop is constructed at boot; `DbQueueAdapter`'s first `subscribe()` under `autoStart` starts it too and belongs at boot.
+  
+  What a reader sees change: a run's history row is written beside the run, not inside the triggering write's unit, so it is not rolled back with that write, and it can land a moment after the write has returned. Read it the way you read any history row written by a run that is not awaited: wait for it to land rather than reading it once straight after the write.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [68aa1be]
+- Updated dependencies [d92684a]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/platform-objects@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

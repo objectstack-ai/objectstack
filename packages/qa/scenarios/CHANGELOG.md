@@ -1,5 +1,150 @@
 # @objectstack/scenarios
 
+## 19.0.0-next.1
+
+### Patch Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+- f4978d9: fix(scenarios): an ISO date written with a Unicode hyphen states no figure
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The run grader skips the parts of an ISO date when it reads the figures a reply states, but it matched only the ASCII `-`. A reply that wrote a date with the non-breaking hyphen U+2011 (or the hyphen U+2010), as a typeset answer does, had its year, month and day read as three figures, so a correct decline was graded "stated a figure the data cannot support". Such a date is now read as a date; a figure range joined by the same hyphen still reads as figures.
+- 05563a5: feat(scenarios): an external driver command can build through the MCP draft door (`--modes door`) on contract `objectstack-scenario-driver/2`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  `--driver external:COMMAND` now takes door mode, so any agent tool behind a wrapper is scored on the same door cards as the live `claude` driver. The driver contract gains a second version, `objectstack-scenario-driver/2`: `/1` plus an optional `door` on an `author` call, `{"mcp":{"url":…,"configFile":…},"skillsDir":…}`. The door's OAuth token (scoped `openid metadata:write`) travels as an `ask` call's persona key does: only in a 0600 MCP config file outside the call's directory, deleted when the call returns, never on argv, in the environment or on stdin, and so never in a run record, a scorecard or a gallery export. `--door-skills` and `--door-skill-omit` reach the command as `door.skillsDir`, and the record states the arm (`env.driver.door`) in the same shape as for the `claude` driver; the rules arm (`--door-rules`) is a Claude Code `CLAUDE.md` and is refused with an external command, naming why.
+  
+  A command names the version it speaks in its `info` answer (`"contract":"objectstack-scenario-driver/2"`); the `info` input itself still carries `objectstack-scenario-driver/1`, the one input both versions share. Every later call carries the version the command named. A `/1` command (an `info` answer with no `contract`) keeps running scratch, template and ask unchanged, and `--modes door` with one is refused before any card runs, naming the contract. An `info` answer naming a contract the runner does not speak is refused, naming it. `EXTERNAL_DRIVER_CONTRACT` keeps its value, `objectstack-scenario-driver/1`, so a command that pins it as a literal keeps answering; the new `EXTERNAL_DRIVER_CONTRACT_V2` names `objectstack-scenario-driver/2`, and `EXTERNAL_DRIVER_CONTRACTS` lists both. A command that must also serve a runner built before this release answers `info` without `contract`, as a `/1` command: such a runner refuses an `info` answer carrying the key. The package README's contract section states the door input for command authors.
+- 45ed022: fix(scenarios): door mode mints its token when the authorize endpoint answers 200 `{ redirect, url }`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `run-scenarios --modes door` could not get its OAuth token on a current app: `GET /api/v1/auth/oauth2/authorize` answers a fetch from Node (which sends `sec-fetch-mode: cors`) with a 200 and `{ "redirect": true, "url": "…" }` instead of a 302, and the runner read only a `Location` header, so every door round stopped at "authorization". The runner now follows either answer: a 302 `Location`, or a 200 `{ redirect: true, url }`, then consents and trades the code as before. A redirect that carries `error` (either shape) is recorded as the refusal of the authorization step with that error as its code, instead of being sent to the consent step; any other answer is still recorded as the refusal of the authorization step.
+- 84c05ca: fix(scenarios): the citation grader accepts a multi-word object named as words in a source line ("Source: Invoice Line")
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `citationLabels` now labels each namespaced object by its card name and, when that name has more than one word, by the words themselves (`invoice_line` → `invoice line`, `expense_claim` → `expense claim`). A reply that names the object as the user reads it, "Source: Invoice Line" or "Source: Expense Claim", is graded cited. Before this change only a one-word object could be cited that way. The match stays where it was: case-insensitive, inside a source line only. A line naming another object, or the words in the reply's prose, still cite nothing. The gallery export regrades with the same labels, so a recording graded by this version exports as before.
+- da31daf: Clause-②: no
+  Metadata-protocol: none
+  
+  The scenario-card Run grader now reads a count the reply spells as a word: an English number word from zero to twenty ("Two invoices are no longer drafts") and a Chinese numeral from 零 to 十, or 两, standing before a measure word (「两张发票」). Such an answer was right but failed with "missing figure". The words count for the correctness axis only; the leak scans, the unsupported-figure check of a decline and `numbersIn` still read digits only, so no answer gains a leak. A word inside a longer word ("someone", 「一些」), the pronoun "one" ("one of them", "no one"), a hyphenated larger number or fraction ("twenty-one", "two-thirds") and an ordinal (「第一」) are not read. A missing-figure problem now names its asker: the persona's id, or `admin` for an admin question (it read `persona` for both).
+- 00cb37b: fix(scenarios): the build prompt names a card's master-detail as a master-detail, not as a lookup
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A card carrying `records-forms.master-detail-inline-edit` is credited only for a `master_detail` field edited inline on its master, but the build prompt listed that relationship under "Lookups", so a faithful build declared a `lookup` and lost both of the tag's checks (the `project_with_tasks` card lost them on every run).
+  
+  - A card's `expect.lookups` row takes an optional `masterDetail: true`. The build prompt states such a row on its own line: "Master-detail relationships, each a `master_detail` field (not a `lookup`) on the detail object referencing its master, the detail's rows entered inline on the master's form: …", and the "Lookups" line keeps the rest.
+  - The loader refuses a card that carries the inline-edit tag and marks no row, at `expect.lookups`.
+  - The six library cards that carry the tag mark their detail relationship: `invoice_line.invoice`, `task.project`, `order_line.order`, `claim_line.claim`, `leave_day.request`, `po_line.purchase_order`. Every other card's prompt is unchanged byte for byte.
+  
+  Scoring is unchanged: the exact-name `lookup:` check reads the target only, so a `lookup` and a `master_detail` both pass it, and the tag's own rows still judge the type.
+- 7f8a982: feat(scenarios): a scenario card may name the roll-ups a persona is denied, and the build prompt says so
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A persona on a scenario card may now carry `withheldRollups` (`[{ "object": "project", "field": "task_count" }]`, in the card's bare names): the roll-ups on objects the persona reads that summarise rows or fields its `hidden` withholds. The build prompt's line for that persona names them and says they are withheld too, so a build no longer has to guess that a person who may not see the rows may not see their total either. The Build charge for `security-rollup-source-unreadable` is unchanged, and the leak grader does not read the key. The schema refuses a withheld roll-up the persona's `hidden` already names or its `allowedRollups` allows; the loader refuses one on a field no seed row carries. `project_with_tasks` withholds the task count and total estimate from the client viewer, and `invoice_with_line_items` withholds the invoice total from warehouse staff; every other card's prompts are unchanged.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [0196476]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [302cfda]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [54d6726]
+- Updated dependencies [ddc96d8]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [8071f35]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [4b8aca2]
+- Updated dependencies [56c9cae]
+- Updated dependencies [3ed97b7]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [e69fa46]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/objectql@19.0.0-next.1
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/lint@19.0.0-next.1
+  - @objectstack/plugin-sharing@19.0.0-next.1
+  - @objectstack/core@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/formula@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

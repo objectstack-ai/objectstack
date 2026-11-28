@@ -1,5 +1,234 @@
 # @objectstack/core
 
+## 19.0.0-next.1
+
+### Major Changes
+
+- eb683b8: feat(security)!: View All and Modify All stop opening fields; `viewAllFields` is the one "every field" bit
+  
+  **BREAKING** (19.0.0): View All (`viewAllRecords`) and Modify All (`modifyAllRecords`) widen records only. They no longer cast a field vote, so a field that a permission set hides (`readable: false`) or locks (`editable: false`) stays hidden or locked for their holders. Reading every field of an object is `viewAllFields: true` on that object's entry; it votes read, never edit.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: semantic
+  
+  <!-- adr-0087: registered permission-view-all-fields-beside-record-bypass -->
+  
+  FROM → TO:
+  
+  - `objects.<name>: { viewAllRecords: true }` read every field of the object another set hides → it reads none of them. TO keep that read: `{ viewAllRecords: true, viewAllFields: true }`.
+  - `objects.<name>: { modifyAllRecords: true }` read and edited every field, the set's own rows included → it reads and edits only what the field rows allow. TO keep the read: `{ modifyAllRecords: true, viewAllFields: true }`, except a field the set's own `readable: false` row hides: that row now hides the field from the set's holders even with the bit, so delete it where they should still read the field. The edit is not restored by any bit, for a field another set locks or a field the set's own field row names without `editable: true` (an omitted `editable` is `false`): grant it with an explicit `editable: true` row in the set that should edit it.
+  - The same holds on a `'*'` entry.
+  
+  **Check your permission sets in one step.** A permission set is affected when one of its `objects` entries, the `'*'` entry included, has `viewAllRecords: true` or `modifyAllRecords: true` and does not have `viewAllFields: true`. For each such entry, add `viewAllFields: true` to it if the set should still read every field of that object. Beside View All that is all the read needs: with the bit, the set reads what View All read before. Beside Modify All it is not: the set's own `readable: false` rows now bind (before, Modify All overrode them), so a field such a row hides stays hidden from the set's holders until you delete the row. For the edit, Modify All no longer grants one: where its holders must still edit a field another set locks, or a field the set's own field row names without `editable: true`, add an explicit `editable: true` row in the set that should edit it.
+  
+  - Sets in your source: `os migrate meta --from 18 --write` adds `viewAllFields: true` beside every such bit (ADR-0087 conversion `permission-view-all-fields-beside-record-bypass`).
+  - Sets saved in a running deployment (Studio-saved, stored in `sys_metadata`): they are **not** rewritten on upgrade, and from 19 they are read with the new meaning. Studio's permission matrix has no control for `viewAllFields` today (it keeps the key when it saves a set that already carries it), so add it to the set's entry through the metadata API. No command lists the affected stored sets yet; a review list is follow-up #37375.
+  
+  The protocol-19 upgrade guide carries the same check as the semantic entry `permission-view-all-modify-all-cast-no-field-vote`.
+  
+  The error direction is safe: an unconverted set sees **fewer** fields after the upgrade, never more. No field that was hidden opens. A set whose object has no field row in any set changes nothing at all, because a field no set names already follows the object grant.
+  
+  Also in this change:
+  
+  - The built-in admin sets (`admin_full_access`, `organization_admin`) already carry `viewAllFields: true` on their `'*'` entry, so they still read every field. They no longer edit a field that another set they hold locks.
+  - Explain no longer reports a row-conditioned field lock as "superseded by the Modify All Data field vote": the lock binds per row for every caller.
+  - `@objectstack/lint`: the warning `security-superuser-field-mask-inert` is retired, since a set's own field rows now bind beside its own View All or Modify All. `security-cross-set-field-reopen` now reports only a field one set hides that another set's `viewAllFields` re-opens. `security-controlled-by-parent-master-reference-hidden` and the roll-up source-visibility rules now judge a mask beside Modify All like any other mask.
+  - `@objectstack/spec` and `@objectstack/metadata-core`: the conversion is a default flip, retired from the load path from day one. Only `os migrate meta --from 18` replays it: the authoring funnel skips it (it is retired from the load path), and the artifact-ingestion door (`DEFAULT_FLIPS_NOT_REPLAYED_HERE`) and every stored-row read (`applyConversionsToStoredItem`, `os migrate meta --stored` included) refuse it by id, so an artifact or stored set is read with the 19 meaning and never handed a field read its author did not write.
+  - `@objectstack/core`: `superuserFieldVote` is replaced by `viewAllFieldsReadVote(sets, object, field)`, which answers whether a set's `viewAllFields` reads the field. `holdsSuperuserBypass` is unchanged and answers the record bypass only.
+  - `@objectstack/scenarios`: the persona-grant scoring no longer treats Modify All as overriding a field lock.
+  - `@objectstack/cli` and `@objectstack/service-automation`: test comments only, restated for the 19 meaning.
+
+### Minor Changes
+
+- 87af66e: feat(core): `requires: ['knowledge']` mounts the knowledge service and one vector store
+  
+  Clause-②: yes
+  Metadata-protocol: added
+  Skills-docs: follow-up #37310
+  
+  ADR-0161, #37102.
+  
+  - **New capability token `knowledge`** (`PLATFORM_CAPABILITY_TOKENS`, provider `@objectstack/service-knowledge`, edition `open`). `os serve` and `@objectstack/verify` mount `KnowledgeServicePlugin` plus exactly one store, picked from the primary database: PostgreSQL gets `KnowledgePgvectorPlugin` (adapter `pgvector`, on the same database URL); any other database gets `KnowledgeTursoPlugin` (adapter `turso`) on a local libSQL file, `knowledge.db` in the directory of the default database: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set (`os start --home` sets it). An in-memory database gets an in-memory turso store. The in-memory adapter (`knowledge-memory`) is never mounted by the token.
+  - No token: no knowledge service and no knowledge settings page, as before. A host that mounts `KnowledgeServicePlugin` itself keeps its own and gets no store from the runtime; a host that mounts only the store the token would choose keeps that store and gets the service.
+  - New core exports: `resolveCapabilityExtras`, `resolveKnowledgeStore`, `KNOWLEDGE_STORE_PROVIDERS` and the `CapabilityDatabase` / `CapabilityExtra` / `KnowledgeStoreSpec` types. `constructServedProviders` (`@objectstack/verify`) takes an optional `database` (default: in-memory SQLite).
+  - `os serve` now warns when a capability's extra plugin cannot be imported or constructed, instead of skipping it silently.
+  - **A source whose adapter is not mounted** no longer fails silently. The service still mounts and boot does not fail; after boot the service logs one `error` per such source naming the mounted adapters, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same message. A search across several sources names the refused one beside the hits of the others. Before, indexing threw an uncoded error and search skipped the source with a warning.
+  - **The turso store reads its URL from settings under the token.** `KnowledgeTursoPlugin` gains `urlFromSettings`: with no `url` option it reads the saved `knowledge.turso_url` / `turso_auth_token`. It reads them when the boot completes (`kernel:bootstrapped`), the first moment the settings service answers a saved value; the adapter is mounted from `start()` and answers `SERVICE_UNAVAILABLE` until the store has opened. A saved `file:` URL must resolve, after symlinks, inside that data directory; a URL that leaves it, names the platform database, or carries a NUL byte or another control character, written out or percent-encoded (`%00`, `%0a`), is refused before the libSQL client sees it (the client decodes the path, and a NUL byte in it kills the process inside the native library). New option `stateDir` (the token passes `OS_HOME`); new exports: `resolveSettingsStoreUrl`, `dataDirectoryOf`. `resolveStoreUrl` refuses control characters too, in both spellings. An auth token carrying a control character (a pasted line break, a NUL byte), saved or given as the `authToken` option, is refused the same way, read as written: the store answers `SERVICE_UNAVAILABLE` with a reason that never quotes the token.
+  - **`@objectstack/knowledge-turso` is an optional dependency of `@objectstack/cli` and `@objectstack/verify`**, not a hard one: its libSQL client is a native module with an `os` / `cpu` list, and a hard dependency would refuse the whole install outside that list. Where it is absent `os serve` warns that the store was not mounted and boots on, `@objectstack/verify` does the same, and a source naming `turso` answers `SERVICE_UNAVAILABLE`. `KNOWLEDGE_STORE_PROVIDERS.turso` and the extra `resolveCapabilityExtras` answers for it carry `optional: true`.
+  - The `turso_url` setting's example path now reads `file:./.objectstack/data/knowledge.db` in every locale.
+
+### Patch Changes
+
+- b1c41e5: **Shipped in 19.0.0-next.0**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec,core): an import lookup cell that names a record under another parent answers its own reason, `reference_out_of_scope`, with the scoping columns as data
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added (`ValidateDataIssueSchema.scope`, a new optional key on the import cell error; the new `FieldErrorCode` value is a wire code, no author-writable key)
+  Skills-docs: follow-up #37590
+  
+  `FieldErrorCode` (ADR-0114) gains `reference_out_of_scope`. The importer answers it for a SCOPED lookup cell (a `dependsOn` column, or the master the same row sets) whose value matches no record within the row's scope while it does match a record outside it: the row names a record that lives under another parent. Until now that cell answered `reference_not_found`, the same reason as a value no record has, and only the message told the two apart (`Contract: no record matches "CTR-0006" (Account = "Acme")`); a client that keys its text on the reason, such as the Import Wizard's dry run, could only say "no matching record". The message is unchanged in English and has its own catalog key, `import_reference_out_of_scope`, in all four platform locales (a deployment overrides it under `validation.field.import_reference_out_of_scope`).
+  
+  The cell error, the element of an import row's `errors` (`ValidateDataIssueSchema`), now carries `scope` on that reason only: the row columns the lookup was resolved within, each `{ field, value }` with the cell as the importer typed it, so a client names the scoping column and its cell without parsing `message`.
+  
+  Unchanged: a value that matches no record at all, scoped or not, still answers `reference_not_found` with the plain sentence and no `scope`. The out-of-scope probe is still the importing caller's own read, so a record that caller cannot read is never named and its cell answers `reference_not_found`.
+  
+  What to do: a client that switches on `reference_not_found` to tell a user "no such record" keeps receiving it for a value no record has. A client that wants every unresolved lookup cell matches `reference_not_found` and `reference_out_of_scope` both.
+- ea1b70a: feat(plugin-grid,core): the Import Wizard names the column a lookup cell was scoped by when the value belongs to another parent; a scope no read could filter by says so
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The Import Wizard's dry run and completion screen render the import cell error `reference_out_of_scope` (#36794) with their own text, `"Design review" was found, but not under Project "Gemini"`, built from the cell error's `scope` (each scoping column by its label, with the cell the row gave it) and translated in all eleven UI locales (`grid.import.referenceOutOfScope`, `grid.import.scopeEntry`). The Wizard keys on the code and the structured `scope`, never on the server's sentence; a cell error with no `scope` shows the server's own sentence, already in the caller's locale.
+  
+  The importer no longer reports a scoped lookup as `reference_out_of_scope` when the engine refused its scoped reads because of the scope: a `dependsOn` whose `param` names a target field the engine cannot filter by (a `formula`) has every scoped read refused (`INVALID_FIELD` naming that field), so the scope was never asked. That cell keeps `reference_not_found`, with its own catalog sentence `import_reference_scope_unqueryable` in all four platform locales, which says the lookup could not be made within the scope and that the `dependsOn` entry should point at a stored target field. No unscoped probe runs for it and it carries no `scope`. A scoped lookup whose reads are all refused for any other reason (no read access to the target, say) keeps the plain `no record matches` sentence.
+  
+  Wording: `ImportRowResultSchema.errors` and the runner's `ImportRowResult.errors` now say that a `reference_out_of_scope` element carries `scope`; the error catalog page says `scope` names the row's own scoping columns, not the parent's.
+  
+  What to do: nothing. A client that matches `reference_not_found` for "the lookup cell did not resolve" keeps receiving it for the unfilterable scope.
+- d58bf7a: feat(spec)!: a knowledge source is a governed metadata type, `knowledge_source`, loaded by the knowledge service
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310. Here only the enumeration row: `skills/objectstack-platform/SKILL.md` lists the new top-level key `knowledgeSources`, and `skills/objectstack-ai/SKILL.md`'s compiled `supportKb` example writes `name` and `content`, because the 18 spelling no longer parses.
+  
+  <!-- adr-0087: registered knowledge-source-id-to-name, knowledge-source-content-fields-to-content, knowledge-source-inert-keys-removed, knowledge-source-content-lists-fields, knowledge-source-file-http-kinds-retired, knowledge-source-inert-keys-retired, knowledge-source-registration-governed -->
+  
+  ADR-0161 K4, K5, K6 and K8 item 4 (#37304).
+  
+  **BREAKING.** A knowledge source written for 18 is refused at parse until it is moved. `os migrate meta --from 18` lists every edit and `--write` applies the ones it can prove.
+  
+  | Wrote (18) | Write instead (19) |
+  |:--|:--|
+  | `id: 'support_kb'` | `name: 'support_kb'` (the value is unchanged, so the index is found again and nothing is rebuilt) |
+  | `source.contentFields: ['title', 'body']` | `source.content: ['title', 'body']` |
+  | `contentFields: ['*']` | `content` with every field named (a hand edit: only the author knows which fields may leave the row store) |
+  | `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron` | delete the key: nothing read it |
+  | `source.kind: 'file'` or `'http'`, with `prefix`, `mimeTypes`, `urls`, `userAgent` | a source indexes the records of one object (`kind: 'object'`); a file or URL source has no replacement |
+  | `knowledge.indexDocument(…)`, `knowledge.deleteDocument(…)` | no call: the service builds every document from the records a source selects; `reindexSource` rebuilds a source |
+  | `KnowledgeServicePlugin({ sources: [{ id, … }] })`, `registerSource({ id, … })` | the same call with the 19 shape, or the source shipped as metadata in the stack's `knowledgeSources` |
+  
+  What changes:
+  
+  - **The type.** `knowledge_source` is registered in the metadata type registry with the one schema `KnowledgeSourceSchema`; a stack carries its sources in the new top-level collection `knowledgeSources`, in `*.knowledge-source.ts` or `.yml` files. An item can be created and changed at run time (Studio, MCP); it takes no environment overlay. Studio's menu lists the type, and the metadata form bundles carry its label in every locale. Two packages may each ship a source of one name (ADR-0150, addendum of 2026-11-25): each has its own index, and `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
+  - **The schema is strict.** An undeclared key is refused, never dropped. `content` is a non-empty list of field names; an empty-string member is refused, and `'*'` is refused with the instruction to list the fields: embedding is egress, and the wildcard sent every text field of a record to the embedder, including one added to the object later. Credential-class and `internal` fields stay unindexed even when named.
+  - **The loader.** `KnowledgeServicePlugin` reads the published items when it starts and follows the type while it runs: an added source is registered and built when a build is due; a changed one is registered again, and a changed `where` or `metadataFields` rebuilds inside the generation while a changed `content` or `split` builds a new one; a removed one is unregistered and its index dropped. The reap guard now follows the sources, so a retention delete on an object first indexed by a source added after boot de-indexes the row. A deployment that holds an item and mounts no knowledge service says so once at boot, naming the items.
+  - **`IKnowledgeAdapter.dropSource?(ctx)`** removes everything an adapter holds for a source: every generation, the one under construction included, and what it recorded about the index. `knowledge-memory`, `knowledge-pgvector` and `knowledge-turso` implement it, and the contract suite (`@objectstack/service-knowledge/testing`) takes a new `implements.dropSource` declaration. Over an adapter without it, a removed source's index is kept and the service says so once. An adapter is handed the source's index key as `ctx.source.name` (it was `ctx.source.id`): the bare name for a source no package holds, so an existing index is found under the same key.
+  - **A capability of its own.** New platform capability `manage_knowledge_sources`: a write of a `knowledge_source` through `/meta` (REST and the dispatcher: save, publish, rollback, delete) and through the MCP draft door needs it beside `manage_metadata`. Platform administrators hold it by default; a grant on the indexed object's records does not imply it. A caller without it is refused `403 PERMISSION_DENIED`, naming the capability. The package doors ask it too: every write to an existing package that holds a knowledge source (an item, a pending draft, or for the commit revert and the rollback a commit that touched one) needs the capability: enable, disable, publish, publish-drafts, discard-drafts, the commit revert, rollback, revert, adopt-orphans, duplicate, the manifest update and delete. A package that holds none is written as before. The install door is not asked, and neither is ensure-customization, which writes nothing of the base and creates an empty pair. For a caller without the capability the doors read the package's holding before their own request checks, so such a caller hears this `403` ahead of a `400`, `404` or `422` the door would have answered for the same request; a holding that cannot be read refuses `503` and changes nothing (a host with no metadata store holds none). A duplicate also admits each knowledge source it copies for the caller (source admission, below), and refuses the whole copy when one is refused.
+  - **Source admission at save.** Those same doors save a source only when its author may themselves search what it would index: an object of a disabled package, an object the API does not serve for `search`, a system object without `enable.aiReadable`, or a field the author may not query refuses the save `403`, naming the object or the field; a verdict that cannot be reached, or a knowledge service that is registered and cannot be resolved, refuses `503`. The fields judged are the ones the source serves and the ones its `where` reads, at save and at search: a source whose `where` reads a field a caller may not query is not searched for that caller. Over MCP it is the human who is judged. Where no knowledge service is mounted there is nothing to ask, and the save goes on.
+  - **One name, one source.** `KnowledgeServicePlugin({ sources })` and `registerSource` stay a door for the same schema and parse with it: a retired key is refused with its prescription (`400 VALIDATION_ERROR`), not converted. A source registered in code belongs to no package. It shares one slot with an environment-authored item of the same name, and the second of the two to arrive is refused `409 RESOURCE_CONFLICT`, naming both doors; a metadata item reloading its own earlier version is not a second arrival.
+  - **The push door leaves.** `IKnowledgeService.indexDocument` and `deleteDocument` are removed, with the `file` / `http` branches that served them. They are runtime-interface-only members with no metadata form, so the compiler reports each call (`TS2339`).
+  - **Removed exports**, twelve, all from `@objectstack/spec/ai`. The whole `embedding` module leaves with `embedding` and `vectorStore`, because the knowledge source was its only composer: `EmbeddingModelSchema`, `VectorStoreSchema`, `VectorStoreProviderSchema` and the types `EmbeddingModel`, `VectorStore`, `VectorStoreProvider`. The source kinds leave with `file` and `http`: `FileKnowledgeSourceSchema`, `HttpKnowledgeSourceSchema`, `KnowledgeSourceKindSchema` and the types `FileKnowledgeSource`, `HttpKnowledgeSource`, `KnowledgeSourceKind`. None has a replacement; an import of one is a compile error.
+  - **CLI.** `os knowledge status` prints the package that holds a source and no longer prints a source kind.
+- 6b7b305: fix: the 5xx fault log and `ObjectLogger` print an error's `cause` chain
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A server fault thrown with the original error on `cause` used to log the wrapper's message and stack only, so the root cause was missing from the operator's line. `logServerFault` (`@objectstack/types`) now prints the chain as `causes` beside `stack` on its console fallback, and `ObjectLogger` (`@objectstack/core`) prints it as `error.causes` for every `logger.error` / `logger.fatal` that passes an error. Each link carries its message and stack; a cycle stops at the first repeat and a chain stops after five links, each saying so in a last link. Nothing reaches a response body.
+  
+  `@objectstack/service-record-context` drops the `Caused by:` suffix it appended to a failed read's stack, since the fault line now renders the `cause` itself.
+- 520cf3f: fix(lint): a skill's `context` naming a pack a declared dependency in the artifact ships no longer warns `ai-skill-context-unknown`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  `ai-skill-context-unknown` judged a skill's `context` against the stack's own `aiContexts` only, so `os validate`, `os build` and `os lint` warned in their per-package pass about a pack that a package the skill's package depends on ships, though the MCP skill prompt resolves that pack. The rule now resolves `context` by the one ADR-0150 D3 rule the prompt uses, over the stack's own packs and the packs of the artifact's other packages, in the skill's package closure (its declared dependencies plus every `sys` package). A pack a declared dependency in the artifact ships gets no warning. A pack that only a sibling package outside the closure ships still warns, naming the holder and saying to declare the dependency. A pack two packages in reach both ship warns, naming both. A pack no package in the artifact ships warns as before.
+  
+  `@objectstack/metadata-core` now exports the ADR-0150 D3 resolution rule, `resolvePackageScopedHolders`, with its holder source, refusal, refusal error class and vocabulary (`packageScopedHolderSource`, `PackageScopedNameRefusedError`, `PACKAGE_SCOPED_TYPES`, `BARE_NAME_ONE_HOLDER_TYPES` and the rest of that module). They moved there from `@objectstack/core` so lint, which depends on metadata-core and never on a runtime, can call the same rule. `@objectstack/core` re-exports every name under the same spelling, and each value is the very object metadata-core exports, so `instanceof PackageScopedNameRefusedError` holds whichever package a caller imports it from.
+  
+  Nothing to migrate: every `@objectstack/core` import of these names keeps working unchanged.
+- 8071f35: fix(automation): a record-change flow's run history and its notification deliveries land again when the triggering write runs in a unit of work
+  
+  Clause-②: yes (widening) — `ObjectQL` is exported from the `@objectstack/objectql` entry, and it gains two public methods, `runOutsideOpenUnits(body)` and `runAfterOpenUnitsCommit(body)`; `@objectstack/core` gains the root export `wakeAfterOpenUnitsCommit(engine, wake)`; the `@objectstack/service-automation` interface `SuspendedRunStoreEngine` gains the matching optional member `runOutsideOpenUnits`, so an engine that does not supply it still satisfies the interface. No existing signature or accepted input narrows. `DispatchLoop`'s change is to the async context its ticks run in, and the dispatchers' change is to when a wake is sent, not to any API. The level stays `patch` because nothing a metadata author can write changes (`Metadata-protocol: none`).
+  Metadata-protocol: none
+  
+  On 19.0.0-next.0 a record-change flow fired by a write whose object carries a metadata `before*` hook, or a blocking `after*` hook that can abort, finished inside the unit of work the write door opens for that write. Two pieces of work the run starts and does not await then ran on that unit's transaction after it had committed, and the database answered "Transaction query already complete":
+  
+  - the run's terminal history row (`sys_automation_run`) never landed, so the run was missing from the Runs surfaces and from every read of its history, with an `error` line naming the persist;
+  - a `notify` node's outbox wake started the notification dispatcher's tick in the same unit, so the tick's delivery updates failed, and with them the audit rows (`sys_activity`) those updates write.
+  
+  Both now run outside the unit:
+  
+  - `ObjectQL.runOutsideOpenUnits(body)` is new: it runs work its caller starts and does not await outside every unit of work open at the call, the same exit an `async: true` hook's run takes. Its calls run on their own connection, and a rollback of the unit open at the call does not undo them.
+  - The durable run-history store writes a finished run's row through it.
+  - `DispatchLoop` (the notification, HTTP-delivery, database-queue and audit-seal loops) runs every tick in the async context it was constructed in, never in the context of the caller of `start()`, `wake()` or `wakeAt()`.
+  - A wake for a row the open unit just wrote is sent at that unit's commit, and not at all when it rolls back: `ObjectQL.runAfterOpenUnitsCommit(body)` is new, and the notification and HTTP outboxes' wake and the database queue's `publish` and `replay` wake go through it (`wakeAfterOpenUnitsCommit` in `@objectstack/core`). A tick woken inside the unit runs outside it, and on a pooled driver (Postgres, MySQL) it could not see the row yet, so the row would have waited for a later, backed-off tick. A unit opened by `ScopedContext`'s `beginTransaction` trio holds the wake back while an engine call carrying its handle runs; a wake made outside such a call, by code that holds the trio handle only explicitly, goes at once, and on a pooled driver waits one backed-off tick.
+  - A loop's home is the context it is constructed in, so a loop is constructed at boot; `DbQueueAdapter`'s first `subscribe()` under `autoStart` starts it too and belongs at boot.
+  
+  What a reader sees change: a run's history row is written beside the run, not inside the triggering write's unit, so it is not rolled back with that write, and it can land a moment after the write has returned. Read it the way you read any history row written by a run that is not awaited: wait for it to land rather than reading it once straight after the write.
+- 709a087: fix(lint,core)!: a lookup `dependsOn` entry whose filter key names a formula of the referenced object is refused at authoring; an import lookup none of whose scoped reads answered is never reported as out of scope
+  
+  Clause-②: yes (narrowing) — a lookup, master_detail or user field whose `dependsOn` filter key names a field of the referenced object computed on read (a `formula`) publishes today and is now refused at `error` by `object-field-ref-unknown`
+  Metadata-protocol: narrowed — a `dependsOn` filter key naming a field of the referenced object computed on read is refused at authoring
+  Skills-docs: none — no published skill page teaches a `dependsOn` filter key on a formula
+  
+  <!-- adr-0087: registered lookup-depends-on-param-computed-field-refused -->
+  
+  **BREAKING** for the publish of an object with such a `dependsOn` entry: it was accepted before and is refused now, by `objectstack validate` / `lint` / `compile` / `build` and by the runtime publish gate, with the field and the fix named in the finding. The schema is unchanged, and stored objects are not rewritten or refused at boot; the refusal comes at the next publish.
+  
+  **Why.** The record picker filters its candidates, and the importer scopes a lookup cell, by the entry's filter key on the referenced object (`param` in `{ field, param }`, else the bare name or `field`). The engine refuses every filter on a field computed on read, so such an entry published clean, then every picker query it scoped was refused and every import of the column failed its lookup. The finding names the referenced field and why it cannot be filtered on, for example `fields.task.dependsOn[0].param "project_label" is a formula field of "oos_task", computed on read: no record-picker query or import lookup can filter on it.`
+  
+  ## FROM → TO
+  
+  - `dependsOn: [{ field: 'project', param: 'project_label' }]`, where `project_label` is a formula of the referenced object → `dependsOn: [{ field: 'project', param: 'project' }]`, naming the stored field of the referenced object that holds the same value; or drop the entry.
+  - `dependsOn: ['region']`, where `region` is a formula on the referenced object → `dependsOn: [{ field: 'region', param: 'region_code' }]` with `region_code` a stored field of the referenced object.
+  
+  A formula on the OWNING object stays a legal gate (`dependsOn[i].field`): the form reads it from the record being edited.
+  
+  **`@objectstack/core`, the importer.** A scoped lookup none of whose reads answered (every read refused, for example because the row's master cell is a value the scoping field's type cannot take) is no longer asked again without the scope. It keeps `reference_not_found` and the plain `no record matches` sentence, and never answers `reference_out_of_scope`, which it could before when the value matched a record outside the scope. `RefMatch` gains the optional member `scopeUnanswered`, which a resolver sets for such a lookup.
+  
+  Measured first-party exposure: none. Every `dependsOn` in `examples/` and in the packaged objects names a stored field on the referenced side, or sits on a field type with no picker.
+  
+  `@objectstack/spec` adds only the upgrade-guide entry `lookup-depends-on-param-computed-field-refused`.
+- Updated dependencies [0296d97]
+- Updated dependencies [bb76b8c]
+- Updated dependencies [d9bc148]
+- Updated dependencies [c42a045]
+- Updated dependencies [58570d8]
+- Updated dependencies [81c68b3]
+- Updated dependencies [eb683b8]
+- Updated dependencies [561fe12]
+- Updated dependencies [f722411]
+- Updated dependencies [c3a4a30]
+- Updated dependencies [b1c41e5]
+- Updated dependencies [ea1b70a]
+- Updated dependencies [dedc16c]
+- Updated dependencies [adb65d1]
+- Updated dependencies [adb65d1]
+- Updated dependencies [87af66e]
+- Updated dependencies [ddd5941]
+- Updated dependencies [d58bf7a]
+- Updated dependencies [bebc2cf]
+- Updated dependencies [c3da753]
+- Updated dependencies [9a65a48]
+- Updated dependencies [9b99640]
+- Updated dependencies [712df42]
+- Updated dependencies [579b857]
+- Updated dependencies [50b4bf8]
+- Updated dependencies [6b7b305]
+- Updated dependencies [91875c7]
+- Updated dependencies [520cf3f]
+- Updated dependencies [1bc265f]
+- Updated dependencies [39fafc0]
+- Updated dependencies [b1490f2]
+- Updated dependencies [44ccf94]
+- Updated dependencies [1dbf19a]
+- Updated dependencies [14badad]
+- Updated dependencies [f4d6bc5]
+- Updated dependencies [3e87d7b]
+- Updated dependencies [f07d63a]
+- Updated dependencies [709a087]
+- Updated dependencies [54dc93a]
+- Updated dependencies [56c9cae]
+- Updated dependencies [c826e8a]
+- Updated dependencies [8fbae19]
+- Updated dependencies [b620c4b]
+- Updated dependencies [babd660]
+  - @objectstack/spec@19.0.0-next.1
+  - @objectstack/metadata-core@19.0.0-next.1
+  - @objectstack/types@19.0.0-next.1
+
 ## 19.0.0-next.0
 
 ### Minor Changes

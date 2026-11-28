@@ -69,7 +69,7 @@ const act = (name: string, label: string, extra: Record<string, unknown> = {}) =
   label,
   type: 'url',
   target: `https://example.com/${name}`,
-  locations: ['record_header'],
+  locations: ['record_page'],
   ...extra,
 });
 

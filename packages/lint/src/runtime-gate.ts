@@ -311,6 +311,17 @@ const TYPE_TO_STACK_KEY: Readonly<Record<string, string>> = {
   // pack's names into `objects`, which every snapshot carries, and nothing
   // into a sibling pack.
   ai_context: 'aiContexts',
+  // [ADR-0161 K4, row 4] `knowledge_source` — `allowRuntimeCreate: true`, so
+  // Studio, REST `/meta` and an MCP/AI author mint sources at runtime, and the
+  // ADR says a packaged item meets the gates that need no principal at
+  // publish as in `os validate`. ⛔ NOT a mapping ahead of its rule:
+  // `validateKnowledgeSource` crosses with this row and opens on
+  // `stack.knowledgeSources`, the key `ObjectStackDefinitionSchema` gives the
+  // collection. Not a context row either, for the `position` / `app` reason
+  // above: the rule resolves a source's names into `objects`, which every
+  // snapshot carries, and nothing into a sibling source. Unlike the
+  // `ai_context` row, its errors refuse the publish (the rule is gating).
+  knowledge_source: 'knowledgeSources',
 };
 
 /**

@@ -90,6 +90,8 @@ vi.mock('./useMetadata', () => ({
 
 import { ActionDefaultInspector } from './inspectors/ActionDefaultInspector';
 import { ActionPreview } from './previews/ActionPreview';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 /** The reporting app's action, reduced to the members these cases read. */
 const GATED = {
@@ -98,7 +100,7 @@ const GATED = {
   type: 'script',
   objectName: 'duly_catalog_item',
   target: 'true',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   requiredPermissions: ['duly.catalog.apply'],
 };
 
@@ -180,7 +182,7 @@ describe('objectui#7234 — the designer states why a gated action is missing', 
     expect(previewRequires()).toHaveTextContent('duly.catalog.apply');
     expect(previewNote()).toHaveTextContent('duly.catalog.apply');
     // Paired positive: the notice was added to "Where it appears", it did not
-    // replace it. The row strip is unique to `PlacementPreview`'s list_toolbar
+    // replace it. The row strip is unique to `PlacementPreview`'s list
     // frame (the bare location name also appears in the metadata strip), so a
     // deleted or emptied PlacementPreview fails here.
     expect(screen.getByText('row 1 · row 2 · row 3')).toBeTruthy();

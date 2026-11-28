@@ -2374,7 +2374,29 @@ const ko = {
           availableObjects: "사용 가능한 데이터 객체를 나열해 주세요.",
           recentActivity: "내 최근 활동을 요약해 주세요.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: '이 레코드 요약',
+            related: '이 레코드와 관련된 항목은?',
+          },
+          list: {
+            summarize: '이 목록의 레코드 요약',
+            recent: '이번 주에 추가된 레코드는?',
+          },
+          dashboard: {
+            explain: '이 대시보드는 무엇을 보여 주나요?',
+            standOut: '이 대시보드에서 눈에 띄는 점은?',
+          },
+          report: {
+            summarize: '이 보고서 요약',
+            takeaways: '이 보고서의 핵심 내용은?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: '추천 질문',
       discussing: "보는 중: {{target}}",
       focus: {
         pin: "이 레코드에 대해 계속 질문",
@@ -2411,7 +2433,7 @@ const ko = {
         expand: "펼치기",
         restore: "사이드 패널로 복원",
         open: "어시스턴트 열기",
-        planAwaitingApproval: "제안된 계획이 승인을 기다리고 있습니다",
+        planAwaitingApproval: "작업이 승인을 기다리고 있습니다",
         close: "닫기",
         more: "추가 작업",
       },
@@ -3500,6 +3522,7 @@ const ko = {
     recent: "최근",
     starred: "즐겨찾기",
     removeFromFavorites: "즐겨찾기에서 {{name}} 제거",
+    conversationUnavailable: "이 대화는 더 이상 사용할 수 없습니다",
     allReports: "모든 보고서",
     collapse: '사이드바 접기',
     expand: '사이드바 펼치기',
@@ -4131,10 +4154,12 @@ const ko = {
       slugTaken: '해당 슬러그는 이미 사용 중입니다.',
       notAllowedToCreate: '새 조직을 만들 권한이 없습니다.',
       organizationLimitReached: '만들 수 있는 조직 수의 한도에 도달했습니다. 초대받아 참여한 조직은 한도에 포함되지 않습니다.',
+      unpaidOrganizationLimitReached: '한 계정이 소유할 수 있는 무료 조직의 한도에 도달했습니다. 조직을 더 만들려면 그중 하나를 유료 플랜으로 업그레이드하거나 지원팀에 문의하세요. 초대받아 참여한 조직은 포함되지 않습니다.',
       notTheRecipient: '이 초대의 수신자가 아닙니다.',
       invitationNotFound: '이 초대는 이미 사용되었거나 만료되었거나 취소되었습니다. 이미 수락했다면 조직 목록에서 해당 조직을 찾을 수 있습니다.',
       unknown: '문제가 발생했습니다. 다시 시도해 주세요.',
     },
+    viewPlans: '플랜 보기 및 업그레이드',
     backToList: "조직 목록으로 돌아가기",
     notFound: "조직을 찾을 수 없음",
     notFoundDescription: "이 조직이 존재하지 않거나 접근 권한이 없습니다.",
@@ -4607,6 +4632,7 @@ const ko = {
       add_field: "오브젝트에 필드 추가하기",
       apply_blueprint: "설계안대로 앱 만들기",
       apply_edit: "이번 변경 적용하기",
+      ask_which: "질문 의도 확인",
       create_metadata: "메타데이터 새로 만들기",
       create_object: "오브젝트 새로 만들기",
       create_package: "패키지 새로 만들기",
@@ -5467,6 +5493,7 @@ const ko = {
       toggleFailed: "앱 상태 전환 실패: {{reason}}",
       setDefaultDone: "{{name}}을(를) 기본값으로 설정했습니다",
       setDefaultFailed: "기본 앱 설정 실패: {{reason}}",
+      restoreDefaultFailed: "{{name}}을(를) 기본 앱으로 복원하지 못해 더 이상 기본 앱이 아닙니다: {{reason}}",
       appDeleted: "{{name}}을(를) 삭제했습니다",
       deleteFailed: "앱 삭제 실패: {{reason}}",
       nothingToDelete: "{{name}}에 삭제할 항목이 없습니다: {{reason}}",

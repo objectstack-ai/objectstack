@@ -93,6 +93,7 @@ import {
   canServeApiOperation,
   type EnableLike,
   referenceTargetOf,
+  resolveInjectedColumnProvenance,
   resolveUserActionTransfer,
   transferCascadeIneligibilityReason,
   transferIneligibilityReason,
@@ -100,7 +101,6 @@ import {
 import { SystemFieldName } from '@objectstack/spec/system';
 import { objectNotFoundError } from '../utils/object-not-found.js';
 import { objectPackageDisabledError } from '../utils/object-package-disabled.js';
-import { recordNotFoundError } from '../utils/record-not-found.js';
 import {
   assertAssignableUser,
   failureOf,
@@ -159,11 +159,24 @@ function lockedOwnerRefusal(err: unknown, object: string, id: string): Error | u
 /**
  * One record's owner write: a by-id update under the caller's context with
  * {@link OWNER_WRITE_OPTIONS}, a locked owner or queue answered as
- * {@link lockedOwnerRefusal}. Answers what the engine answers.
+ * {@link lockedOwnerRefusal}. Resolves once the write landed; any other
+ * outcome is a throw.
+ *
+ * The engine's answer is never read as "not found". A by-id update reads the
+ * row as the caller BEFORE it writes and throws `404 RECORD_NOT_FOUND` itself
+ * when the caller cannot reach it (`engine-update.ts`, the not-found gate),
+ * so a call that returns wrote the row. What it returns is the driver's
+ * post-write read-back, and that is `null` for a write that landed: a change
+ * of owner that moves the row out of the caller's own row scope (handing a
+ * record away under an owner-scoped read) reads back nothing, the case the
+ * engine names when it explains why it asks existence before the write. A
+ * driver that answers the write with nothing at all wrote it too. Reading
+ * either as "not found" would answer 404, list the row as failed and tell
+ * nobody, for a record that moved.
  */
-async function writeOwner(engine: ChangeOwnerEngine, object: string, id: string, changeSet: AnyRec, context: unknown): Promise<unknown> {
+async function writeOwner(engine: ChangeOwnerEngine, object: string, id: string, changeSet: AnyRec, context: unknown): Promise<void> {
   try {
-    return await engine.update(object, changeSet, { where: { id }, context, ...OWNER_WRITE_OPTIONS });
+    await engine.update(object, changeSet, { where: { id }, context, ...OWNER_WRITE_OPTIONS });
   } catch (err) {
     throw lockedOwnerRefusal(err, object, id) ?? err;
   }
@@ -344,6 +357,8 @@ export function changeOwnerOffRefusal(object: string, reason: string): Error {
  * read and before any write or notification. `getSchema` still resolves such
  * an object (disable is reversible and keeps it registered), so the switch
  * alone would let it through.
+ *
+ * Whether the object can take a queue target is {@link carriesQueueColumn}.
  */
 function offeredDefinition(engine: ChangeOwnerEngine, object: string, target: ChangeOwnerTarget): AnyRec {
   const def = asRecord(engine.getSchema(object));
@@ -351,14 +366,29 @@ function offeredDefinition(engine: ChangeOwnerEngine, object: string, target: Ch
   if (engine.registry?.isObjectPackageDisabled?.(object) === true) throw objectPackageDisabledError(object);
   const reason = changeOwnerOffReason(object, def);
   if (reason) throw changeOwnerOffRefusal(object, reason);
-  if (target.queue !== undefined) {
-    const fields = asRecord(def.fields);
-    if (!fields || !Object.prototype.hasOwnProperty.call(fields, QUEUE_FIELD)) {
-      throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR',
-        `'${object}' has no ownership queue column, so its records cannot be moved to a queue; name a person in ownerId instead`);
-    }
+  if (target.queue !== undefined && !carriesQueueColumn(def)) {
+    throw new UserWorkTransferRefusal(400, 'VALIDATION_ERROR',
+      `'${object}' has no ownership queue column, so its records cannot be moved to a queue; name a person in ownerId instead`);
   }
   return def;
+}
+
+/**
+ * [ADR-0142 D3] Does `def` carry the platform's `queue` column with storage
+ * behind it — the engine's own test (`carriesQueueColumn`, `@objectstack/objectql`'s
+ * assignment rules), asked of the spec's provenance verdict so this package
+ * and the engine judge one answer.
+ *
+ * Not "does a field named `queue` appear in `fields`". The injection registers
+ * `queue` wherever it registers `owner_id`, on an external (ADR-0015) object
+ * too, where no column backs it: a name test admits that object and sends the
+ * remote system a queue write instead of refusing. A `queue` field the author
+ * declared is the author's, not the ownership queue, and admits nothing. And
+ * the verdict reads either registered `fields` shape, a list as well as a
+ * record keyed by name.
+ */
+function carriesQueueColumn(def: AnyRec): boolean {
+  return resolveInjectedColumnProvenance(def, QUEUE_FIELD) === 'injected-provisioned';
 }
 
 /** The change-set one record's owner change writes. */
@@ -632,10 +662,7 @@ async function runCascade(
             // The parent's own owner write, so a child whose `owner_id` is locked
             // on that row (read-only, or a `readonlyWhen` that holds) is refused
             // `403 FIELD_NOT_ACCESSIBLE` and listed here, never counted as moved.
-            const written = await writeOwner(engine, rel.object, String(childId), { [SystemFieldName.OWNER_ID]: newOwner }, context);
-            if (written === null || written === undefined || written === 0) {
-              throw recordNotFoundError(rel.object, String(childId), context as Parameters<typeof recordNotFoundError>[2]);
-            }
+            await writeOwner(engine, rel.object, String(childId), { [SystemFieldName.OWNER_ID]: newOwner }, context);
             outcome.updated += 1;
           } catch (err) {
             outcome.failed += 1;
@@ -665,8 +692,10 @@ async function runCascade(
  * refusal for a row the caller may not move (the route answers it as the
  * `/data` door answers the same throw), `403 FIELD_NOT_ACCESSIBLE` when a
  * `readonlyWhen` lock holds `owner_id` or `queue` on the row, `404
- * RECORD_NOT_FOUND` for a row the caller cannot reach, and the whole-call
- * refusals of {@link changeRecordsOwner}.
+ * RECORD_NOT_FOUND` for a row the caller cannot reach (the engine's own
+ * refusal, thrown before the write), and the whole-call refusals of
+ * {@link changeRecordsOwner}. A row the move takes out of the caller's sight
+ * moved, and is answered as moved ({@link writeOwner}).
  */
 export async function changeRecordOwner(
   engine: ChangeOwnerEngine,
@@ -687,10 +716,7 @@ export async function changeRecordOwner(
   const relations = cascadeRelationsOf(engine, object, options.cascade, target);
   await assertTarget(engine, target, context);
   const before = relations.length > 0 ? await previousOwners(engine, object, [id], context) : undefined;
-  const written = await writeOwner(engine, object, id, ownerChangeSet(target), context);
-  if (written === null || written === undefined || written === 0) {
-    throw recordNotFoundError(object, id, context as Parameters<typeof recordNotFoundError>[2]);
-  }
+  await writeOwner(engine, object, id, ownerChangeSet(target), context);
   const ownerId = target.ownerId ?? null;
   const cascade = before && ownerId !== null
     ? await runCascade(engine, relations, [{ id, previousOwner: before.get(id) }], ownerId, context,
@@ -763,10 +789,7 @@ export async function changeRecordsOwner(
   const moved: string[] = [];
   for (const id of ids) {
     try {
-      const written = await writeOwner(engine, object, id, { ...changeSet }, context);
-      if (written === null || written === undefined || written === 0) {
-        throw recordNotFoundError(object, id, context as Parameters<typeof recordNotFoundError>[2]);
-      }
+      await writeOwner(engine, object, id, { ...changeSet }, context);
       report.updated += 1;
       moved.push(id);
     } catch (err) {

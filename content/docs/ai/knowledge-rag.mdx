@@ -14,7 +14,7 @@ ObjectStack ships a Knowledge Protocol that lets you retrieve from pluggable bac
 
 ## Turning it on: `requires: ['knowledge']`
 
-Add `knowledge` to your app's `requires`, and `os dev`, `os serve` and `os start` mount the knowledge service and one vector store for you — and in an app's tests, `bootStack` from `@objectstack/verify` mounts the same:
+Ship a knowledge source in your app ([below](#writing-a-source)), or add `knowledge` to its `requires`, and `os dev`, `os serve` and `os start` mount the knowledge service and one vector store for you — and in an app's tests, `bootStack` from `@objectstack/verify` mounts the same. A source in the app's `knowledgeSources` is enough on its own; the token is for an app that ships none and authors its sources at run time:
 
 ```ts
 export default defineStack({
@@ -30,7 +30,8 @@ Which store is mounted depends on the platform database:
 | PostgreSQL | `@objectstack/knowledge-pgvector` | `pgvector` | the platform database, schema `os_knowledge` ([below](#self-hosted-vector-store-postgresql--pgvector)) |
 | anything else (SQLite under `os dev`, libSQL, MySQL, MongoDB) | `@objectstack/knowledge-turso` | `turso` | `knowledge.db` in the directory of the default database and never its file: `.objectstack/data/`, or `<OS_HOME>/data/` when `OS_HOME` is set ([below](#local-vector-store-a-libsql-file)) |
 
-- **Sources are metadata**: list them under `knowledgeSources` ([below](#writing-a-source)), and name the adapter of the store your database gets (`adapter: 'turso'` or `adapter: 'pgvector'`).
+- **Sources are metadata**: list them under `knowledgeSources` ([below](#writing-a-source)). A source needs no `adapter`: one left out is held by the store in this table — the deployment's store — so the same source builds on SQLite under `os dev`, on PostgreSQL and on a hosted environment. Name an adapter only to place a source on another store you mounted.
+- **Two stores and none the deployment's** (a host that mounts the service and two adapters itself): a source that names no adapter is refused when it is registered or saved — `VALIDATION_ERROR` (400), naming the adapters to choose from.
 - **A source naming a store that is not mounted** does not stop the boot: the server logs one error naming the source and the stores that are mounted, and indexing or searching that source answers `SERVICE_UNAVAILABLE` (503) with the same choices; `search_knowledge` lists it in `refused`.
 - **The embedder** comes from Settings → AI & Embedder ([below](#configuring-the-embedder-from-settings)).
 - **Another libSQL store** for the `turso` case: save its URL as `turso_url` (and `turso_auth_token` for a managed `libsql://` database) in Settings → Knowledge, then restart. A `file:` URL saved there must name a file inside that same data directory, and a URL carrying a NUL byte or another control character, written out or percent-encoded (`%00`), is refused, as is a token carrying one (a pasted line break counts); either way the store answers `SERVICE_UNAVAILABLE` saying why, and the boot goes on.
@@ -38,14 +39,15 @@ Which store is mounted depends on the platform database:
 - **Settings → Knowledge** holds only what the service and its store read: `turso_url` and `turso_auth_token`, which `@objectstack/knowledge-turso` adds to the page where it is the store and reads them (on PostgreSQL the page shows neither), and `chunk_target`, the longest passage the splitter cuts. The page names no adapter: a source's store is the one its own `adapter` names, and `os knowledge status` reports it per source. Every search re-checks each hit as the asking user, and no setting turns that off.
 - **More than one replica** on MySQL, MongoDB or a remote libSQL database: each replica keeps its own local `knowledge.db` and indexes only the record writes that replica itself handles, so replicas answer from indexes that differ. Give them one store: save a shared `libsql://` URL in `turso_url`, or run on PostgreSQL, where the vectors live in the one database.
 - **An install without the libSQL client**: `@objectstack/knowledge-turso` is an optional dependency of the CLI, because its client is a native module. Where it could not be installed the server warns at boot that the store was not mounted, and sources naming `turso` answer `SERVICE_UNAVAILABLE`.
-- **Without the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
+- **Without a source or the token** nothing is mounted: no knowledge service, no store and no Knowledge settings page. `knowledge-memory` is never mounted for you.
 - **Mounting it yourself** still works: an app whose `plugins` already hold `KnowledgeServicePlugin` keeps its own, and the runtime adds neither a second service nor a store.
 
 ## Writing a source
 
 A knowledge source is a metadata item: a `*.knowledge-source.ts` file in your
 app, listed under `knowledgeSources`. It says which object's records to
-index, which fields become searchable text, and which adapter holds the index.
+index and which fields become searchable text; the deployment's store holds the
+index unless the source names another.
 
 ```ts
 // src/ai/task-notes.knowledge-source.ts
@@ -54,7 +56,7 @@ import type { KnowledgeSource } from '@objectstack/spec/ai';
 export const TaskNotes: KnowledgeSource = {
   name: 'task_notes',
   label: 'Task notes',
-  adapter: 'turso', // 'pgvector' when the platform database is PostgreSQL
+  // No `adapter`: the deployment's store (turso, or pgvector on PostgreSQL).
   source: { kind: 'object', object: 'task', content: ['title', 'notes'] },
 };
 ```
@@ -65,8 +67,7 @@ import { defineStack } from '@objectstack/spec';
 import { TaskNotes } from './src/ai/task-notes.knowledge-source.js';
 
 export default defineStack({
-  requires: ['knowledge'],
-  knowledgeSources: [TaskNotes],
+  knowledgeSources: [TaskNotes], // mounts the knowledge service: no `requires` entry
   // …
 });
 ```
@@ -76,7 +77,7 @@ and keeps the index in step with the records. There is no registration call
 to write.
 
 - **`content` lists its fields by name.** What is listed is what leaves the row store: the text of those fields is sent to the embedder and kept in the index. `'*'` is refused, and a field added to the object later is not indexed until you add it here.
-- **A source can also be created or changed at run time**, in Studio or through MCP, with no restart: a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
+- **A source can also be created or changed at run time**, in Studio or through MCP, with no restart where the knowledge service is mounted (above): a new source is loaded and built, a changed one is reloaded (and rebuilt when what it indexes changed), and a removed one has its index dropped.
 - **Authoring one needs `manage_knowledge_sources`** beside `manage_metadata` — platform administrators hold it by default — and the author must themselves be allowed to search the object and query every listed field and every field `where` reads, or the save is refused naming what they may not read. A write to a package that holds a source (publish its drafts, roll it back, duplicate, disable or delete it) needs the same capability.
 - **Two packages may each ship a source of the same name.** `search_knowledge` lists a package's source as `NAMESPACE-NAME` and takes that spelling in `sourceIds`.
 - **Registering in code still works**: `new KnowledgeServicePlugin({ sources: [TaskNotes] })` or `knowledge.registerSource(TaskNotes)` takes the same shape. A source registered in code and an item saved under the same name are one name: the second to arrive is refused.
@@ -124,6 +125,15 @@ the matching records still gets up to `topK` hits
 ([the protocol](/docs/protocol/knowledge) gives the factors and the cap). A
 hit's `title` is the value of the object's display field (`nameField`, else the
 derived title field).
+
+The two open stores, [pgvector](#self-hosted-vector-store-postgresql--pgvector)
+and [libSQL](#local-vector-store-a-libsql-file), search with two legs: the
+vector leg ranks by meaning, and a keyword leg ranks the passages that hold the
+query's terms as written — an order number, a model code like `X-200`, a
+person's name, a short term like 「出差」 — which a vector alone can rank
+below `topK`. The two rankings are merged by reciprocal rank fusion, so a hit's
+`score` is 1 for a passage first in both and 0.5 for one first in only one, and
+the merge happens before the permission re-check.
 
 ```ts
 const knowledge = ctx.getService('knowledge');
@@ -208,14 +218,14 @@ The answer never says how many hits the permission re-check or the scope removed
 ## What you get for free
 
 - **Permission-aware retrieval.** Every hit with a `sourceRecordId` is re-checked against the caller's `ExecutionContext` via `IDataEngine` — the same RLS that gates plain ObjectQL queries. A salesperson asking "find proposals about ACME" only sees the proposals they could already read directly. Before a source is searched, the caller's field-level read rules and the object's API exposure are asked too: a source serving a field the caller may not query is not searched for them (see [the protocol's source admission](/docs/protocol/knowledge#source-admission-exposure-and-field-level-rules)). File / HTTP hits pass through (ACL is the adapter's problem).
-- **Inline event sync.** When records on indexed objects change, the kernel's `IRealtimeService` events drive `KnowledgeService.handleRecordUpsert/Delete` automatically. No cron, no queue (yet — Phase 2).
+- **Record sync through the queue.** When a record of an indexed object is saved, restored or deleted, the save publishes one message per source to the `knowledge-record-sync` queue, once its unit of work commits and never for a write that rolls back; a worker re-reads the row and writes or removes its document. The message holds the source, the object, the record id and the reason, never a field value. The save does not wait for the embedder; a failed sync is retried (eight attempts over about six and a half minutes, `recordSyncRetry`) and then kept as a dead letter (`listFailed`) that the daily reconcile repairs; messages survive a restart. Without a durable queue (only the kernel's in-memory fallback) the sync runs inline, as before, and the boot says so once at `warn`: compose `QueueServicePlugin` over the ObjectQL engine. Details in [the protocol's sync model](/docs/protocol/knowledge#through-the-queue).
 - **Adapter swap, zero caller changes.** Move from `memory` to `pgvector` or `turso`, or to a custom adapter, without touching your `search` calls, the `search_knowledge` tool, or any agent prompt.
 
 ## Configuring the embedder from Settings
 
 When `KnowledgeServicePlugin` is mounted beside the settings service, Settings → AI & Embedder offers an **Embedder** section (`ai.embedder_*`): provider, API key, model, Base URL (for a custom or Azure endpoint), dimensions and batch size. The knowledge plugin reads those settings once, when the server starts, and registers the `EMBEDDER_SERVICE` (`'embedder'`) that knowledge adapters embed with:
 
-- **An embedder is already registered** — by ObjectOS Cloud, or by your own plugin — **it is kept.** The plugin logs one line saying so and does not apply the settings. It checks at `kernel:bootstrapped`, after every plugin's `init()`, `start()` and `kernel:ready` handler, so an embedder registered in any of those is seen. Register yours there, not later.
+- **An embedder is already registered** — by ObjectOS Cloud, or by your own plugin — **it is kept.** The plugin logs one line saying so and does not apply the settings. It checks at `kernel:bootstrapped`, after every plugin's `init()`, `start()` and `kernel:ready` handler, so an embedder registered in any of those is seen. Register yours there, not later. A host that always provides its own embedder can also keep the Embedder section and its **Test embedder** button off the page: `new KnowledgeServicePlugin({ embedderSettings: false })` offers neither and logs nothing about them; the Knowledge page is offered as before.
 - **A provider is saved and complete** → an `@objectstack/embedder-openai` embedder for that provider. The saved Base URL applies only to the custom and Azure providers; other providers use their preset endpoint. The boot line names the endpoint host. "Complete" is what the **Test embedder** button checks: a provider, an API key (Ollama excepted) and, for a custom or Azure endpoint, a Base URL.
 - **Dimensions and batch size are positive integers**, saved as numbers or set as text through an `OS_*` override (`OS_AI_EMBEDDER_DIMENSIONS=256`). A value that is not a positive integer is refused, with a `warn` at boot and the error below on every use — never silently ignored.
 - **The batch size is passed only when you saved it.** Left unsaved (the form shows 64), the embedder sends as many inputs per request as the model's documented cap allows — 10 for DashScope `text-embedding-v3`, 2048 for OpenAI `text-embedding-3-*` — and 10 for a model it does not know. A saved batch size is held to the saved model's documented cap (`documentedMaxBatchSize(model)` from `@objectstack/embedder-openai`): a saved 64 on `text-embedding-v3` sends 10. For a model without a documented cap the saved size is sent as saved.
@@ -287,14 +297,14 @@ Known residual: text made mostly of random hex or base64 — UUIDs, sha256 diges
 
 ## When the model or the split changes: rebuild
 
-Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it — which the next boot starts by itself, or `os knowledge rebuild` (below) does now; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
+Vectors from two embedding models are not comparable, and neither are the passages of two splits. So every source's index is built under one **index fingerprint** — the embedding model and dimensions the adapter reports, the resolved split, and the content list — which the knowledge service computes and carries on every write and every search, and the adapter checks against the index it holds. Change any of them and the source's stored index is **refused** (`KNOWLEDGE_REBUILD_REQUIRED`, 409) until a complete reindex rebuilds it — which the next boot or the next daily reconcile starts by itself, or `os knowledge rebuild` (below) does now; it never answers with vectors of the old model ranked against the new one. A search over several sources still answers from the others, and the `search_knowledge` tool names each refused source in `refused`. Changing `where` or `metadataFields` changes no vector: a complete reindex repairs it in place. The full rules are in [the protocol's fingerprint section](/docs/protocol/knowledge#36-the-index-fingerprint).
 
 ### Generations: the new index is built beside the old one
 
 A store that keeps **generations** (pgvector and Turso) does not throw the old index away when the fingerprint changes. The rebuild fills a new generation beside it, and the switch happens only when the build is done:
 
 1. **The build writes into the new generation.** The complete reindex writes every document into it. Record changes that arrive while it runs (event sync) carry the new fingerprint, so they also land in the new generation only. Nothing is written into the old one under the new model.
-2. **Search during the build is refused, never answered from the old index.** A search of the source answers `KNOWLEDGE_REBUILD_REQUIRED` (409) and says the source *is being rebuilt*. A search over several sources still answers from the others, and `search_knowledge` names this one in `refused`.
+2. **Search during the build is refused, never answered from the old index.** A search of the source answers `KNOWLEDGE_REBUILD_REQUIRED` (409) and says the source *is being rebuilt*. A search over several sources still answers from the others, and `search_knowledge` names this one in `refused`. The same code has a second cause, from the knowledge service itself: a source over an object that declares a `title` field the source does not serve is refused until its index is proven built under the current recipe ([the protocol's title rule](/docs/protocol/knowledge)).
 3. **At the end, the switch.** Once the walk is done, the purge runs once. Then the new generation becomes the active one, and the old one is deleted. pgvector deletes it in batches of 1,000 rows, so no long lock is held over a large source. If the deletion stops part-way, the source's next build finishes it, and the old rows are never searched meanwhile.
 4. **One builder per source.** pgvector takes a PostgreSQL advisory lock on the source when its build begins and holds it until the switch. A second build of the source, from another node or process, is refused `LOCK_CONFLICT` (409) and walks nothing. This is a *session* lock, so the store needs a direct or session-mode PostgreSQL connection. Behind a transaction-mode pooler (PgBouncer transaction pooling, or a hosted provider's pooled URL), the lock does not stay with the store's session. Point the store's `url` at a direct or session-mode endpoint. A release whose session no longer held the lock is logged as a warning.
 5. **A build that stops is resumed, not restarted.** The generation under construction is kept, with everything written into it so far. The next build under the same fingerprint takes it up, and skips every document it already holds unchanged, so only the rest is sent to the embedding provider. If the process stops, PostgreSQL frees the lock at once. If the build fails on a process that keeps running, the lock is freed after 15 minutes without a call of the build itself. Record events that keep arriving for the source do not hold it. A build under yet another fingerprint abandons the unfinished generation and deletes it, and so does a build under the active fingerprint, when the change was reverted before the new index was finished.
@@ -326,6 +336,8 @@ The completion is not a page, and the limit does not apply to it. It is the stor
 The default `memory` adapter holds nothing after a restart, so with it **every boot is a first build**: each boot sends the whole source to the embedding provider again, on every node, because each process keeps its own index. Use a persistent adapter (pgvector, Turso) for a source you do not want re-embedded on each restart. And "only one node builds a source" holds only with a shared cluster lock driver: the default `memory` cluster driver's lock is a per-process mutex, so with it every node builds the source itself.
 </Callout>
 
+**The index is reconciled every day.** Record events keep an index fresh as rows change; a daily reconcile keeps it correct when an event was lost, a sync failed, the embedding provider was down or a write rolled back. At 03:00 UTC the knowledge service walks every source whose store lists its documents (pgvector, Turso, the memory store), writes the documents of rows that are new or changed, removes those of rows that are gone or no longer match `where`, and sends nothing to the embedder for a row that did not change. A `multi: true` update or delete asks for the same walk of every source over its object, two minutes after the last such write. The job runs on the platform's job service, under the name `knowledge:reconcile`, and a run that could not finish a source is `degraded` in its run history. `KnowledgeServicePlugin({ reconcile: { cron: '0 2 * * *', timezone: 'Asia/Shanghai' } })` moves it, and `reconcile: false` turns it off. A store that does not list its documents is never reconciled: the log says so once, and `os knowledge rebuild` is the way. The full rules are in [the protocol's reconcile section](/docs/protocol/knowledge#reconcile-keeping-the-index-correct).
+
 To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
 
 ```bash
@@ -343,7 +355,7 @@ os knowledge rebuild support_articles  # start a complete build and follow its p
 new KnowledgePgvectorPlugin({ queryPrefix: '' /* e.g. BGE's query instruction */ }),
 ```
 
-- It searches by an exact scan, so a 3072-wide model works; the organization filter and the metadata `filter` run in SQL before ranking.
+- It searches with two legs merged by reciprocal rank fusion: an exact cosine scan, so a 3072-wide model works, and a keyword match on a `simple` `tsvector` (a GIN index), with `ILIKE` for a term under three characters or one in Chinese, Japanese or Korean script. The organization filter, the record scope and the metadata `filter` run in SQL in both legs, before ranking.
 - An unchanged passage is not sent to the embedder again on a reindex.
 - When the embedding model, its dimensions or the split change, it builds the new index beside the old one under a builder lock, then switches to it ([generations](#generations-the-new-index-is-built-beside-the-old-one)).
 - Without the `vector` extension (or the right to create it), boot goes on: the plugin warns with the SQL a database owner runs, and its sources answer `SERVICE_UNAVAILABLE` until then.
@@ -359,7 +371,7 @@ Details — the tables, an approximate index as an operator's step, rebuilds —
 new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
 ```
 
-- It searches by an exact scan; the organization filter, the record scope and the metadata `filter` run in SQL before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- It searches with two legs merged by reciprocal rank fusion: an exact cosine scan, and a keyword match in an FTS5 trigram index beside each passage table, with `LIKE` for a term under three characters (「出差」). The organization filter, the record scope and the metadata `filter` run in SQL in both legs, before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
 - A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
 - Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
 

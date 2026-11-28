@@ -3,7 +3,7 @@
 /**
  * objectui#11270 — the action designer previews `record_related` where the
  * console places it: on each row of a related list inside a record, drawn with
- * the row frame `list_item` already has. Not a button in a section header.
+ * the row frame `record_row` already has. Not a button in a section header.
  *
  * The header drawing was the toolbar reading that objectstack-ai/objectstack#20937's
  * enforce answer (triage `5919625056`) replaced with row placement; with the
@@ -81,9 +81,9 @@ describe('ActionPreview — `record_related` previews on each related-list row (
     expect(rows.queryByText('Section')).toBeNull();
   });
 
-  it('`list_item` and `record_related` draw the same row frame, each under its own caption', () => {
-    renderWithLocations(['list_item', 'record_related']);
-    expect(frame('list_item').getAllByText('Log Time')).toHaveLength(2);
+  it('`record_row` and `record_related` draw the same row frame, each under its own caption', () => {
+    renderWithLocations(['record_row', 'record_related']);
+    expect(frame('record_row').getAllByText('Log Time')).toHaveLength(2);
     expect(frame('record_related').getAllByText('Log Time')).toHaveLength(2);
   });
 });

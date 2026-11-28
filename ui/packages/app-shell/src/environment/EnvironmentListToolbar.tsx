@@ -1,6 +1,6 @@
 /**
  * EnvironmentListToolbar — the state-aware replacement for the generic
- * `list_toolbar` action bar on the `sys_environment` list.
+ * `list` action bar on the `sys_environment` list.
  *
  * The cloud serves ONE `create_environment` action; born-with-env makes its
  * meaning depend on org state (which the action metadata can't express). This
@@ -118,7 +118,7 @@ function OtherActionsBar({ actions }: { actions: any[] }) {
   // Typed as the `action:bar` node it is (objectui#11355), not as the
   // `BaseSchema` the `schema` prop accepts: a key `ActionBarSchema` does not
   // declare is refused here.
-  const bar: ActionBarSchema = { type: 'action:bar', location: 'list_toolbar', actions, size: 'sm', variant: 'outline' };
+  const bar: ActionBarSchema = { type: 'action:bar', location: 'list', actions, size: 'sm', variant: 'outline' };
   return <SchemaRenderer schema={bar} />;
 }
 
@@ -150,7 +150,7 @@ export function EnvironmentListToolbar({ actions, entitlements }: Props) {
   // so a create action the caller may not invoke was counted here and dropped
   // there.
   const toolbarActions = (actions || []).filter(
-    (a: any) => actionRendersAt(a, 'list_toolbar') && mayInvoke(a?.requiredPermissions),
+    (a: any) => actionRendersAt(a, 'list') && mayInvoke(a?.requiredPermissions),
   );
   const hasCreateAction = toolbarActions.some((a: any) => a?.name === CREATE_ACTION);
   const ctaKind = entitlements?.ready ? decideEnvironmentCta(entitlements) : null;
@@ -213,7 +213,7 @@ export function EnvironmentListToolbar({ actions, entitlements }: Props) {
   // Typed as the `action:bar` node it is (objectui#11355); see `OtherActionsBar`.
   const bar: ActionBarSchema = {
     type: 'action:bar',
-    location: 'list_toolbar',
+    location: 'list',
     actions: renderedActions,
     size: 'sm',
     variant: 'outline',

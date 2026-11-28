@@ -71,7 +71,7 @@ const SINGLE_RECORD_WRITE_ONLY: Record<string, string> = {
   //    default, `userActions` opens `edit` alone, and `delete` is not in
   //    `apiMethods`). So there is no selection to batch.
   //  · A multi-select revoke, if the product ever wants one, still would not
-  //    reach `/batch`. Both actions are `locations: ['list_item']`; naming one
+  //    reach `/batch`. Both actions are `locations: ['record_row']`; naming one
   //    in a view's `bulkActions` promotes it to `operation: 'custom'` +
   //    `actionDef`, which `useBulkExecutor` fans out through the action runner
   //    as N single-record PATCHes against the route #7769 opened. The data-plane

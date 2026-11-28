@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useObjectTranslation } from '@object-ui/i18n';
+import { useAuth } from '@object-ui/auth';
 import { translateMetadataType } from '../../views/metadata-admin/i18n.js';
 import {
   Select,
@@ -47,6 +48,8 @@ import {
 } from '@object-ui/plugin-chatbot/core';
 
 import { useOpenAssistant } from '../../layout/chatDockControl.js';
+import { publishPlanApprovalPending } from '../../assistant/assistantBus.js';
+import { countWritesAwaitingApproval } from '../../assistant/writeApprovalPending.js';
 import type { ChatSurfaceContext } from '../../layout/chatSurfaceContext.js';
 import { buildFocusContext, type ConversationFocus } from '../../layout/chatFocus.js';
 import { ChatFocusRow } from './ChatFocusRow.js';
@@ -69,6 +72,8 @@ import { isSpreadsheetAttachment, uploadChatAttachments, chatAttachmentNotes } f
 import { listLinkTarget, recordOpenTarget, nextSectionOpening } from './aiChatLinks.js';
 import { hydratedMessagesToChatMessages } from './aiChatHydration.js';
 import { localizeAgentLabel, agentEmptyState, buildAgentSuggestions } from './agentCopy.js';
+import { drawerSuggestions, type EmptyConversationSize } from './emptyConversationModel.js';
+import { DrawerRecentConversations, EmptyConversation, EmptyConversationGreeting } from './EmptyConversation.js';
 import {
   useDeferredFirstSend,
   useComposerDraftHandoff,
@@ -160,6 +165,20 @@ interface ChatPaneProps {
    * @default false
    */
   actionsInHost?: boolean;
+  /**
+   * objectstack#37862 — the host draws the shared empty conversation before
+   * the first message (`EmptyConversation`): the greeting, what to ask, the
+   * page's suggestions and 「最近会话」, `large` where the chat fills the
+   * window and `compact` in the rail and the phone sheet. `userId` and
+   * `onOpenConversation` list the recent conversations and open one where the
+   * host shows conversations; without them the section is not drawn. Absent,
+   * the pane keeps the chat's built-in empty state.
+   */
+  emptyConversation?: {
+    size: EmptyConversationSize;
+    userId?: string;
+    onOpenConversation?: (conversation: { id: string; agentId?: string }) => void;
+  };
 }
 
 export function ChatPane({
@@ -185,6 +204,7 @@ export function ChatPane({
   onShare,
   hideHeader = false,
   actionsInHost = false,
+  emptyConversation,
 }: ChatPaneProps) {
   const { t, language } = useObjectTranslation();
   const navigate = useNavigate();
@@ -422,6 +442,23 @@ export function ChatPane({
     },
   });
 
+  // ui ADR-0057 Amendment A5, row 3 — a write the AI proposed that still waits
+  // for this user's approval is published per conversation to the assistant
+  // bus, where it outlives this pane: the drawer's host reads it when the
+  // drawer is next opened from the entry, and reopens this conversation.
+  const { user } = useAuth();
+  const approvalOwner = user?.id;
+  const writesAwaiting = countWritesAwaitingApproval(runtimeMessages, hitl.decisions);
+  useEffect(() => {
+    if (!conversationId) return;
+    publishPlanApprovalPending({
+      userId: approvalOwner,
+      conversationId,
+      pending: writesAwaiting > 0,
+      count: writesAwaiting,
+    });
+  }, [approvalOwner, conversationId, writesAwaiting]);
+
   // The real send, shared by a normal submit and by the deferred-first-message
   // replay below (resetSuppression → send → onSent, in that order).
   //
@@ -582,6 +619,45 @@ export function ChatPane({
     [hydrated.length, activeAgent, activeAgentLabel, t],
   );
   const emptyState = useMemo(() => agentEmptyState(t, activeAgent), [t, activeAgent]);
+
+  // objectstack#37862 — the shared empty conversation, where the host asks for
+  // it. The page's suggestions read the surface the agent is sent; one about
+  // the record in view fills the composer, the rest send.
+  const emptySuggestions = useMemo(
+    () =>
+      emptyConversation
+        ? drawerSuggestions(t, { agentName: activeAgent, agentLabel: activeAgentLabel, surface: surfaceContext })
+        : [],
+    [emptyConversation, t, activeAgent, activeAgentLabel, surfaceContext],
+  );
+  const emptySize = emptyConversation?.size;
+  const recentUserId = emptyConversation?.userId;
+  const openRecentConversation = emptyConversation?.onOpenConversation;
+  const renderEmptyState = useMemo(() => {
+    if (!emptySize) return undefined;
+    return (actions: { send: (text: string) => void; fill: (text: string) => void }) => (
+      <EmptyConversation
+        size={emptySize}
+        heading={<EmptyConversationGreeting />}
+        subtitle={emptyState.description}
+        suggestions={emptySuggestions}
+        onSuggestion={(suggestion) =>
+          suggestion.mode === 'fill' ? actions.fill(suggestion.text) : actions.send(suggestion.text)
+        }
+        recent={
+          recentUserId && openRecentConversation ? (
+            <DrawerRecentConversations
+              size={emptySize}
+              userId={recentUserId}
+              apiBase={apiBase}
+              agentName={activeAgent}
+              onOpen={openRecentConversation}
+            />
+          ) : null
+        }
+      />
+    );
+  }, [emptySize, emptyState.description, emptySuggestions, recentUserId, openRecentConversation, apiBase, activeAgent]);
 
   // objectstack#37146 — with one launchable agent there is nothing to switch,
   // so the row names no agent (it read only 「提问」 once the in-app build
@@ -772,6 +848,8 @@ export function ChatPane({
         // area, in flow above the input.
         promptHeaderSlot={focusRow ?? undefined}
         messages={shownMessages}
+        // Keys the question card's skip marks to this conversation.
+        conversationId={conversationId}
         placeholder={
           activeAgent
             ? agentRouteName(activeAgent) === 'ask'
@@ -824,6 +902,7 @@ export function ChatPane({
         onModelChange={setSelectedModelId}
         allowanceUsedFraction={allowanceUsedFraction}
         suggestions={suggestions}
+        renderEmptyState={renderEmptyState}
         onSendMessage={handleSend}
         // objectstack#32749 — the attach button and the attachment chips: the
         // send reads spreadsheets, images and PDFs (see `doSend`), and a file

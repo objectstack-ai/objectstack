@@ -50,7 +50,7 @@ import {
   ObjectIconTile,
   RecordTopBarButton,
 } from '@object-ui/components';
-import { Bot, Database, Lock, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
+import { Database, Lock, MessageCircle, MoreHorizontal, Plus, RotateCcw, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { useObjectTranslation, useObjectLabel } from '@object-ui/i18n';
@@ -107,6 +107,7 @@ import { mayManageViews } from './objectViewViewSharing.js';
 import { servedObjectLabel, servedObjectPluralLabel } from '../hooks/servedObjectLabel.js';
 import type { RowCrudPredicates } from '../utils/crudAffordances.js';
 import { servesRecordRead } from '../utils/recordReadServed.js';
+import { RECORD_PREVIEW_DEFAULT_WIDTH, RECORD_PREVIEW_WIDTH_KEY } from './recordDrawerContext.js';
 import {
   RECORD_FORM_LINK_PARAM,
   RECORD_FORM_OBJECT_PARAM,
@@ -627,8 +628,12 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       `/apps/${appName}/${objectName}/record/${encodeURIComponent(String(id))}`,
     [appName, objectName],
   );
+  // The side drawer opens at the `auto` default the `navigation.size` help
+  // text states, the side preview's 460, and remembers a dragged width under
+  // the preview's shared key, as the object list's drawer does
+  // (objectstack#36149). This page has no view, so nothing authors a size.
   const navOverlay = useNavigationOverlay({
-    navigation: { mode: 'drawer' },
+    navigation: { mode: 'drawer', width: RECORD_PREVIEW_DEFAULT_WIDTH },
     objectName: objectName ?? '',
     onNavigate: (id) => navigate(recordUrl(id)),
   });
@@ -730,7 +735,10 @@ export function ObjectDataPage({ dataSource, objects }: any) {
   const openDrawerRecordWithAssistant = React.useCallback(() => {
     if (!openedRecordId || !dock) return;
     openDrawerRecordAsPage();
-    dock.open();
+    // ui ADR-0057 Amendment A5 — this is the assistant's entry, drawn on the
+    // pane: with the drawer closed it opens as the entry does.
+    if (dock.openEntry) dock.openEntry();
+    else dock.open();
   }, [openedRecordId, dock, openDrawerRecordAsPage]);
   React.useEffect(() => {
     if (openedRecordId && !navOverlay.isOpen) navOverlay.open({ id: openedRecordId });
@@ -1229,15 +1237,16 @@ export function ObjectDataPage({ dataSource, objects }: any) {
       {navOverlay.isOverlay && (
         <NavigationOverlay
           {...navOverlay}
+          storageKey={RECORD_PREVIEW_WIDTH_KEY}
           setIsOpen={(open: boolean) => { if (!open) closeRecordDrawer(); }}
           onExpand={openedRecordId ? openDrawerRecordAsPage : undefined}
           toggles={openedRecordId && dock ? (
             <RecordTopBarButton
-              label={t('topbar.aiAssistant', { defaultValue: 'AI Assistant' })}
+              label={t('home.askAI', { defaultValue: 'Ask AI' })}
               onClick={openDrawerRecordWithAssistant}
               data-testid="record-pane-open-assistant"
             >
-              <Bot className="h-3.5 w-3.5" />
+              <MessageCircle className="h-3.5 w-3.5" />
             </RecordTopBarButton>
           ) : undefined}
           title={servedObjectLabel(objectDef, language, objectLabel)}

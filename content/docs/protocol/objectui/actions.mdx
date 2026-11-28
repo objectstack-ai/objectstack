@@ -162,7 +162,7 @@ refreshAfter: true
 **Request body shaping:**
 - `bodyShape` — `'flat'` (default) sends collected params at the top level; `{ wrap: 'data' }` nests user params under that key.
 - `bodyExtra` — constant fields merged into the request, applied last so they always win (e.g. `bodyExtra: { resend: true }`).
-- `recordIdParam` / `recordIdField` — inject the current row id (or another row field) into a body key when the action runs from a `list_item` location.
+- `recordIdParam` / `recordIdField` — inject the current row id (or another row field) into a body key when the action runs from a `record_row` location.
 
 ### Form Actions
 
@@ -273,15 +273,15 @@ Action `name` is the configuration ID and **must** be lowercase `snake_case` (`a
 
 ### Action Locations
 
-The `locations` array declares where an action surfaces. The canonical enum (`ACTION_LOCATIONS`) is:
+The `locations` array declares what an action acts on, and so where it surfaces. The canonical enum (`ACTION_LOCATIONS`) is:
 
 | Location | Where it renders |
 | --- | --- |
-| `list_toolbar` | Header/toolbar of a list view (bulk actions, "New", export) |
-| `list_item` | Per-row action on a list/grid row |
-| `record_header` | Primary actions in the record-detail title bar |
-| `record_more` | Overflow ("More" / ⋯) menu on a record |
-| `record_related` | Per-row action on each row of a related-list section inside a parent record, in that parent's context only — unlike `list_item`, never on the object's own list views. Declared, not yet placed: the console does not render it on those rows yet |
+| `list` | Header/toolbar of a list view (bulk actions, "New", export) — acts on no record |
+| `record` | Both record surfaces: the record-detail title bar and each list/grid row |
+| `record_page` | Actions in the record-detail title bar; with `component: 'action:menu'`, straight into its overflow ("More" / ⋯) menu |
+| `record_row` | Per-row action on a list/grid row |
+| `record_related` | Per-row action on each row of a related-list section inside a parent record, in that parent's context only — unlike `record_row`, never on the object's own list views. Declared, not yet placed: the console does not render it on those rows yet |
 | `record_section` | Actions inside a body section/tab of a record |
 
 ```yaml
@@ -290,18 +290,18 @@ label: Export
 icon: download
 type: api
 target: /api/customers/export
-locations: [list_toolbar]
+locations: [list]
 ```
 
 ### Ordering & the Primary Button
 
-Within each location group, actions render in **`order`** sequence — **lower comes first / more prominent**. In `record_header` the first visible action becomes the **primary button** and the rest fall into the `⋯` overflow menu, so `order` is how you decide which action holds the primary slot.
+Within each location group, actions render in **`order`** sequence — **lower comes first / more prominent**. In `record_page` the first visible action becomes the **primary button** and the rest fall into the `⋯` overflow menu, so `order` is how you decide which action holds the primary slot.
 
 ```yaml
 # Approve holds the primary button even though the app action registered first.
 name: approve_request
 label: Approve
-locations: [record_header]
+locations: [record_page]
 variant: primary
 order: -10          # negative → floats ahead of app actions (order defaults to 0)
 ```
@@ -364,7 +364,7 @@ An action the reader toggles, such as a "Helpful" vote on a knowledge article, s
 name: mark_article_helpful
 label: Helpful
 type: script
-locations: [record_header]
+locations: [record_page]
 pressed: "has(record.viewer) && record.viewer.vote == 'helpful'"
 ```
 
@@ -382,14 +382,14 @@ disabled: "record.status == 'converted'"   # preferred — works on every surfac
 disabled: "status == 'converted'"          # bare field — also resolves to the record
 ```
 
-Prefer the `record.<field>` form: it reads unambiguously and resolves identically on **every** surface an action renders (`record_header`, `record_more`, `list_item`, related lists). The bare-field form is supported for brevity but is easy to confuse with a local variable.
+Prefer the `record.<field>` form: it reads unambiguously and resolves identically on **every** surface an action renders (`record`, `record_page`, `record_row`, related lists). The bare-field form is supported for brevity but is easy to confuse with a local variable.
 
 Beyond `record`, action predicates also expose the authenticated user as `ctx.user` (e.g. `record.id == ctx.user.id`) and public feature flags as `features.*` (see [Capability gates](#capability-gates-requiresfeature)) — they are not limited to the record. [record-alert](/docs/protocol/objectui/record-alert) conditions surface the analogous identity values under the `os.*` namespace (`os.user` / `os.org` / `os.env`) instead.
 
 <Callout type="warn">
 **The bound record is SPARSE — guard every read with `has()`.** Unlike a
 validation or hook predicate, an action predicate is evaluated against whatever
-record the client already fetched. On `list_item` that is the row the view's
+record the client already fetched. On `record_row` that is the row the view's
 `$select` projected, so a column the view did not ask for is **absent**, not
 `null` — and CEL aborts the whole expression at key resolution (`No such key:
 status`). The abort is fail-closed, so the button simply is not offered, which
@@ -630,7 +630,7 @@ ai:
   icon: pause-circle
   variant: secondary
   mode: custom
-  locations: [list_item, record_header]
+  locations: [record_row, record_page]
   type: api
   method: POST
   target: /api/v1/auth/admin/oauth2/toggle-disabled
@@ -650,7 +650,7 @@ ai:
   icon: refresh-cw
   variant: secondary
   mode: custom
-  locations: [record_header, record_more]
+  locations: [record, record_page]
   type: api
   method: POST
   target: /api/v1/auth/sys-oauth-application/rotate-secret

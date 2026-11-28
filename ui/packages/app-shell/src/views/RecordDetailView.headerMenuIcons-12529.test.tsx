@@ -76,7 +76,7 @@ const appAction = (name: string, label: string) => ({
   label,
   type: 'url',
   target: `https://example.com/${name}`,
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 
 function objectsWith(actions: unknown[]) {

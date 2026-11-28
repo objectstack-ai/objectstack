@@ -34,7 +34,7 @@ export const ProjectDetailPage = definePage({
       width: 'full',
       components: [
         // The title bar. A full page renders exactly the nodes it declares;
-        // `showcase_project` declares no `record_header` / `record_more`
+        // `showcase_project` declares no `record` / `record_page`
         // action, so the header carries none, as the synthesized one did.
         { type: 'page:header' },
         // Explicit highlights strip — exercises the page editor's field-list picker
@@ -130,7 +130,7 @@ export const ProjectDetailPage = definePage({
                 //
                 // It is the same `record:related_list` node the synthesizer emits,
                 // under the same record page, so its rows carry what a synthesized
-                // list's rows carry: the task's `list_item` actions, plus its
+                // list's rows carry: the task's `record_row` actions, plus its
                 // `record_related` ones, which only render on a related list
                 // inside a parent record. No `actions` key on purpose — authoring
                 // one would replace those host-supplied actions with the list

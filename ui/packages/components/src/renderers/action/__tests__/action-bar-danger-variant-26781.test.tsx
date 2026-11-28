@@ -11,7 +11,7 @@
  * the destructive button style and confirms through the destructive button.
  *
  * The producer is `examples/app-todo`'s `DeleteCompletedAction`
- * (`delete_completed`: `locations: ['list_toolbar']`, `variant: 'danger'`,
+ * (`delete_completed`: `locations: ['list']`, `variant: 'danger'`,
  * `confirmText`). The list page hands an object's actions to `action:bar` as
  * they are served, and `action:bar` spreads each one onto an `action:button`
  * member with `variant: action.variant || schema.variant`. Before
@@ -56,7 +56,7 @@ const DELETE_COMPLETED = {
   icon: 'trash',
   type: 'script',
   target: 'deleteCompletedTasks',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   variant: 'danger',
   confirmText: 'Permanently delete all completed tasks? This cannot be undone.',
   successMessage: 'Completed tasks deleted!',
@@ -76,7 +76,7 @@ const EXPORT_CSV = {
   icon: 'download',
   type: 'script',
   target: 'exportTasksToCSV',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   successMessage: 'Export completed!',
   refreshAfter: false,
   ai: {
@@ -99,7 +99,7 @@ function renderToolbar() {
   if (!Bar) throw new Error('action:bar is not registered');
   const schema = {
     type: 'action:bar',
-    location: 'list_toolbar',
+    location: 'list',
     actions: [DELETE_COMPLETED, EXPORT_CSV],
     size: 'sm',
     variant: 'outline',

@@ -2439,7 +2439,29 @@ const pt = {
           availableObjects: "Liste os objetos de dados disponíveis.",
           recentActivity: "Resuma minha atividade recente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Resumir este registro',
+            related: 'O que está relacionado a este registro?',
+          },
+          list: {
+            summarize: 'Resumir os registros desta lista',
+            recent: 'Quais registros foram adicionados esta semana?',
+          },
+          dashboard: {
+            explain: 'O que este painel mostra?',
+            standOut: 'O que se destaca neste painel?',
+          },
+          report: {
+            summarize: 'Resumir este relatório',
+            takeaways: 'Quais são os principais pontos deste relatório?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Perguntas sugeridas',
       discussing: "Vendo: {{target}}",
       focus: {
         pin: "Continuar perguntando sobre este registro",
@@ -2476,7 +2498,7 @@ const pt = {
         expand: "Expandir",
         restore: "Restaurar painel lateral",
         open: "Abrir o assistente",
-        planAwaitingApproval: "Um plano proposto aguarda sua aprovação",
+        planAwaitingApproval: "Uma ação aguarda sua aprovação",
         close: "Fechar",
         more: "Mais ações",
       },
@@ -3575,6 +3597,7 @@ const pt = {
     recent: "Recente",
     starred: "Favoritos",
     removeFromFavorites: "Remover {{name}} dos favoritos",
+    conversationUnavailable: "Esta conversa não está mais disponível",
     allReports: "Todos os relatórios",
     collapse: 'Recolher a barra lateral',
     expand: 'Expandir a barra lateral',
@@ -4215,10 +4238,12 @@ const pt = {
       slugTaken: 'Esse slug já está em uso.',
       notAllowedToCreate: 'Você não tem permissão para criar uma nova organização.',
       organizationLimitReached: 'Você atingiu o número máximo de organizações que pode criar. Organizações para as quais você foi convidado não contam para esse limite.',
+      unpaidOrganizationLimitReached: 'Você já possui o máximo de organizações gratuitas que uma conta permite. Para criar outra, faça upgrade de uma delas para um plano pago ou entre em contato com o suporte. Organizações para as quais você foi convidado não contam.',
       notTheRecipient: 'Você não é o destinatário deste convite.',
       invitationNotFound: 'Este convite já foi usado, expirou ou foi revogado. Se você já o aceitou, encontrará a organização na sua lista de organizações.',
       unknown: 'Algo deu errado. Tente novamente.',
     },
+    viewPlans: 'Ver planos e fazer upgrade',
     backToList: "Voltar para as organizações",
     notFound: "Organização não encontrada",
     notFoundDescription: "Esta organização não existe ou você não tem acesso.",
@@ -4697,6 +4722,7 @@ const pt = {
       add_field: "Adicionar um campo",
       apply_blueprint: "Construir o aplicativo conforme o plano",
       apply_edit: "Aplicar a alteração",
+      ask_which: "Esclarecer a pergunta",
       create_metadata: "Criar um item de metadados",
       create_object: "Criar um objeto",
       create_package: "Criar um pacote",
@@ -5614,6 +5640,7 @@ const pt = {
       toggleFailed: "Falha ao alterar o status do aplicativo: {{reason}}",
       setDefaultDone: "{{name}} definido como padrão",
       setDefaultFailed: "Falha ao definir o aplicativo padrão: {{reason}}",
+      restoreDefaultFailed: "Não foi possível restaurar {{name}} como aplicativo padrão, então ele não é mais o padrão: {{reason}}",
       appDeleted: "{{name}} excluído",
       deleteFailed: "Falha ao excluir o aplicativo: {{reason}}",
       nothingToDelete: "Nada a excluir para {{name}}: {{reason}}",

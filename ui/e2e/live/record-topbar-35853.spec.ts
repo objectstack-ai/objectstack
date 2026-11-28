@@ -13,7 +13,7 @@ import { test, expect, type Locator, type Page } from '@playwright/test';
  * 12 px). On a phone the bar is the one-row phone bar.
  *
  * Drives the real Console against the real showcase backend. The task record
- * page (`showcase_task_detail`) authors three `record_header` actions; the
+ * page (`showcase_task_detail`) authors three `record_page` actions; the
  * account page is synthesized, with a tab row.
  */
 
@@ -107,7 +107,7 @@ test.describe('record header at 1280 px', () => {
   });
 
   test('the header shows three authored actions by default, on one line', async ({ page }) => {
-    // The task page authors Mark Done, Log Time and Archive as record_header
+    // The task page authors Mark Done, Log Time and Archive as record_page
     // actions (Mark Done hides on a finished task), plus the host's Edit.
     await openFromList(page, 'showcase_task', 2);
     const record = page.locator(BAR).locator(RECORD);
@@ -116,7 +116,7 @@ test.describe('record header at 1280 px', () => {
     await expect(actions.getByRole('button', { name: 'Log Time' })).toBeVisible();
     await expect(actions.getByRole('button', { name: 'Archive' })).toBeVisible();
     await expect(actions.getByRole('button', { name: 'Edit' })).toBeVisible();
-    // The authored actions beyond three, and record_more, are under ⋯.
+    // The authored actions beyond three, and the folded ones (component: 'action:menu'), are under ⋯.
     await expect(actions.getByRole('button', { name: /more/i })).toBeVisible();
     expect(await actionsOnOneLine(record)).toBe(true);
   });

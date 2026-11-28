@@ -3621,7 +3621,7 @@ export function summarizeAction(
         (Array.isArray(action?.locations) &&
         action.locations.some(
             (l: string) =>
-                l === 'list_item' || l === 'record_header' || l === 'record_more' || l === 'record_related',
+                l === 'record' || l === 'record_page' || l === 'record_row' || l === 'record_related',
         ));
     const description =
         (typeof action?.ai?.description === 'string' ? action.ai.description : undefined) ??
