@@ -29,7 +29,7 @@ import { bootShowcase } from './showcase-boot.js';
 
 const PKG = 'com.example.qalistagree';
 const action = (name: string, label: string, objectName: string) => ({
-  name, label, objectName, type: 'url', target: 'https://example.com', locations: ['record_more'],
+  name, label, objectName, type: 'url', target: 'https://example.com', locations: ['record_page'], component: 'action:menu',
 });
 
 describe('[#33904] the action list agrees with the by-name read beside a package-less save on another object', () => {

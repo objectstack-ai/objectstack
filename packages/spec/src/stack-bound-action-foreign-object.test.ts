@@ -23,7 +23,7 @@ const manifest = { id: 'com.test.binder', name: 'binder', version: '1.0.0', type
 const OWN = { name: 'binder_note', label: 'Note', fields: { title: { type: 'text' as const, label: 'Title' } } };
 const bound = (objectName: string) => ({
   name: 'probe_bound', label: 'Probe', objectName, type: 'url' as const, target: 'https://example.com',
-  locations: ['record_header' as const],
+  locations: ['record_page' as const],
 });
 
 const refusalOf = (config: unknown): any => {

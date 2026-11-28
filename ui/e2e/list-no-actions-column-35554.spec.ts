@@ -180,9 +180,9 @@ const dataSource = {
 };
 const record = (name) => async () => { window.__dispatched.push(name); return { success: true }; };
 const rowActionDefs = [
-  { name: 'submit_approval', label: '提交审批', locations: ['list_item'] },
-  { name: 'make_quote', label: '生成报价单', locations: ['list_item'] },
-  { name: 'clone_opportunity', label: '复制', locations: ['list_item'] },
+  { name: 'submit_approval', label: '提交审批', locations: ['record_row'] },
+  { name: 'make_quote', label: '生成报价单', locations: ['record_row'] },
+  { name: 'clone_opportunity', label: '复制', locations: ['record_row'] },
 ];
 const bulkActionDefs = [
   { name: 'mass_update', label: '批量更新' },
@@ -233,7 +233,7 @@ function Header() {
     actions: { create: () => {} }, t, listActions: [], toolbarActionsWithDeepLink: [],
     identityImportEnabled: false, objectCanImport: false, importVisible: false, importDisabled: false,
     setShowImport: () => {}, listFavorite: null, isEnvironmentList: false,
-    toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
+    toolbarBar: { type: 'action:bar', location: 'list', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
     viewAccess: { refusal: null }, createLabel: '新建商机',
   });
   return h(ObjectViewPageHeader, {
@@ -249,7 +249,7 @@ function Header() {
     isEnvironmentList: false,
     headerToolbarActions: [],
     environmentEntitlements: undefined,
-    toolbarBar: { type: 'action:bar', location: 'list_toolbar', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
+    toolbarBar: { type: 'action:bar', location: 'list', actions: [], maxVisible: 3, mobileMaxVisible: 0 },
     listFavorite: null,
     foldedHeaderActions: chrome.foldedHeaderActions,
   });

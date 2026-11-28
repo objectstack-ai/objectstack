@@ -46,7 +46,7 @@ afterEach(() => cleanup());
 
 const PARENT = 'sys_organization';
 const CHILD_ACTIONS = [
-  { name: 'invite_user', label: 'Invite user', type: 'api', locations: ['list_toolbar'] },
+  { name: 'invite_user', label: 'Invite user', type: 'api', locations: ['list'] },
   { name: 'change_role', label: 'Change role', type: 'api', locations: ['record_related'] },
 ];
 const CHILD = { name: 'sys_member', label: 'Member', actions: CHILD_ACTIONS };

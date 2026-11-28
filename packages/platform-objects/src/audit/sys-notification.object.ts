@@ -100,7 +100,7 @@ export const SysNotification = ObjectSchema.create({
         'Send a message to everyone in your organization, or to the members you pick. It appears in each recipient’s notifications.',
       icon: 'send',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/messaging/in-app-messages',
       requiredPermissions: ['setup.write'],

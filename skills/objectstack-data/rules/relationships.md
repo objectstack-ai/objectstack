@@ -23,7 +23,6 @@ export default ObjectSchema.create({
   name: 'contact',
   sharingModel: 'public_read_write',
   fields: {
-    first_name: { type: 'text', required: true },
     account_id: {
       type: 'lookup',
       reference: 'account',
@@ -55,7 +54,6 @@ export default ObjectSchema.create({
       deleteBehavior: 'cascade',
       required: true,
     },
-    product: { type: 'text', required: true },
     amount: { type: 'currency', required: true },
   }
 });
@@ -108,7 +106,8 @@ an omitted `required` as `true`.
 master (one reference column to it) or the lookup's `dependsOn` sibling: a tie
 there is `reference_ambiguous`, another master's detail `reference_out_of_scope`
 (`scope: [{ field, value }]` names the scoping columns). A name no record
-has, or a scoping field the caller cannot read, is `reference_not_found`.
+has, or a scoping field the caller cannot read or the engine cannot filter by
+(such as a formula), is `reference_not_found`.
 
 ### Many-to-Many: Junction Object
 
@@ -358,8 +357,9 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
   (`sys_attachment`, `sys_approval_request`, `sys_activity`). An entry is the child,
   `object.field` or `{ list, label, columns }`; its `label` translates at
   `objects.{parent}._relatedLists.{list}.label` (none: no key). A `.custom`
-  arrangement re-stating the entry with no `label`, or hiding it, leaves none and
-  `os validate` refuses the key: drop it, or re-state the entry with the
+  arrangement re-stating the entry with no `label`, or hiding it, leaves none (a
+  bare child's name, labelled or not, covers each of its `child.field` lists too) and
+  `os validate` refuses the key: drop it, or re-state the entry, shown, with the
   owner's `label`. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
@@ -368,8 +368,7 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
 `relatedListTitle` / `relatedListColumns` override the derived title / columns
 (columns: the child's `highlightFields`); an entry's `label` / `columns` win. Audit FKs
 (`created_by`/`updated_by`/`owner_id`) never become related lists. A child that
-references the parent through several FKs (e.g. `primary_account` +
-`partner_account`) yields **one related list per FK**; a self-referential FK
+references the parent through several FKs yields **one related list per FK**; a self-referential FK
 surfaces a "children" list.
 
 ## Incorrect vs Correct

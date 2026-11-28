@@ -95,7 +95,7 @@ const REASSIGN = {
   type: 'flow',
   name: 'reassign',
   target: 'reassign_wizard',
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   params: [{ name: 'owner', label: 'Owner', type: 'text', required: true }],
 };
 const launch = (extra: Record<string, unknown> = {}): ActionDef => ({ ...JSON.parse(JSON.stringify(REASSIGN)), ...extra });
@@ -128,7 +128,7 @@ describe('flowHandler.refuseBeforeInput — the resolver its dispatch runs (obje
 
   it('control: an object-level toolbar flow with 0 rows is not refused', () => {
     expect(runtime().flowHandler.refuseBeforeInput?.(
-      launch({ locations: ['list_toolbar'] }),
+      launch({ locations: ['list'] }),
       rowsContext([]),
     )).toBeUndefined();
   });
@@ -184,7 +184,7 @@ describe('a toolbar flow launch through the console runtime (objectui#13397)', (
   });
 
   it('control: an object-level toolbar flow with 0 rows still opens its dialog', async () => {
-    mount([], launch({ locations: ['list_toolbar'] }));
+    mount([], launch({ locations: ['list'] }));
 
     await screen.findByTestId('param-dialog');
     expect(toastError).not.toHaveBeenCalled();

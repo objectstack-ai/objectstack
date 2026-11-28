@@ -65,9 +65,10 @@ type PinnableAction = {
 };
 
 /** The locations whose actions a scope's header places. */
-const PAGE_LOCATIONS: Readonly<Record<PinPage, readonly ('list_toolbar' | 'record_header' | 'record_more')[]>> = {
-  list: ['list_toolbar'],
-  record: ['record_header', 'record_more'],
+const PAGE_LOCATIONS: Readonly<Record<PinPage, readonly ('list' | 'record_page')[]>> = {
+  list: ['list'],
+  // `actionRendersAt` draws a `record` action at `record_page` too.
+  record: ['record_page'],
 };
 
 /** Whether `action` is placed in `page`'s scope. */
@@ -97,16 +98,15 @@ function headerSort<T extends PinnableAction>(actions: readonly T[]): T[] {
 /**
  * What the header draws as buttons while the object sets no arm for `page`:
  * the first three of its row's actions by the header's own sort. On the record
- * page the row's actions are those placed at `record_header` (one placed at
- * `record_more` only is in ⋯ already); an action authored into ⋯
- * (`component: 'action:menu'`) is never a button.
+ * page the row's actions are those placed on it (`record` / `record_page`);
+ * an action folded into ⋯ (`component: 'action:menu'`) is never a button.
  */
 export function defaultPins(actions: readonly PinnableAction[], page: PinPage): string[] {
   const row = actions.filter(
     (a) =>
       typeof a.name === 'string' &&
       a.component !== 'action:menu' &&
-      (page === 'list' ? actionRendersAt(a as never, 'list_toolbar') : actionRendersAt(a as never, 'record_header')),
+      (page === 'list' ? actionRendersAt(a as never, 'list') : actionRendersAt(a as never, 'record_page')),
   );
   return headerSort(row)
     .slice(0, PIN_LIMIT)
