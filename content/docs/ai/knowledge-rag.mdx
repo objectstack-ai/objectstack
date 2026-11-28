@@ -372,7 +372,7 @@ Details — the tables, an approximate index as an operator's step, rebuilds —
 new KnowledgeTursoPlugin(), // or { url: 'file:/var/lib/app/knowledge.db' }, ':memory:', a libsql:// URL
 ```
 
-- It searches with two legs merged by reciprocal rank fusion: an exact cosine scan, and a keyword match in an FTS5 trigram index beside each passage table, with `LIKE` for a term under three characters (「出差」). The organization filter, the record scope and the metadata `filter` run in SQL in both legs, before ranking. 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms; larger sources belong on pgvector.
+- It searches with two legs merged by reciprocal rank fusion: a cosine ranking, and a keyword match in an FTS5 trigram index beside each passage table, with `LIKE` for a term under three characters (「出差」). The organization filter, the record scope and the metadata `filter` run in SQL in both legs. The cosine ranking is an exact scan — 10,000 passages of 1,536 dimensions take about 82 MB and a search about 50 ms — until a complete build finds a source of 20,000 passages or more (`vectorIndexThreshold`), all of one organization: that source gets an approximate index of one-bit vectors, whose nearest candidates are filtered and re-ranked by the stored vector, never over two organizations. At 200,000 passages a vector search took 81 ms at p95 instead of about a second, with a recall@10 of 0.998 against the exact scan. Larger sources shared by many organizations belong on pgvector.
 - A changed model or split is rebuilt beside the old index, which keeps answering until the reindex completes.
 - Where libSQL has no native build (Windows on ARM), boot goes on and its sources answer `SERVICE_UNAVAILABLE`.
 

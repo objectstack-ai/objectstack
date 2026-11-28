@@ -58,6 +58,14 @@ export interface KnowledgeTursoPluginOptions {
   requestTimeoutMs?: number;
   /** Text put before every query before it is embedded (see the adapter's option). */
   queryPrefix?: string;
+  /**
+   * The passage count at or above which a complete build makes a source's
+   * approximate vector index (see the adapter's option); `Infinity` never
+   * makes one. @default 20000
+   */
+  vectorIndexThreshold?: number;
+  /** How many approximate-index candidates the vector leg reads per hit, 8 or more (see the adapter's option). @default 40 */
+  vectorIndexOverfetch?: number;
   /** The embedder to call. Absent: the kernel's `embedder` service, read at each call. */
   embedder?: IEmbedder;
   /**
@@ -541,6 +549,8 @@ export class KnowledgeTursoPlugin implements Plugin {
       ...(store.client ? { client: store.client } : { unavailable: store.unavailable }),
       embedder,
       queryPrefix: this.opts.queryPrefix,
+      ...(this.opts.vectorIndexThreshold === undefined ? {} : { vectorIndexThreshold: this.opts.vectorIndexThreshold }),
+      ...(this.opts.vectorIndexOverfetch === undefined ? {} : { vectorIndexOverfetch: this.opts.vectorIndexOverfetch }),
       ...(store.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: store.requestTimeoutMs }),
     });
   }

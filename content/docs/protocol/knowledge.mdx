@@ -769,7 +769,8 @@ an exact scan.
 libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
 store for local development and for a deployment not on PostgreSQL. It takes
 the service's passages, embeds them with the kernel's `embedder` service (or
-the `embedder` it is given), and answers a search by an exact scan.
+the `embedder` it is given), and answers a search by an exact scan, or, for a
+large source of one organization, through an approximate index.
 
 - **Which database.** The `url` option (`file:`, `:memory:` or a
   `libsql://` Turso URL), else `knowledge.db` under the project's
@@ -790,16 +791,36 @@ the `embedder` it is given), and answers a search by an exact scan.
   passages; a generation made before carries the index from its next build. A key that is not snake_case is
   refused before any SQL.
 - **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
-  at most `topK`) before the service's re-check: an exact scan by cosine
-  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  at most `topK`) before the service's re-check: a vector leg by cosine
+  distance (an exact scan, or the approximate index below), and a keyword leg in a contentless FTS5 trigram index beside each
   passage table (kept in step by triggers), a term of three characters or
   more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
   the [record scope](#record-scope) and the metadata `filter` (JSON equality
-  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
-  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
-  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
-  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
-  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+  per key) are one `WHERE`, run in both legs. Without the approximate index
+  the vector leg reads every row in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
+  5 ms; 10,000 take 82 MB and about 50 ms.
+- **Approximate index.** A complete build that completes on a generation of
+  `vectorIndexThreshold` passages or more (default 20,000), all of one
+  organization, makes its approximate index: each passage's vector quantized
+  to one bit a dimension, in a side table kept in step by triggers, copied in
+  2,048 rows to a transaction before the switch, never on a search (200,000
+  passages: 3 s, 54 MB). The vector leg then takes the
+  `topK × vectorIndexOverfetch` passages nearest by that index (default 40 a
+  hit), runs the same `WHERE` over them, ranks those in scope by their stored
+  vector, and feeds the fusion as the exact leg does; a leg the filter leaves
+  with fewer than 8 × `topK` candidates in scope, or short of `topK` hits,
+  runs again as the exact scan, so a narrow scope keeps its recall and a
+  search never answers fewer hits than the exact scan. A database that
+  refuses the one-bit vectors or the index's DDL gets no index, its builds
+  complete, and the adapter's health check names the source and the reason. The candidates are ranked before the
+  filter, so the index is never made, or used, over the passages of two
+  organizations (passages of none count as one): each search reads the
+  organization index and takes the exact scan once a second organization's
+  passage is written. At 200,000 passages of 1,536
+  dimensions a search whose keyword leg matched nothing took 81 ms at p95
+  (the exact scan 1,054 ms), with a recall@10 against the exact scan of 0.998. libSQL's own DiskANN index (`vector_top_k`)
+  is not used: on the same 200,000 passages it took 24 minutes and 2.2 GB to
+  build and answered a recall@10 of 0.39.
 - **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
   under a new fingerprint builds a new generation table beside the active
   one, which keeps answering its own fingerprint, and switches at the end of
@@ -1347,7 +1368,7 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; a vector leg (an exact scan, or a one-bit approximate index for a large source of one organization) and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 
