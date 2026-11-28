@@ -5493,32 +5493,41 @@ export function selfTest({ tier = 'full' } = {}) {
   // The 178 files run only in CI's Test UI shards, so no family named them and a
   // card under ui package source or skills/objectui learned of a red one CI round
   // later. The entry stands in for that CI JOB (`ciJobRunsRunner`): pinned here
-  // are the predicate on all four roots and outside them, the rendering and the
+  // are the predicate on every reader's specimen and outside them, the rendering and the
   // runnable union through the whole table, the `--ran` verdict without it, the
   // STALE branch, and the binding against the live workflows.
   const UI_SUITE = 'pnpm --dir ui exec vitest run scripts/';
+  // Keyed by the reader that makes each specimen a suite input, so a root list
+  // narrowed back to sub-trees reds on the specimen it drops.
   const UI_SUITE_SPECIMENS = Object.freeze({
-    'ui/packages/**/src': 'ui/packages/sdui-parser/src/expression-carriage.ts',
-    'ui/apps/**': 'ui/apps/console/src/App.tsx',
-    'skills/objectui/**': 'skills/objectui/SKILL.md',
-    'ui/scripts/**': 'ui/scripts/check-skill-examples.mjs',
+    'ui package source': 'ui/packages/sdui-parser/src/expression-carriage.ts',
+    'the ui apps': 'ui/apps/console/src/App.tsx',
+    'the objectui skill bundle': 'skills/objectui/SKILL.md',
+    'the suite\'s own tree': 'ui/scripts/check-skill-examples.mjs',
+    // check-ui-root-lookups scans every source under ui/packages, a package's
+    // own scripts/ directory included: the miss this specimen pins.
+    'a ui package\'s own scripts/ directory': 'ui/packages/components/scripts/new-script.mjs',
+    // package-files-exist reads every ui package manifest.
+    'a ui package manifest': 'ui/packages/core/package.json',
+    // the vitest-config tests read the ui root's config.
+    'the ui root config': 'ui/vitest.config.mts',
   });
   const UI_SUITE_CONTROLS = Object.freeze([
     'packages/core/src/x.ts',
-    'ui/packages/core/package.json',
+    'uikit/packages/core/scripts/x.mjs',
     'skills/objectstack/SKILL.md',
     'scripts/pm/dispatch-gates.mjs',
   ]);
   const uiEntry = CHANGE_KIND_GATES.filter((k) => k.gates.some((g) => g.name === UI_SUITE));
   t('exactly one entry in the table names the ui/scripts suite, bound to the Test UI job',
     uiEntry.length === 1 && uiEntry[0].matches('ui/scripts/x.mjs') && uiEntry[0].gates[0].ciJob === 'Test UI' && UI_SUITE.startsWith(`${uiEntry[0].gates[0].ciRunner} `));
-  t('the roots are the card\'s four, in the trigger language', ['ui/packages/**/src/**', 'ui/apps/**', 'skills/objectui/**', 'ui/scripts/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
+  t('the roots are the whole ui tree and the objectui skill bundle, in the trigger language', ['ui', 'ui/**', 'skills/objectui/**'].every((r) => UI_SCRIPTS_SUITE_ROOTS.includes(r)));
   for (const [root, specimen] of Object.entries(UI_SUITE_SPECIMENS)) {
     t(`a path under ${root} is read by the ui/scripts suite (${specimen})`, readByUiScriptsSuite(specimen));
   }
-  t('a dispatch surface given as a ui package\'s src DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts'));
+  t('a dispatch surface given as a ui DIRECTORY counts too', readByUiScriptsSuite('ui/packages/core/src') && readByUiScriptsSuite('./ui/scripts') && readByUiScriptsSuite('ui/packages/fields/scripts') && readByUiScriptsSuite('ui'));
   for (const control of UI_SUITE_CONTROLS) {
-    t(`CONTROL: ${control} is outside the four roots`, !readByUiScriptsSuite(control));
+    t(`CONTROL: ${control} is outside the roots`, !readByUiScriptsSuite(control));
   }
   // A resolver that resolves a family by its `pnpm` spelling and a CI-job gate by
   // its own name — the shape `derive`'s resolver has.
@@ -5532,10 +5541,10 @@ export function selfTest({ tier = 'full' } = {}) {
     t(`…and ${control} derives no suite line and no suite command`,
       !throughTableUi(control) && !commandsFor({ kindGroups: changeKindGates([control], uiResolved) }).includes(UI_SUITE));
   }
-  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['skills/objectui/**']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
+  const uiLine = changeKindLines([UI_SUITE_SPECIMENS['the objectui skill bundle']], uiResolved, uiEntry).find((l) => l.includes(`- ${UI_SUITE}   —`)) ?? '';
   t('the suite line states its build prerequisite, runnably', /seven @objectstack packages/.test(uiLine) && uiLine.includes('turbo run build') && uiLine.includes('--filter=@objectstack/sdui-parser...'));
   t('…and says it is the whole suite, never a subset', /The whole suite, never a subset/.test(uiLine));
-  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['ui/apps/**']], uiResolved) });
+  const uiDerived = commandsFor({ kindGroups: changeKindGates([UI_SUITE_SPECIMENS['the ui apps']], uiResolved) });
   const uiWithout = runReconciliation({
     derived: uiDerived,
     record: parseRunRecord(uiDerived.filter((c) => c !== UI_SUITE).map((c) => `${c} :: exit 0`).join('\n')),
@@ -5543,7 +5552,7 @@ export function selfTest({ tier = 'full' } = {}) {
   t('⭐ a run record carrying every derived command BUT the suite is NOT ok, and names the suite unrun', !uiWithout.ok && uiWithout.unrun.some((u) => u.command === UI_SUITE));
   const uiWith = runReconciliation({ derived: uiDerived, record: parseRunRecord(uiDerived.map((c) => `${c} :: exit 0`).join('\n')) });
   t('CONTROL: the same record WITH the suite is ok', uiWith.ok);
-  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['ui/scripts/**']], () => null, uiEntry);
+  const uiStale = changeKindLines([UI_SUITE_SPECIMENS['the suite\'s own tree']], () => null, uiEntry);
   t('an unresolvable binding renders STALE, naming the job and the runner it lost',
     uiStale.filter((l) => l.includes(`⚠ ${UI_SUITE}: STALE`) && l.includes("job named 'Test UI…'") && l.includes("'pnpm --dir ui exec vitest run'")).length === 1);
   // The binding itself, against fixtures and then the LIVE workflows.

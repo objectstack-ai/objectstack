@@ -100,8 +100,8 @@ const fixtureStack = defineStack({
   objects: [Report],
   flows: [writer(SUBMIT, { status: 'submitted', note: 'submitted by the button' }), writer(ADD_NOTE, { note: 'noted by the button' })],
   actions: [
-    { name: 'submit_for_approval', label: 'Submit for approval', objectName: REPORT, type: 'flow', target: SUBMIT, locations: ['record_header'] },
-    { name: 'add_note', label: 'Add note', objectName: REPORT, type: 'flow', target: ADD_NOTE, locations: ['record_header'] },
+    { name: 'submit_for_approval', label: 'Submit for approval', objectName: REPORT, type: 'flow', target: SUBMIT, locations: ['record_page'] },
+    { name: 'add_note', label: 'Add note', objectName: REPORT, type: 'flow', target: ADD_NOTE, locations: ['record_page'] },
   ],
 } as never);
 

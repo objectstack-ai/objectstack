@@ -26,8 +26,8 @@
  *
  * Population covers each filter the acceptance criterion names, so one
  * equivalence assertion measures all of them at once:
- *   - `actionRendersAt` placement — `list_only` (list_item) must not render;
- *     `archive` (record_more) must land in the ⋯ menu, not inline
+ *   - `actionRendersAt` placement — `list_only` (record_row) must not render;
+ *     `archive` (folded) must land in the ⋯ menu, not inline
  *   - `requiredPermissions` — `gated` is denied for this user
  *   - `visible` — `closed_only` is a CEL predicate that is false for this record
  *   - `order` — `qualify` (order 1) renders BEFORE `convert` (order 2), which is
@@ -49,30 +49,30 @@ import type { MetadataContextValue } from '@object-ui/react';
 const BODY_MARKER = 'OS6252_HANDLER_BODY_MARKER';
 
 const ACTIONS: Record<string, any> = {
-  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'], order: 2 },
-  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_header'], order: 1 },
+  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'], order: 2 },
+  qualify: { name: 'qualify', label: 'Qualify', type: 'api', locations: ['record_page'], order: 1 },
   scripted: {
     name: 'scripted',
     label: 'Run Script',
     type: 'script',
-    locations: ['record_header'],
+    locations: ['record_page'],
     order: 3,
     body: { language: 'js', source: `return { marker: '${BODY_MARKER}' };` },
   },
-  archive: { name: 'archive', label: 'Archive', type: 'api', locations: ['record_more'] },
-  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['list_item'] },
+  archive: { name: 'archive', label: 'Archive', type: 'api', locations: ['record_page'], component: 'action:menu' },
+  list_only: { name: 'list_only', label: 'List Only', type: 'api', locations: ['record_row'] },
   gated: {
     name: 'gated',
     label: 'Gated Action',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     requiredPermissions: ['nobody_holds_this'],
   },
   closed_only: {
     name: 'closed_only',
     label: 'Closed Only',
     type: 'api',
-    locations: ['record_header'],
+    locations: ['record_page'],
     visible: 'record.status == "closed"',
   },
 };
@@ -203,18 +203,18 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
 
     // `order`: qualify (1) before convert (2), the reverse of the authored order.
     expect(names.indexOf('Qualify')).toBeLessThan(names.indexOf('Convert Lead'));
-    // `actionRendersAt`: list_item-only never renders on this surface.
+    // `actionRendersAt`: record_row-only never renders on this surface.
     expect(screen.queryByRole('button', { name: /List Only/i })).toBeNull();
     // `requiredPermissions`: denied for this user.
     expect(screen.queryByRole('button', { name: /Gated Action/i })).toBeNull();
     // `visible`: the CEL predicate is false for a record with status "open".
     expect(screen.queryByRole('button', { name: /Closed Only/i })).toBeNull();
-    // record_more is routed to the ⋯ overflow menu, never an inline slot.
+    // folded is routed to the ⋯ overflow menu, never an inline slot.
     expect(screen.queryByRole('button', { name: /^Archive$/i })).toBeNull();
   });
 
-  it('routes a record_more id into the overflow menu, never an inline slot', async () => {
-    // Same evidence the sibling `record_more` pins in `page-header-actions.test.tsx`
+  it('routes a folded id into the overflow menu, never an inline slot', async () => {
+    // Same evidence the sibling folded (`component: 'action:menu'`) pins in `page-header-actions.test.tsx`
     // take: the ⋯ trigger exists and the action is NOT among the inline buttons.
     // (The menu's own contents live behind a Radix portal that opens on
     // pointerdown; no test in this repo drives it open, and the routing claim is
@@ -269,8 +269,8 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
       type: 'page:header',
       title: 'Lead',
       actions: [
-        { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_header'] },
-        { name: 'other', label: 'Other', type: 'api', locations: ['record_header'] },
+        { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_page'] },
+        { name: 'other', label: 'Other', type: 'api', locations: ['record_page'] },
       ],
     });
     expect(buttonNames(container)).toEqual(['Ad Hoc', 'Other']);
@@ -287,7 +287,7 @@ describe('page:header — declared action-id lookup (objectui#6252)', () => {
   it('refuses a mixed id/object array — nothing authored renders, and the console names the offending index', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      const adhoc = { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_header'] };
+      const adhoc = { name: 'adhoc', label: 'Ad Hoc', type: 'api', locations: ['record_page'] };
       // Live controls FIRST: each half renders on its own, so the refusal below
       // is about the MIX and not about either element.
       const idsOnly = mount({ type: 'page:header', title: 'Lead', actions: ['convert'] });

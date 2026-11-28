@@ -1827,6 +1827,8 @@ export const WORKFLOW_TIER_H_FILES = Object.freeze([
   // content classifier read seven of eight edits to it as Tier S, a step ahead of the guard and its
   // self-test swapped for an echo among them — so the file is H by path, like the instruments it runs.
   Object.freeze({ path: '.github/workflows/governed-surface-guard.yml', why: 'runs the merge-queue guard that enforces this register (an edit can stop the guard reading anything)' }),
+  Object.freeze({ path: '.github/workflows/publish-starter-staging.yml', why: 'publishes the first-party starter to the staging cloud marketplace (a platform-admin key, `auto_approve`)' }),
+  Object.freeze({ path: '.github/workflows/publish-starter-production.yml', why: 'publishes the first-party starter to the production cloud marketplace (a platform-admin key, `auto_approve`)' }),
 ]);
 
 /** The patterns an ADDED line may not carry without Tier H (biased cases: each can turn a check off or skip a gate). */
@@ -7596,9 +7598,9 @@ async function selfTest() {
     assert('the-split-repositories-are-a-subset-of-the-rows-own', row.split.repos.every((r) => surfaceRepos(row).includes(r)));
     assert('the-reader-parses-the-fixture-and-the-baseline-is-S-against-itself', workflowFacts(BASE_WF).ok === true && isS(tierOf(BASE_WF)) && isS(tierOf(`${BASE_WF}\n`)), show(tierOf(BASE_WF)));
 
-    // Tier H by PATH: the six release, publish and deploy files and the workflow that runs the queue guard, each on disk under its own name.
+    // Tier H by PATH: the six release, publish and deploy files, the workflow that runs the queue guard and the two starter marketplace publishes, each on disk under its own name.
     const PINNED = WORKFLOW_TIER_H_FILES.map((f) => f.path);
-    assert('seven-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-the-write-relay-and-the-guards-own-workflow', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write', 'governed-surface-guard'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
+    assert('nine-files-are-Tier-H-by-path-release-docker-base-image-docs-wiki-the-write-relay-the-guards-own-workflow-and-both-starter-publishes', PINNED.join() === ['release', 'docker-publish', 'framework-build-base', 'docs-deploy', 'checklist-status', 'fleet-write', 'governed-surface-guard', 'publish-starter-staging', 'publish-starter-production'].map((n) => `${WORKFLOWS_PREFIX}${n}.yml`).join(), PINNED.join());
     assert('every-pinned-path-is-a-real-workflow-file-of-this-repository', PINNED.every((p) => existsSync(resolve(scriptDir, '..', '..', p))), PINNED.filter((p) => !existsSync(resolve(scriptDir, '..', '..', p))).join());
     assert('⛔ the-guards-own-workflow-is-H-by-path-on-an-edit-the-content-classifier-reads-S-anywhere-else', isH(tierOf(`# a comment\n${BASE_WF}`, { path: `${WORKFLOWS_PREFIX}governed-surface-guard.yml` }), /Tier H by path/) && isS(tierOf(`# a comment\n${BASE_WF}`)), show(tierOf(`# a comment\n${BASE_WF}`, { path: `${WORKFLOWS_PREFIX}governed-surface-guard.yml` })));
     assert('a-pinned-file-is-H-even-on-a-comment-only-edit', PINNED.every((p) => isH(classifyWorkflowChange({ path: p, base: BASE_WF, head: `# a comment\n${BASE_WF}`, inventory: INVENTORY }), /Tier H by path/)));

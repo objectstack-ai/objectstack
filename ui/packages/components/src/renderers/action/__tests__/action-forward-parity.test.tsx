@@ -75,9 +75,9 @@ import '../action-menu';
 
 /** Three ordinary actions — enough to fill the desktop `maxVisible: 3`. */
 const FILLERS = [
-  { name: 'a1', label: 'a1', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a2', label: 'a2', type: 'api', locations: ['list_toolbar'] },
-  { name: 'a3', label: 'a3', type: 'api', locations: ['list_toolbar'] },
+  { name: 'a1', label: 'a1', type: 'api', locations: ['list'] },
+  { name: 'a2', label: 'a2', type: 'api', locations: ['list'] },
+  { name: 'a3', label: 'a3', type: 'api', locations: ['list'] },
 ];
 
 /**
@@ -93,7 +93,7 @@ const CREATE = {
   label: 'Create Environment',
   description: 'Provision a new environment for this project',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
   params: [{ name: 'title', type: 'text', label: 'Title' }],
   autoTrigger: true,
 };
@@ -115,7 +115,7 @@ function Bar({ actions }: { actions: any[] }) {
   const C = ComponentRegistry.get('action:bar');
   if (!C) throw new Error('action:bar is not registered');
   // eslint-disable-next-line react-hooks/static-components -- ComponentRegistry.get returns a registered renderer (stable reference), not a component created during render
-  return <C schema={{ type: 'action:bar', location: 'list_toolbar', actions }} />;
+  return <C schema={{ type: 'action:bar', location: 'list', actions }} />;
 }
 
 const renderBar = (actions: any[]) =>

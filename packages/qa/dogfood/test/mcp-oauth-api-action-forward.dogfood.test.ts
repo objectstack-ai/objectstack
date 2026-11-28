@@ -61,10 +61,10 @@ const Probe = ObjectSchema.create({
   sharingModel: 'public_read_write',
   fields: { name: Field.text({ label: 'Name' }) },
   actions: [
-    { name: 'probe_update_me', label: 'Update Me', type: 'api', method: 'POST', target: '/api/v1/auth/update-user', bodyExtra: { name: 'Renamed By Agent' }, locations: ['record_header'], ai: ai('Rename the signed-in user through the identity route as the caller.') },
-    { name: 'probe_data_patch', label: 'Data Patch', type: 'api', method: 'PATCH', target: '/api/v1/data/probe_fwd_thing/${ctx.recordId}', bodyExtra: { name: 'patched' }, locations: ['record_header'], ai: ai('Patch the probe record through the data door as the caller.') },
-    { name: 'probe_ban', label: 'Ban', type: 'api', method: 'POST', target: '/api/v1/auth/admin/ban-user', params: [{ name: 'userId', label: 'User', type: 'text', required: true }], locations: ['record_header'], ai: ai('Ban the probe target user through the better-auth admin endpoint.') },
-    { name: 'probe_meta_put', label: 'Meta Put', type: 'api', method: 'PUT', target: '/api/v1/meta/object/probe_fwd_thing', locations: ['record_header'], ai: ai('Rewrite the probe object definition through the metadata door.') },
+    { name: 'probe_update_me', label: 'Update Me', type: 'api', method: 'POST', target: '/api/v1/auth/update-user', bodyExtra: { name: 'Renamed By Agent' }, locations: ['record_page'], ai: ai('Rename the signed-in user through the identity route as the caller.') },
+    { name: 'probe_data_patch', label: 'Data Patch', type: 'api', method: 'PATCH', target: '/api/v1/data/probe_fwd_thing/${ctx.recordId}', bodyExtra: { name: 'patched' }, locations: ['record_page'], ai: ai('Patch the probe record through the data door as the caller.') },
+    { name: 'probe_ban', label: 'Ban', type: 'api', method: 'POST', target: '/api/v1/auth/admin/ban-user', params: [{ name: 'userId', label: 'User', type: 'text', required: true }], locations: ['record_page'], ai: ai('Ban the probe target user through the better-auth admin endpoint.') },
+    { name: 'probe_meta_put', label: 'Meta Put', type: 'api', method: 'PUT', target: '/api/v1/meta/object/probe_fwd_thing', locations: ['record_page'], ai: ai('Rewrite the probe object definition through the metadata door.') },
   ],
 } as any);
 

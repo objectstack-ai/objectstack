@@ -99,7 +99,7 @@ export const ResolveTicketAction = defineAction({
   icon: 'check-circle',
   operation: 'update',
   patch: { status: 'resolved' },
-  locations: ['record_header', 'list_item'],
+  locations: ['record'],
   visible: 'has(record.status) && record.status != "resolved" && record.status != "closed"',
   successMessage: 'Ticket resolved.',
   refreshAfter: true,
@@ -112,7 +112,7 @@ export const EscalateTicketAction = defineAction({
   icon: 'arrow-up',
   type: 'script',
   target: 'escalateTicket',
-  locations: ['record_header'],
+  locations: ['record_page'],
 });
 `;
 

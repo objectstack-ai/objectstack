@@ -521,7 +521,10 @@ export const DataTableSchema = BaseSchema.extend({
   //                       `FieldDesigner` are the hosts that supply it.
   //   - `onBatchSave`     was one of the seven until objectstack#35827 RETIRED
   //                       the staged editing model it served: no renderer reads
-  //                       it any more, so it is refused as `'retired'` below.
+  //                       it any more, so it is refused as `'retired'` below,
+  //                       with its own FROM → TO (`onRowSave` on `object-grid`)
+  //                       in place of the node-type remedy, since a save path
+  //                       is not behaviour a node can declare.
   //   - `onCellChange`    `ObjectGrid` forwards `ObjectGridComponentProps.onCellChange`.
   //   - `onColumnResize`  ⚠️ a DIFFERENT channel from its six siblings, and the
   //                       reason "six of them were" is not evidence: no host prop
@@ -541,7 +544,15 @@ export const DataTableSchema = BaseSchema.extend({
   //   - `onRowSave`       `ObjectGrid`'s `onRowSave ?? defaultRowSave` — the left
   //                       limb is `ObjectGridComponentProps.onRowSave`.
   onAddRecord: handlerKeyRefusal('onAddRecord', 'runtime-slot', 'Add record handler'),
-  onBatchSave: handlerKeyRefusal('onBatchSave', 'retired', 'Batch save handler'),
+  onBatchSave: handlerKeyRefusal(
+    'onBatchSave',
+    'retired',
+    'Batch save handler',
+    '`onBatchSave` → `onRowSave` on `object-grid`. The staged editing model it served (a pending-changes bar and '
+      + '"Save All") is gone: the table saves each committed cell on its own, one `onRowSave` call per record. '
+      + 'Render an `object-grid`, which writes each committed cell through its data source; a React host that '
+      + 'saves rows itself passes `onRowSave` inside a `GridCellSelectionProvider`. Delete the key.',
+  ),
   onCellChange: handlerKeyRefusal('onCellChange', 'runtime-slot', 'Cell value change handler'),
   onColumnResize: handlerKeyRefusal('onColumnResize', 'runtime-slot', 'Column resize handler'),
   onRowActionDef: handlerKeyRefusal('onRowActionDef', 'runtime-slot', 'Row action handler'),

@@ -19,7 +19,7 @@
  * `DeclaredActionsBar` mount):
  *
  *  - a `type: 'api'` row action (the shape of objectstack's published
- *    `ReassignLeadAction`: undoable, on `list_item`, writing a lookup), run by
+ *    `ReassignLeadAction`: undoable, on `record_row`, writing a lookup), run by
  *    the runtime's own `api` handler, which looks the object's field
  *    definitions up itself;
  *  - an `operation: 'update'` row action, run by `ActionRunner`, which reads
@@ -75,6 +75,9 @@ vi.mock('../../views/FlowRunner', () => ({ FlowRunner: () => null }));
 // stub is handed, standing in for the declaration the route resolves by name:
 // the request never carries it (objectui#12941).
 const routeWrites: Array<Record<string, unknown>> = [];
+// What the route answers beside the write: by default the bare success, else
+// the declarative-update answer a case sets (objectstack#37867's `warnings`).
+let routeAnswerData: Record<string, unknown> | undefined;
 vi.mock('../../utils/consoleServerAction', () => ({
   createConsoleServerActionHandler: () => vi.fn(async (action: {
     params?: Record<string, unknown>;
@@ -82,7 +85,7 @@ vi.mock('../../utils/consoleServerAction', () => ({
   }) => {
     const { _rowRecord: _row, recordId: _id, ...fields } = action.params ?? {};
     routeWrites.push({ ...(action.patch ?? {}), ...fields });
-    return { success: true };
+    return routeAnswerData ? { success: true, data: routeAnswerData } : { success: true };
   }),
 }));
 
@@ -144,7 +147,7 @@ async function runOnGridRow(action: Record<string, unknown>) {
                 type: 'object-grid',
                 objectName: OBJECT,
                 columns: ['name', 'account'],
-                rowActionDefs: [{ locations: ['list_item'], successMessage: MESSAGE, ...action }],
+                rowActionDefs: [{ locations: ['record_row'], successMessage: MESSAGE, ...action }],
               } as never}
               dataSource={dataSource as never}
             />
@@ -175,7 +178,9 @@ async function runOnGridRow(action: Record<string, unknown>) {
 afterEach(() => {
   cleanup();
   routeWrites.length = 0;
+  routeAnswerData = undefined;
   vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
   globalUndoManager.clear();
 });
 
@@ -288,5 +293,57 @@ describe('console runtime — where the field definitions come from (objectui#11
     const global = await reassign({ objects: [OBJECT_DEF] });
     expect(global.context).not.toHaveProperty('objectName');
     expect(global.context).not.toHaveProperty('objectFields');
+  });
+});
+
+describe('grid row — an update whose write raised warnings warns, on one toast (objectstack#37867)', () => {
+  const WARNING = 'This deal takes its account over the credit limit.';
+
+  it('the runtime raises the warning toast: the success message, the warning under it, and Undo', async () => {
+    routeAnswerData = {
+      operation: 'update',
+      object: OBJECT,
+      id: 'o1',
+      record: { ...STORED, account: 'a2' },
+      warnings: [{ field: 'account', code: 'rule_violation', message: WARNING, rule: 'credit_limit', severity: 'warning' }],
+    };
+    const dataSource = makeDataSource();
+    render(
+      <I18nProvider config={EN} persistLanguage={false}>
+        <MemoryRouter>
+          <ConsoleActionRuntimeProvider dataSource={dataSource} objects={[OBJECT_DEF]} objectName={OBJECT}>
+            <SchemaRendererProvider dataSource={dataSource as never}>
+              <ObjectGrid
+                schema={{
+                  type: 'object-grid',
+                  objectName: OBJECT,
+                  columns: ['name', 'account'],
+                  rowActionDefs: [{
+                    locations: ['list_item'], successMessage: MESSAGE, name: 'set_account', label: 'Set account',
+                    type: 'script', operation: 'update', undoable: true, patch: { account: 'a2' },
+                  }],
+                } as never}
+                dataSource={dataSource as never}
+              />
+            </SchemaRendererProvider>
+          </ConsoleActionRuntimeProvider>
+        </MemoryRouter>
+      </I18nProvider>,
+    );
+    await waitFor(() => expect(screen.getByText('Deal')).toBeInTheDocument());
+    await userEvent.click(await screen.findByTestId('row-action-trigger'));
+    await userEvent.click(await screen.findByTestId('row-action-set_account'));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    const [message, options] = vi.mocked(toast.warning).mock.calls[0] as [string, { description?: string; action?: { onClick: () => void } }];
+    expect(message).toBe(MESSAGE);
+    expect(options.description).toBe(WARNING);
+    expect(options.action).toBeDefined();
+    // One toast: the warning variant replaces the success one, never joins it.
+    expect(vi.mocked(toast.success).mock.calls.filter(([m]) => m === MESSAGE)).toHaveLength(0);
+
+    // The kept Undo is the runtime's real one.
+    await act(async () => { options.action!.onClick(); });
+    await waitFor(() => expect(dataSource.update).toHaveBeenLastCalledWith(OBJECT, 'o1', { account: 'a1' }));
   });
 });

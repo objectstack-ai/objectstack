@@ -629,12 +629,12 @@ export const BLOCK_CONFIG: Record<string, BlockPropField[]> = {
       label: 'engine.inspector.pageBlock.field.record:quick_actions.location',
       kind: 'select',
       options: [
-        { value: 'record_header', label: 'engine.inspector.pageBlock.option.location.record_header' },
-        { value: 'record_more', label: 'engine.inspector.pageBlock.option.location.record_more' },
+        { value: 'record_page', label: 'engine.inspector.pageBlock.option.location.record_page' },
+        { value: 'record', label: 'engine.inspector.pageBlock.option.location.record' },
+        { value: 'record_row', label: 'engine.inspector.pageBlock.option.location.record_row' },
         { value: 'record_section', label: 'engine.inspector.pageBlock.option.location.record_section' },
         { value: 'record_related', label: 'engine.inspector.pageBlock.option.location.record_related' },
-        { value: 'list_toolbar', label: 'engine.inspector.pageBlock.option.location.list_toolbar' },
-        { value: 'list_item', label: 'engine.inspector.pageBlock.option.location.list_item' },
+        { value: 'list', label: 'engine.inspector.pageBlock.option.location.list' },
         // No `global_nav` option: the location was retired from the spec's
         // `ACTION_LOCATIONS` in @objectstack/spec 17.0.0-rc.6 (objectstack#6888).
         // Offering it here would let the designer author a value the schema now

@@ -25,6 +25,8 @@ const state = vi.hoisted(() => ({
 vi.mock('../useMetadata', () => ({ useMetadataClient: () => state.metadataClient }));
 
 import { ActionDefaultInspector } from './ActionDefaultInspector';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 afterEach(cleanup);
 
@@ -79,7 +81,7 @@ const NEW_UPDATE_ACTION: Draft = {
   name: 'invoice_action_2',
   label: 'New action',
   objectName: 'invoice',
-  locations: ['record_header'],
+  locations: ['record_page'],
   operation: 'update',
   patch: {},
 };

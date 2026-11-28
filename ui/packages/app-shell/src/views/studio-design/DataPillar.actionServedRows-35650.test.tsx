@@ -41,7 +41,7 @@ const SIGN = {
   name: 'showcase_task_sign',
   label: 'Sign',
   objectName: 'showcase_task',
-  locations: ['record_more'],
+  locations: ['record_page'], component: 'action:menu',
   type: 'script',
   body: { language: 'js', source: "throw { code: 'SIGN_IN_REQUIRED' };" },
   refusals: { SIGN_IN_REQUIRED: { message: 'Sign in first.', status: 401 } },

@@ -199,7 +199,7 @@ export const GenerateInvoicePdf = defineAction({
   method: 'POST',
   recordIdParam: 'recordId',                  // the clicked record's id
   bodyExtra: { app: 'sales', object: 'invoice', page: 'invoice_document' },
-  locations: ['list_item'],
+  locations: ['record_row'],
   refreshAfter: true,
 });
 ```

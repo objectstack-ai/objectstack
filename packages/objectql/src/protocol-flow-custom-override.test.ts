@@ -162,7 +162,7 @@ const actionBody = (label: string, extra: Record<string, unknown> = {}) => ({
     objectName: 'showcase_task',
     type: 'script',
     body: { language: 'js', source: `return { ran: '${label}' };` },
-    locations: ['record_header', 'list_item'],
+    locations: ['record'],
     ...ACTION_GATES,
     ...extra,
 });

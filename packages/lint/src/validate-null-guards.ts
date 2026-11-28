@@ -189,13 +189,13 @@
  *         or the object's field list — and the two hits in (2) prove it from one
  *         file: identical `record.<f> != null` guards on identical `locations`,
  *         where `f_lookup`/`f_lookups` are NOT default-list columns (so the
- *         predicate faults on `list_item`) while `f_textarea` IS one (so it does
+ *         predicate faults on `record_row`) while `f_textarea` IS one (so it does
  *         not). Nothing in the action's own metadata distinguishes them. `&&`
  *         short-circuiting makes it worse: `record.id == ctx.user.id &&
  *         record.two_factor_enabled != true` never reaches the absent key on a
  *         row whose first conjunct is false, so whether a given predicate faults
  *         depends on row DATA. A sound static rule would have to flag every
- *         `record.*` read on any action reaching `list_item` — 34 of 34, which
+ *         `record.*` read on any action reaching `record_row` — 34 of 34, which
  *         is a platform-contract finding, not a lint rule.
  *      4. **The prescription would be wrong.** `has()` guards absence, not
  *         nullness: measured, `has(record.a) && record.a > 1` FAULTS on a

@@ -8,7 +8,7 @@
 
 /**
  * objectui#12331 — a single-record script action placed in a list's
- * `list_toolbar` never drops a click.
+ * `list` never drops a click.
  *
  * Filed from a browser pass of HotCRM's Leads list: "Add to Campaign", a
  * `type: 'script'` action with one param (a campaign picker), launched from the
@@ -29,7 +29,7 @@
  * success toast — the action's own copy, filled from the answer's
  * `{{ result.* }}`, or the runner's generic line when it declares none.
  *
- * The last block replays HotCRM's own declaration: a `list_item` placement and
+ * The last block replays HotCRM's own declaration: a `record_row` placement and
  * a FIELD-BACKED param, so the dialog draws a record picker and the toast
  * comes after a picker was used. It refuses and reports exactly as the plain
  * fixture does.
@@ -48,7 +48,7 @@
  *
  * "Record-scoped" is a declaration, not a guess: an action is single-record
  * when its `locations` include a record placement (`isRecordScopedAction`). An
- * action declared at `list_toolbar` alone is object-level, so zero rows
+ * action declared at `list` alone is object-level, so zero rows
  * dispatches it with no record — pinned below as the control.
  */
 
@@ -111,13 +111,15 @@ vi.mock('./metadata-admin/useMetadata', async (importOriginal) => ({
 import { ObjectView } from './ObjectView';
 import { ExpressionProvider } from '../providers/ExpressionProvider';
 import { ConsoleToaster } from '../chrome/ConsoleToaster';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 
 const ACTION_URL = '/api/v1/actions/crm_lead/create_campaign';
 
 /** A record-scoped placement: the toolbar plus a record placement. */
-const RECORD_SCOPED = ['list_toolbar', 'record_header'];
+const RECORD_SCOPED = ['list', 'record_page'];
 /** The declaration the card measured: the toolbar alone, i.e. object-level. */
-const TOOLBAR_ONLY = ['list_toolbar'];
+const TOOLBAR_ONLY = ['list'];
 
 function crmLead(locations: string[], successMessage?: string) {
   return {
@@ -245,7 +247,7 @@ async function launchRefusedFromHeader(refusal: string): Promise<void> {
   expect(screen.queryByRole('dialog')).toBeNull();
 }
 
-describe('objectui#12331 — a record-scoped script action at list_toolbar, with a param', () => {
+describe('objectui#12331 — a record-scoped script action at list, with a param', () => {
   it('0 rows: the refusal shows before any dialog, and no request is sent', async () => {
     mountLeads(RECORD_SCOPED);
     await tickRows(0);
@@ -284,7 +286,7 @@ describe('objectui#12331 — a record-scoped script action at list_toolbar, with
 });
 
 describe('objectui#12331 — the refusal follows the `locations` declaration', () => {
-  it('declared at list_toolbar alone, 2 rows: one dispatch cannot name two records, so it refuses before any dialog', async () => {
+  it('declared at list alone, 2 rows: one dispatch cannot name two records, so it refuses before any dialog', async () => {
     mountLeads(TOOLBAR_ONLY);
     await tickRows(2);
     await launchRefusedFromHeader(MULTI_ROW_REFUSAL);
@@ -292,7 +294,7 @@ describe('objectui#12331 — the refusal follows the `locations` declaration', (
     expect(actionCalls()).toHaveLength(0);
   });
 
-  it('control — declared at list_toolbar alone, 0 rows: object-level, so it dispatches with no record', async () => {
+  it('control — declared at list alone, 0 rows: object-level, so it dispatches with no record', async () => {
     mountLeads(TOOLBAR_ONLY);
     await tickRows(0);
     await launchFromHeader();
@@ -312,7 +314,7 @@ describe('objectui#12331 — the refusal follows the `locations` declaration', (
  * HotCRM's `CreateCampaignAction` (objectstack-ai/hotcrm, `src/sales/actions/
  * lead.actions.ts`), with the keys this chain reads. It differs from the
  * fixture above in the two ways the card's reading could hinge on: the record
- * placement is `list_item`, and its one param is FIELD-BACKED, so the dialog
+ * placement is `record_row`, and its one param is FIELD-BACKED, so the dialog
  * draws a record picker (a lookup to `crm_campaign`) instead of a text box.
  */
 const HOTCRM_CREATE_CAMPAIGN = {
@@ -320,7 +322,7 @@ const HOTCRM_CREATE_CAMPAIGN = {
   label: 'Add to Campaign',
   objectName: 'crm_lead',
   type: 'script',
-  locations: ['list_toolbar', 'list_item'],
+  locations: ['list', 'record_row'],
   successMessage: 'Leads added to campaign!',
   refreshAfter: true,
   params: [{ field: 'crm_campaign', objectOverride: 'crm_campaign_member', label: 'Campaign', required: true }],
@@ -402,7 +404,7 @@ function mountHotcrmLeads() {
 
 /**
  * Click the HEADER toolbar's "Add to Campaign", pick "Cloud Migration Webinar"
- * in the record picker, Confirm — the card's steps. `list_item` also draws the
+ * in the record picker, Confirm — the card's steps. `record_row` also draws the
  * action on every row, so the header's toolbar is the first one on the page.
  */
 async function launchHotcrmFromHeader(): Promise<void> {
@@ -416,11 +418,11 @@ async function launchHotcrmFromHeader(): Promise<void> {
   await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'Confirm' })); });
 }
 
-describe('objectui#12331 — HotCRM\'s declaration: list_item placement, a field-backed record-picker param', () => {
+describe('objectui#12331 — HotCRM\'s declaration: record_row placement, a field-backed record-picker param', () => {
   it('0 rows: the refusal shows before any dialog, and no request is sent', async () => {
     mountHotcrmLeads();
     await tickRows(0);
-    // `list_item` also draws the action on every row; the header's toolbar is the first.
+    // `record_row` also draws the action on every row; the header's toolbar is the first.
     await launchRefusedFromHeader(ZERO_ROW_REFUSAL);
 
     expect(actionCalls()).toHaveLength(0);

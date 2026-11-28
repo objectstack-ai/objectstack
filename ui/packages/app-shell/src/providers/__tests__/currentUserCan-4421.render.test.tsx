@@ -172,8 +172,8 @@ const SURFACES: Record<string, {
             title: 'Northwind',
             maxVisible: 10,
             actions: [
-              { ...logicalDelete(state), type: 'api', locations: ['record_header'] },
-              { ...COMPANION, type: 'api', locations: ['record_header'] },
+              { ...logicalDelete(state), type: 'api', locations: ['record_page'] },
+              { ...COMPANION, type: 'api', locations: ['record_page'] },
             ],
           },
         }),

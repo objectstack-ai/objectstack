@@ -68,10 +68,10 @@ import { DesignModeBar } from '../DesignModeBar';
 import { DesignModeHeaderPins, useObjectPins } from '../DesignModeHeaderPins';
 
 const ACTIONS = [
-  { name: 'convert', label: 'Convert', locations: ['record_header'], order: 1 },
-  { name: 'mark_won', label: 'Mark won', locations: ['record_header'], order: 2 },
-  { name: 'clone', label: 'Clone', locations: ['record_header'], order: 3 },
-  { name: 'log_call', label: 'Log call', locations: ['record_more'], order: 4 },
+  { name: 'convert', label: 'Convert', locations: ['record_page'], order: 1 },
+  { name: 'mark_won', label: 'Mark won', locations: ['record_page'], order: 2 },
+  { name: 'clone', label: 'Clone', locations: ['record_page'], order: 3 },
+  { name: 'log_call', label: 'Log call', locations: ['record_page'], component: 'action:menu', order: 4 },
 ];
 
 function Harness({ objectDef }: { objectDef: Record<string, unknown> }) {

@@ -42,7 +42,7 @@
 import '@testing-library/jest-dom/vitest';
 import React from 'react';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, within } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, within, waitFor } from '@testing-library/react';
 import { ChatbotEnhanced } from '../ChatbotEnhanced';
 
 afterEach(() => cleanup());
@@ -202,5 +202,75 @@ describe('the closed picker shows the tier name alone when the model carries one
     const { onModelChange, trigger } = mount('haiku', { models: TIERED });
     await pick(trigger(), 'Advanced · Claude Sonnet 5');
     expect(onModelChange.mock.calls).toEqual([['sonnet']]);
+  });
+});
+
+describe('a picked model survives the composer\'s send (objectstack#37831)', () => {
+  /**
+   * The host holds the pick, as every chat host does (ADR-0028): what the
+   * picker writes comes back as `selectedModelId`, and the send reads the
+   * model in force at that moment. Each send goes through the composer's real
+   * form submit (Enter in the box), never a direct `onSendMessage` call: the
+   * submit is where the pick was lost. The composer used to clear its box with
+   * `form.reset()`, and the Radix `Select` in the same form answers a reset by
+   * writing its first-render value (the default model) back through
+   * `onValueChange`. Ablation: restoring `form.reset()` in `handleSubmit`
+   * (`elements/prompt-input.tsx`) reds the picked row; the CONTROL row stays green.
+   */
+  function mountHeld() {
+    const writes: string[] = [];
+    const sends: Array<[string, string]> = [];
+    function Host() {
+      const [held, setHeld] = React.useState<string | undefined>(undefined);
+      const inForce = held ?? MODELS[0].id;
+      return (
+        <ChatbotEnhanced
+          models={MODELS}
+          selectedModelId={inForce}
+          onModelChange={(id: string) => {
+            writes.push(id);
+            setHeld(id);
+          }}
+          onSendMessage={(text: string) => {
+            sends.push([text, inForce]);
+          }}
+        />
+      );
+    }
+    render(<Host />);
+    return { writes, sends, trigger: () => screen.getByRole('combobox', { name: 'Model' }) };
+  }
+
+  async function sendTyped(text: string, sentBefore: number, sends: unknown[]): Promise<void> {
+    const box = screen.getByRole('textbox') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: text } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(sends).toHaveLength(sentBefore + 1));
+  }
+
+  it('picked: the picker still shows the pick after each send, and every later send carries it', async () => {
+    const { writes, sends, trigger } = mountHeld();
+    await pick(trigger(), 'Claude 3.5 · anthropic');
+    await sendTyped('first', 0, sends);
+    expect(within(trigger()).getByTestId('model-picker-value').textContent).toBe('Claude 3.5');
+    await sendTyped('second', 1, sends);
+    expect(within(trigger()).getByTestId('model-picker-value').textContent).toBe('Claude 3.5');
+    // The one write is the user's pick: the sends wrote nothing.
+    expect(writes).toEqual(['claude-3-5-sonnet']);
+    expect(sends).toEqual([
+      ['first', 'claude-3-5-sonnet'],
+      ['second', 'claude-3-5-sonnet'],
+    ]);
+    // The send still clears the box.
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('CONTROL — no pick: the first model is in force before and after a send, and nothing is written', async () => {
+    const { writes, sends, trigger } = mountHeld();
+    await sendTyped('first', 0, sends);
+    expect(within(trigger()).getByTestId('model-picker-value').textContent).toBe('GPT-4o mini');
+    expect(writes).toEqual([]);
+    expect(sends).toEqual([['first', 'gpt-4o-mini']]);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).value).toBe('');
   });
 });
