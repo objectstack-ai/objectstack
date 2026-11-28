@@ -342,11 +342,30 @@ The default `memory` adapter holds nothing after a restart, so with it **every b
 To rebuild a source yourself, as an administrator (an account with `manage_platform_settings`):
 
 ```bash
-os knowledge status                    # each source: built, never built or due a rebuild, and the last build
+os knowledge status                    # each source: built, never built or due a rebuild, its last build and failed syncs
 os knowledge rebuild support_articles  # start a complete build and follow its progress
 ```
 
-`os knowledge rebuild` starts the build on the server and prints its progress — rows read, documents written, unchanged, purged, and those that cannot be indexed — until it ends; `--no-wait` returns once it has started. Both commands call the `knowledge` settings actions `rebuild` and `index_status` (`POST /api/settings/knowledge/rebuild` with `{ "source": "ID" }`). The server logs each build's start, its progress every ten seconds, and its result. A build's progress lives on the node that runs it: behind a load balancer, read it from that node.
+`os knowledge rebuild` starts the build on the server and prints its progress — rows read, documents written, unchanged, purged, and those that cannot be indexed — until it ends; `--no-wait` returns once it has started. Both commands call the `knowledge` settings actions `rebuild` and `index_status` (`POST /api/settings/knowledge/rebuild` with `{ "source": "ID" }`). The server logs each build's start, its progress every ten seconds, and its result. The progress the commands read is the source's sync state (below), so behind a load balancer any node answers it. On the `memory` adapter the index itself lives in each server process: a rebuild fills the index of the node that ran it only, and the command says so when it ends.
+
+### Each source's sync state
+
+Every source has one sync-state row, in the system object `sys_knowledge_sync_state`, which every node reads and writes, so every node answers the same and a restart forgets nothing. A platform administrator reads it in **Setup → Knowledge Sync Status** (beside the Knowledge settings), with `os knowledge status`, or through the `index_status` action. Nothing but the knowledge service writes it, and no other account reads it.
+
+The row holds the source (its name, package, adapter and object), its **last build** and its **failed syncs**:
+
+| Last build status | What it means |
+|:--|:--|
+| `running` | the build is walking; its counts are written at most every ten seconds |
+| `done` | every row was read and the index recorded the build |
+| `failed` | it did not finish; the reason is in the server log of the node that ran it |
+| `lease_lost` | its cluster lease was lost, so it stopped; another node may build the source now |
+| `timed_out` | no page finished in time, so it was cancelled |
+| `interrupted` | the node running it stopped; the next boot, or the next node that takes the source's build lease, closes it |
+
+After any status but `done`, the index keeps what it held, and the next reconcile, boot or rebuild builds again. A build that did not run (another node held the source's build, or nothing was due) is not written: the row keeps the build that did. Only the last build is kept; the reconcile job's run history is the job service's.
+
+A **failed sync** is a record sync that spent every attempt and waits as a dead letter on the `knowledge-record-sync` queue. Each one adds one to the count, with its time and a sentence naming the record, the attempts and the kind of error. It never holds a field value, and never the embedding provider's own text, which may quote the record: that is in the server log of the node that ran the sync. A sync that succeeds on a retry counts nothing. The first failure of a source asks for a reconcile of that source two minutes later, however many follow. When a reconcile of the source completes, it clears the failures recorded before its walk began and removes their dead letters; failures recorded during its walk stay counted for the next one. `os knowledge status` also prints how many record syncs are waiting on the queue (every source's together). Removing a source removes its row.
 
 ## Self-hosted vector store: PostgreSQL + pgvector
 

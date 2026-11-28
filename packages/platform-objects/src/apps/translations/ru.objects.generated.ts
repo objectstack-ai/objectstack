@@ -4664,6 +4664,111 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
       }
     }
   },
+  sys_knowledge_sync_state: {
+    label: "Knowledge Sync State",
+    pluralLabel: "Knowledge Sync States",
+    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    fields: {
+      id: {
+        label: "Source Key",
+        help: "The key the source's index is held under in its store. One row per source."
+      },
+      source: {
+        label: "Source",
+        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+      },
+      package_id: {
+        label: "Package",
+        help: "The package that holds the source. Empty for a source no package holds."
+      },
+      adapter: {
+        label: "Adapter",
+        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+      },
+      object: {
+        label: "Object",
+        help: "The object whose records the source indexes."
+      },
+      build_id: {
+        label: "Build ID",
+        help: "Names the last build. A build writes its progress and its end only while this still names it."
+      },
+      build_trigger: {
+        label: "Started By",
+        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        options: {
+          boot: "boot",
+          reload: "reload",
+          operator: "operator",
+          reconcile: "reconcile"
+        }
+      },
+      build_status: {
+        label: "Build Status",
+        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        options: {
+          running: "running",
+          done: "done",
+          failed: "failed",
+          lease_lost: "lease_lost",
+          timed_out: "timed_out",
+          interrupted: "interrupted"
+        }
+      },
+      build_started_at: {
+        label: "Build Started At"
+      },
+      build_finished_at: {
+        label: "Build Finished At"
+      },
+      build_discovered: {
+        label: "Rows Read",
+        help: "Rows the last build read."
+      },
+      build_indexed: {
+        label: "Documents Written",
+        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+      },
+      build_skipped: {
+        label: "Unchanged",
+        help: "Documents the index already held unchanged, so not written again."
+      },
+      build_purged: {
+        label: "Purged",
+        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+      },
+      build_failed: {
+        label: "Cannot Be Indexed",
+        help: "Documents that cannot be indexed under the source's split, removed from the index."
+      },
+      build_message: {
+        label: "Build Message",
+        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+      },
+      failure_count: {
+        label: "Failed Syncs",
+        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+      },
+      first_failed_at: {
+        label: "First Failed At",
+        help: "When the oldest failure counted above failed."
+      },
+      last_failed_at: {
+        label: "Last Failed At",
+        help: "When the newest failure counted above failed."
+      },
+      last_error: {
+        label: "Last Error",
+        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+      },
+      created_at: {
+        label: "Created At"
+      },
+      updated_at: {
+        label: "Updated At"
+      }
+    }
+  },
   sys_task: {
     label: "Задача",
     pluralLabel: "Задачи",
