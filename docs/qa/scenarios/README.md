@@ -64,7 +64,7 @@ instead, so a working day stays a working day on every run date and N working da
 dates stay N (a weekend run date moves them as for the Friday before it). Public holidays are out
 of scope either way.
 
-**Counts.** The default band is 8–10 questions and 4–7 operations. A card below 8 questions
+**Counts.** The default band is 8–11 questions and 4–7 operations. A card below 8 questions
 or 4 operations states why in `run.countsReason`, or it is refused; a `starter` or `delivery`
 card has no such excuse ([Tiers](#tiers)).
 
@@ -328,7 +328,7 @@ the loader enforces; each card's own test pins the rest:
 - a seed spanning at least three months, with at least 100 rows on the main object;
 - declarative first — flows, formulas and validation rules over code hooks, so a graduated
   app can install unmanaged;
-- 8–10 questions mixing count/sum, group-by, top-N, a time window, at least two
+- 8–11 questions mixing count/sum, group-by, top-N, a time window, at least two
   cross-object and two permission-boundary questions, a "who owns / latest progress"
   question and at least one unanswerable one; 4–7 operations covering entry from free text
   (lines included), a one-field change, a workflow step, a confirm-gated irreversible
@@ -409,7 +409,7 @@ that moves one changes the test and this table together):
 | `business_term` | 2 | 2 | 4 |
 | `ambiguous` | 2 | 2 | 4 |
 | `forbidden` | 1 | 2 | 3 |
-| `unanswerable` | 1 | 1 | 2 |
+| `unanswerable` | 2 | 1 | 3 |
 
 Every kind is asked at least twice, every question in Chinese and English. The `forbidden` turns
 are the leak reading: `collected_by_team_last_30_days` as `sales_rep` and `department_budgets` as
