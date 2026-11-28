@@ -252,8 +252,8 @@ describe('/packages — duplicate admits each knowledge source it copies for the
         expect(r.response?.body?.error?.message).toContain('nothing was copied');
         expect(r.response?.body?.error?.message).toContain(REFUSAL.message);
         expect(s.protocol.duplicatePackage).not.toHaveBeenCalled();
-        // Judged as the caller, on the item the package holds.
-        expect(s.admitAuthoredSource).toHaveBeenCalledWith(SOURCE_ITEM, caller.executionContext);
+        // Judged as the caller, on the item the package holds, and asked for this door's wording.
+        expect(s.admitAuthoredSource).toHaveBeenCalledWith(SOURCE_ITEM, caller.executionContext, { door: 'duplicate' });
     });
 
     it('every source is asked about: the second one refused refuses the duplicate', async () => {
@@ -498,8 +498,8 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
             },
         } as Plugin;
         const kernel = new ObjectKernel({ gracefulShutdown: false, skipSystemValidation: true });
-        kernel.use(host);
-        kernel.use(new KnowledgeServicePlugin({ enableEventSync: false }));
+        await kernel.use(host);
+        await kernel.use(new KnowledgeServicePlugin({ enableEventSync: false }));
         await kernel.bootstrap();
         const knowledge = kernel.getService<KnowledgeService>('knowledge');
         knowledge.registerAdapter('memory', { id: 'memory', upsert: async () => undefined, delete: async () => undefined, search: async () => [] });
