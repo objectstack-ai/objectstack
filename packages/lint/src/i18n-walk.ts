@@ -87,8 +87,12 @@
  *   objects.<name>._validations.<rule>.message
  *   objects.<name>._milestones.<field>.<value>.summary   (an `activityMilestones`
  *                                                entry's summary template)
- *   objects.<name>._relatedLists.<list>.label   (an object-form `relatedLists`
- *                                                entry that authors a `label`)
+ *   objects.<name>._relatedLists.<list>.label   (a record-page tab the served
+ *                                                object titles: an owner entry
+ *                                                that authors a `label`, as the
+ *                                                `.custom` arrangement leaves
+ *                                                it, or an arrangement entry
+ *                                                that authors one)
  *   objects.<name>._actions.<action>.label
  *   objects.<name>._actions.<action>.description
  *   objects.<name>._actions.<action>.confirmText
@@ -202,6 +206,7 @@ import { APPROVAL_NODE_TYPE, flowDecisionEdgeBranch, isFlowTechnicalNodeType } f
 import { expandViewContainer, InlineLocaleMapSchema } from '@objectstack/spec/ui';
 import { authorWarnedProperties } from './lint-liveness-properties.js';
 import { walkPageComponents } from './page-walk.js';
+import { addOwnerRelatedLists, emptyRelatedListTitles, foldRelatedListExtensions, objectExtensionsByTarget } from './object-graph.js';
 
 // ─── Public types ──────────────────────────────────────────────────────
 
@@ -1047,23 +1052,34 @@ function pushMilestoneSummaries(out: ExpectedEntry[], objectName: string, milest
 }
 
 /**
- * Emit `objects.<object>._relatedLists.<list>.label` for every object-form
- * `relatedLists` entry of an object that authors a `label` (the record page's
- * tab title and table heading for that list, which wins over the child FK's
- * `relatedListTitle`). The key is the entry's literal `list`, a dotted
- * `object.field` included, indexed as is. Only an AUTHORED label is emitted:
- * `translateObject` translates that label and swaps nothing in for an entry
- * that has none, so a key for one would ask a translator for a string no
- * screen shows.
+ * Emit `objects.<object>._relatedLists.<list>.label` for every record-page
+ * tab the SERVED object titles with a `label` (the tab title and table heading
+ * for that list, which wins over the child FK's `relatedListTitle`). The key
+ * is the entry's literal `list`, a dotted `object.field` included, indexed as
+ * is. Only an AUTHORED label is emitted: `translateObject` translates that
+ * label and swaps nothing in for an entry that has none, so a key for one
+ * would ask a translator for a string no screen shows.
+ *
+ * [#37622] The owner's entries are folded with the extensions of this stack
+ * that target the object ({@link foldRelatedListExtensions}, the fold the
+ * `translation-target-unknown` rule of `os validate` reads), so a list the
+ * paired `.custom` arrangement hides, names bare or re-states without a
+ * `label` gets no key, and a list the arrangement labels gets one, carrying
+ * the arrangement's text. A label only a code extender's `place` entry gives
+ * is not emitted: the rule accepts its key, but the registry may not apply the
+ * placement, so asking for it could ask for a string no screen shows.
  */
-function pushRelatedListLabels(out: ExpectedEntry[], objectName: string, entries: unknown): void {
-  if (!Array.isArray(entries)) return;
-  for (const entry of entries) {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
-    const list = (entry as any).list;
-    if (typeof list !== 'string' || list.length === 0) continue;
-    const label = (entry as any).label;
-    if (typeof label !== 'string' || label.length === 0) continue;
+function pushRelatedListLabels(
+  out: ExpectedEntry[],
+  objectName: string,
+  entries: unknown,
+  extensions: Parameters<typeof foldRelatedListExtensions>[1],
+): void {
+  const titles = emptyRelatedListTitles();
+  addOwnerRelatedLists(titles, entries);
+  foldRelatedListExtensions(titles, extensions);
+  for (const [list, { label, layer }] of titles.labels) {
+    if (layer === 'place') continue;
     pushEntry(out, ['objects', objectName, '_relatedLists', list, 'label'], label, 'object', { objectName });
   }
 }
@@ -1580,6 +1596,8 @@ export function collectExpectedEntries(
 
   // ── Objects ───────────────────────────────────────────────────────
   const objects: any[] = Array.isArray(config?.objects) ? config.objects : [];
+  // [#37622] The extensions each object's served tab list folds in, read once.
+  const extensionsByTarget = objectExtensionsByTarget(config);
   for (const obj of objects) {
     if (!obj?.name) continue;
     const objectName = obj.name as string;
@@ -1710,11 +1728,12 @@ export function collectExpectedEntries(
 
     // Record-page related-list titles (`_relatedLists.<list>.label`): the
     // `label` an object-form `relatedLists` entry authors on this parent,
-    // keyed by the entry's literal `list` (`object.field` is one key).
+    // keyed by the entry's literal `list` (`object.field` is one key), after
+    // the paired `.custom` arrangement this stack carries is folded in.
     // `translateObject` overlays only an authored label, so an entry without
     // one — and a bare-string entry or built-in tab — gets no key: its title
     // is the child FK's `relatedListTitle`, keyed on the child above.
-    pushRelatedListLabels(out, objectName, obj.relatedLists);
+    pushRelatedListLabels(out, objectName, obj.relatedLists, extensionsByTarget.get(objectName) ?? []);
   }
 
   // ── Top-level views ──────────────────────────────────────────────
