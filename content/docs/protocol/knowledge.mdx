@@ -730,13 +730,13 @@ large source of one organization, through an approximate index.
   (`<source>` is the source's index key). A key that is not snake_case is
   refused before any SQL.
 - **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
-  at most `topK`) before the service's re-check: an exact scan by cosine
-  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  at most `topK`) before the service's re-check: a vector leg by cosine
+  distance (an exact scan, or the approximate index below), and a keyword leg in a contentless FTS5 trigram index beside each
   passage table (kept in step by triggers), a term of three characters or
   more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
   the [record scope](#record-scope) and the metadata `filter` (JSON equality
-  per key) are one `WHERE`, run in both legs. The exact scan reads every row
-  in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
+  per key) are one `WHERE`, run in both legs. Without the approximate index
+  the vector leg reads every row in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
   5 ms; 10,000 take 82 MB and about 50 ms.
 - **Approximate index.** A complete build that completes on a generation of
   `vectorIndexThreshold` passages or more (default 20,000), all of one
@@ -1303,7 +1303,7 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; a vector leg (an exact scan, or a one-bit approximate index for a large source of one organization) and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

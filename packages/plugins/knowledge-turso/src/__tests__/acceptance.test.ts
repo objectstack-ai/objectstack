@@ -1046,9 +1046,14 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
  * a test reads which path a search took: the approximate vector leg ranks
  * the one-bit side table (`vector1bit`), the exact one does not.
  */
-function recording(client: Client): { client: Client; sql: string[] } {
+function recording(client: Client): { client: Client; sql: string[]; args: unknown[][] } {
   const sql: string[] = [];
-  const note = (statement: unknown) => sql.push(typeof statement === 'string' ? statement : String((statement as { sql: unknown }).sql));
+  const args: unknown[][] = [];
+  const note = (statement: unknown) => {
+    sql.push(typeof statement === 'string' ? statement : String((statement as { sql: unknown }).sql));
+    const bound = typeof statement === 'string' ? undefined : (statement as { args?: unknown }).args;
+    args.push(Array.isArray(bound) ? bound : []);
+  };
   const watch = <T extends object>(target: T, onTransaction: boolean): T =>
     new Proxy(target, {
       get(t, key) {
@@ -1063,14 +1068,40 @@ function recording(client: Client): { client: Client; sql: string[] } {
         return fn;
       },
     });
-  return { client: watch(client, true), sql };
+  return { client: watch(client, true), sql, args };
+}
+
+/** The catalog reads of a vector index recorded since `from`: the shape reads that name a `-vec` side table. */
+function vectorCatalogReads(watched: { sql: string[]; args: unknown[][] }, from = 0): number {
+  return watched.sql
+    .slice(from)
+    .filter((sql, i) => /sqlite_master|pragma_table_info/.test(sql) && watched.args[from + i].some((a) => String(a).endsWith('-vec'))).length;
+}
+
+/** The vector-leg statements recorded since `from`, each with the highest `?N` its SQL reads and the values bound. */
+function vectorStatements(watched: { sql: string[]; args: unknown[][] }, from = 0): Array<{ approximate: boolean; reads: number; bound: number }> {
+  return watched.sql.flatMap((sql, i) =>
+    i < from || !sql.includes('vec AS (')
+      ? []
+      : [{ approximate: sql.includes('vector1bit('), reads: Math.max(...[...sql.matchAll(/\?(\d+)/g)].map((m) => Number(m[1]))), bound: watched.args[i].length }],
+  );
+}
+
+/** A fake embedder that gives a query of no letters or digits, which has no keyword term, the vector of two words. */
+class TermlessQueryEmbedder extends FakeEmbedder {
+  override async embed(texts: string[]): Promise<number[][]> {
+    return super.embed(texts.map((t) => (/[a-z0-9]/i.test(t) ? t : 'w1x w2x')));
+  }
 }
 
 /**
  * A recorded client that refuses, as a database that does not know them
  * would, the statements whose SQL matches `pattern`, the transaction's too.
  */
-function refusing(watched: { client: Client; sql: string[] }, pattern: RegExp): { client: Client; sql: string[]; refused: string[] } {
+function refusing(
+  watched: { client: Client; sql: string[]; args: unknown[][] },
+  pattern: RegExp,
+): { client: Client; sql: string[]; args: unknown[][]; refused: string[] } {
   const refused: string[] = [];
   const sqlOf = (statement: unknown) => (typeof statement === 'string' ? statement : String((statement as { sql: unknown }).sql));
   const guard = <T extends object>(target: T, onTransaction: boolean): T =>
@@ -1092,7 +1123,7 @@ function refusing(watched: { client: Client; sql: string[] }, pattern: RegExp): 
         return fn;
       },
     });
-  return { client: guard(watched.client, true), sql: watched.sql, refused };
+  return { client: guard(watched.client, true), sql: watched.sql, args: watched.args, refused };
 }
 
 /** The vector legs of the searches recorded since `from`: how many were approximate, how many exact. */
@@ -1294,6 +1325,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ['ann_no_1bit', /^(?!\s*CREATE\s)[\s\S]*vector1bit\(/i],
         // A host that refuses the side table's column type.
         ['ann_no_ddl', /F1BIT_BLOB/],
+        // A host that makes the index and refuses the copy of the passages into it.
+        ['ann_no_copy', /^\s*INSERT INTO "[^"]+-vec"/],
       ] as const) {
         const s = source(name);
         const watched = refusing(recording(store.client()), refused);
@@ -1302,7 +1335,9 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         await adapter.upsert(corpus(s, 60), ctx(s));
         await adapter.completeBuild(ctx(s));
         expect(watched.refused.length).toBeGreaterThan(0);
-        expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toEqual([]);
+        // Refused before the copy: nothing of the index is left. Refused at the copy: the index is there, short of
+        // its passage table, and never searched.
+        expect(await vectorObjects(watched.client, `knowledge_${s.name}_g1`)).toHaveLength(name === 'ann_no_copy' ? 5 : 0);
         // The build switched to its generation, and writes and searches go on through the exact scan.
         await adapter.upsert([doc(s, 'late', 'wzzx wyyx wxxx')], ctx(s));
         const from = watched.sql.length;
@@ -1315,13 +1350,53 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         expect(health.message).toContain(`the approximate vector index of source '${s.name}' was not made`);
         const noOneBit = 'this database does not compute one-bit vectors (vector1bit), so no source gets an approximate vector index';
         if (name === 'ann_no_1bit') expect(health.message).toContain(noOneBit);
-        else expect(health.message).toContain('the database refused its DDL');
+        else if (name === 'ann_no_ddl') expect(health.message).toContain('the database refused its DDL');
+        else expect(health.message).toContain('the database refused its copy');
         // A dropped source is no longer named.
         await adapter.dropSource(ctx(s));
         const after = await adapter.healthCheck();
         expect(after.message).not.toContain(`source '${s.name}'`);
-        if (name === 'ann_no_ddl') expect(after).toEqual({ ok: true, message: 'libSQL vectors ready' });
+        if (name !== 'ann_no_1bit') expect(after).toEqual({ ok: true, message: 'libSQL vectors ready' });
       }
+    });
+
+    it('a search under the threshold, or at Infinity, reads no catalog for an index; another process reads it once', async () => {
+      for (const vectorIndexThreshold of [61, Infinity]) {
+        const s = source(`ann_reads_${vectorIndexThreshold === Infinity ? 'inf' : 'n'}`);
+        const watched = recording(store.client());
+        const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold });
+        await adapter.beginBuild(ctx(s));
+        await adapter.upsert(corpus(s, 60), ctx(s));
+        await adapter.completeBuild(ctx(s));
+        const from = watched.sql.length;
+        for (const query of ['w1x w2x', 'w3x w4x', 'w5x']) await adapter.search(query, { source: s, topK: 5 });
+        expect(vectorCatalogReads(watched, from)).toBe(0);
+        expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 3 });
+      }
+    });
+
+    it('a query without a keyword term binds exactly the values each vector statement reads', async () => {
+      const s = source('ann_termless');
+      const watched = recording(store.client());
+      const adapter = new TursoKnowledgeAdapter({
+        id: 'under_test',
+        client: watched.client,
+        embedder: new TermlessQueryEmbedder(),
+        vectorIndexThreshold: THRESHOLD,
+      });
+      await adapter.beginBuild(ctx(s));
+      await adapter.upsert(corpus(s, 60), ctx(s));
+      await adapter.completeBuild(ctx(s));
+      expect(keywordTerms('?! …')).toEqual([]);
+      const from = watched.sql.length;
+      // Answered through the index; then a scope of its two hits, under the floor, runs both statements.
+      const hits = await adapter.search('?! …', { source: s, topK: 2 });
+      expect(hits).toHaveLength(2);
+      const ids = hits.flatMap((h) => h.sourceRecordId ?? []);
+      expect(await adapter.search('?! …', { source: s, topK: 2, scope: [{ kind: 'record', ids }] })).toHaveLength(2);
+      const statements = vectorStatements(watched, from);
+      expect(statements.map((st) => st.approximate)).toEqual([true, true, false]);
+      for (const st of statements) expect(st).toMatchObject({ reads: st.bound });
     });
 
     it('an object it did not make under a vector-index name is never dropped; the build and dropSource are refused', async () => {
@@ -1352,6 +1427,66 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
     });
   });
 }
+
+describe('knowledge-turso approximate vector index: two processes on one file store', () => {
+  const store = storeOf('file');
+  afterAll(() => store.closeAll());
+  const corpus = (s: KnowledgeSource, n: number) => wordsOf(n, 7).map((text, i) => doc(s, String(i).padStart(3, '0'), text));
+  const processes = () => {
+    const at = store.url();
+    const one = () => {
+      const watched = recording(store.client(at));
+      return { ...watched, adapter: new TursoKnowledgeAdapter({ id: 'under_test', client: watched.client, embedder: new FakeEmbedder(), vectorIndexThreshold: 40 }) };
+    };
+    return { a: one(), b: one(), raw: store.client(at) };
+  };
+  const build = async (adapter: TursoKnowledgeAdapter, s: KnowledgeSource, n: number) => {
+    await adapter.beginBuild(ctx(s));
+    await adapter.upsert(corpus(s, n), ctx(s));
+    await adapter.completeBuild(ctx(s));
+  };
+
+  it('a source another process dropped and built again under the threshold is searched by the exact scan, not by the index it had', async () => {
+    const s = source('ann_two_procs');
+    const { a, b } = processes();
+    await build(a.adapter, s, 60);
+    let from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 1, exact: 0 });
+    // Generation 1 again, made anew, under the threshold: no index.
+    await a.adapter.dropSource(ctx(s));
+    await build(a.adapter, s, 30);
+    expect(await vectorObjects(a.client, `knowledge_${s.name}_g1`)).toEqual([]);
+    from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 0, exact: 1 });
+  });
+
+  it('an index gone under the memory of it is answered by the exact scan, and forgotten', async () => {
+    const s = source('ann_gone');
+    const { a, b, raw } = processes();
+    await build(a.adapter, s, 60);
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    const table = `knowledge_${s.name}_g1`;
+    for (const name of [`${table}-vec-insert`, `${table}-vec-delete`, `${table}-vec-update`]) await raw.execute(`DROP TRIGGER "${name}"`);
+    await raw.execute(`DROP TABLE "${table}-vec"`);
+    let from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 1, exact: 1 });
+    from = b.sql.length;
+    expect(await b.adapter.search('w1x w2x', { source: s, topK: 5 })).toHaveLength(5);
+    expect(vectorLegs(b.sql, from)).toEqual({ approximate: 0, exact: 1 });
+  });
+
+  it('another process reads the catalog of a source under the threshold once, then remembers it', async () => {
+    const s = source('ann_reads_once');
+    const { a, b } = processes();
+    await build(a.adapter, s, 30);
+    const from = b.sql.length;
+    for (const query of ['w1x w2x', 'w3x w4x', 'w5x']) await b.adapter.search(query, { source: s, topK: 5 });
+    expect(vectorCatalogReads(b, from)).toBe(2);
+  });
+});
 
 describe('knowledge-turso approximate vector index: recall and options', () => {
   const store = storeOf('memory');
