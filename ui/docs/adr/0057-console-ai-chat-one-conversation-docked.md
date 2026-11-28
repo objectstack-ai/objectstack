@@ -439,6 +439,18 @@ and in the dock outside any authorable app. This extends A1's direction
 ("the `app` axis becomes always present for `build`") to the one surface
 A1.b had kept product-only. Implemented under objectui#10926.
 
+**Note (2026-11-28, objectstack#37245) — the key, as `main` stands.** No
+decision changes. Since objectstack#37720 retired the build chat frontend, the
+dock no longer computes the `app:PKG:build` key. Its conversation is keyed on
+the product alone in every app, and a turn names the current app only as its
+`activeApp`, with no package bound, whether or not a build agent is in the
+catalog (`@object-ui/app-shell`, `layout/ChatDockConversation.tsx`; pinned in
+`layout/__tests__/ChatDock.requestContext-30043.test.tsx`, "a build agent in
+the catalog binds no package"). The Studio copilot that this amendment names
+as sharing the thread was removed by the same change. The helper that spells
+an app-bound key is now called with a package only by an app's AI inquiry page
+(A4), for `ask`.
+
 ## Amendment A3 (2026-11-17, Accepted) — one drawer, maximized in place
 
 **What it changes.** §3's focus mode ("`/ai` = the same panel maximized"), A2's
@@ -550,6 +562,29 @@ reach the drawer. A surface whose state matters for deep-linking (ui ADR-0054
 C3) reaches the drawer through those addresses, not through a query
 parameter on every page. Implemented under objectstack#34608 (the drawer)
 and objectstack#34610 (building with the app draft in the main area).
+
+**Note (2026-11-28, objectstack#37245) — two lines of the Decision above, as
+`main` stands.** No decision changes. The paths are `@object-ui/app-shell`'s.
+
+- **"Three surfaces keep their own chrome … Studio's copilot in its right
+  slot".** Studio has no copilot of its own since objectstack#37720 retired
+  the build chat frontend: the copilot panel and its top-bar entry were
+  removed, so there is no copilot slot to widen. Studio's right slot holds the
+  open item's properties (`views/studio-design/StudioRightSlot.tsx`). The
+  surface still takes an injected panel through its `aiSlot` seam, which
+  nothing in this repository fills. The other two surfaces the bullet names
+  are not touched by this note.
+- **"It carries the plan-awaiting-approval marker the floating button carried
+  (objectui#11666)."** No plan is proposed any more: the plan card left with
+  the build chat (objectstack#37720). The entry still carries the marker.
+  Since objectstack#37860 (PR objectstack#37970; A5, row 3) it stands for a
+  write the AI proposed that waits for the user's approval, in any
+  conversation of the signed-in user, as a mounted chat last read it
+  (`assistant/writeApprovalPending.ts`, published by
+  `console/ai/ChatPane.tsx`, read by `layout/AssistantTopBarButton.tsx`). A5's
+  "Not recorded yet" bullet says that nothing has published to the assistant
+  bus since objectstack#37720 and that write approvals do not reach it. That
+  held until objectstack#37970 merged.
 
 ## Amendment A4 (2026-11-27, Accepted) — an app's AI inquiry page
 
