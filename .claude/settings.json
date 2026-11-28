@@ -87,12 +87,17 @@
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/hotcrm/issues/* *)",
       "Bash(curl -sS -X PATCH https://api.github.com/repos/objectstack-ai/mobile/issues/* *)",
       "Bash(git commit -F *)",
-      "Bash(git push -u origin claude/issue-*)"
+      "Bash(git push -u origin claude/issue-*)",
+      "Bash(git commit --allow-empty -F *)",
+      "Bash(git push -u origin claude/mailbox-*)"
     ],
     "ask": [
       "Bash(git commit -F * *)",
       "Bash(git push -u origin claude/issue-* *)",
-      "Bash(git push -u origin claude/issue-*:*)"
+      "Bash(git push -u origin claude/issue-*:*)",
+      "Bash(git commit --allow-empty -F * *)",
+      "Bash(git push -u origin claude/mailbox-* *)",
+      "Bash(git push -u origin claude/mailbox-*:*)"
     ],
     "deny": [
       "mcp__github__issue_write",

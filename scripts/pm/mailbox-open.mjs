@@ -333,6 +333,23 @@ export function headLeftWarning(plan) {
   return `⚠️  mailbox-open: --head ${plan.branch} is not a claude/mailbox-* branch, so --close will LEAVE it behind for a person to delete — the relay deletes only that shape. Name the head claude/mailbox-${plan.seat.slug} to have --close delete it.`;
 }
 
+/**
+ * The refusal an open prints when the push of its default branch is refused (with-fleet exit `status`). A cloud seat
+ * cannot push it, so the message names the three commands that create and push `claude/mailbox-<slug>`, one per
+ * line and spelt exactly as `.claude/settings.json`'s allow rules for a mailbox branch, so a seat in Auto mode runs
+ * them without a mode switch; then the `--head` re-run. Pure.
+ */
+export function pushRefusedMessage(plan, status) {
+  const head = `claude/mailbox-${plan.seat.slug}`;
+  return [
+    `✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${status}). A cloud seat cannot push it — create and push ${head} itself, each command on its own line:`,
+    `    git switch -c ${head} origin/${plan.base}`,
+    '    git commit --allow-empty -F FILE',
+    `    git push -u origin ${head}`,
+    `  then pass --head ${head} (--close deletes that name). A legacy branch ${MAILBOX_BRANCH_PREFIX}${plan.login} refuses it too: git nests no ref under an existing one, so delete that branch once its mailbox is closed. No PR was opened.`,
+  ].join('\n');
+}
+
 /** `head` is the pull's head as read live; a `claude/mailbox-*` one is deleted in the same stroke, after the close (header). */
 export function planClose({ repo, pull, head = null }) {
   const branch = typeof head === 'string' && MAILBOX_BRANCH_SHAPE.test(head) ? head : null;
@@ -467,7 +484,7 @@ async function openLive(plan, opts) {
     }
     const pushed = run('bash', [join(PM_DIR, 'with-fleet.sh'), '--kind', 'git push', '--', 'git', 'push', 'origin', `${sha.out}:refs/heads/${plan.branch}`]);
     if (!pushed.ok) {
-      console.error(`✗ mailbox-open: the push of ${plan.branch} was refused (with-fleet exit ${pushed.status}). A cloud seat cannot push it — push claude/mailbox-${plan.seat.slug} itself and pass --head claude/mailbox-${plan.seat.slug} (--close deletes that name). A legacy branch ${MAILBOX_BRANCH_PREFIX}${plan.login} refuses it too: git nests no ref under an existing one, so delete that branch once its mailbox is closed. No PR was opened.`);
+      console.error(pushRefusedMessage(plan, pushed.status));
       return EXIT_PREREQUISITE;
     }
   } else {
@@ -554,7 +571,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'arguments: the two modes and every refusal': 14,
   'the seat: canonical key, ref slug, and the per-seat branch': 11,
-  'the open plan: branch, labels, body, and the relay validator': 13,
+  'the open plan: branch, labels, body, and the relay validator': 14,
   'the close plan: comment then close, then the delete of a claude/mailbox-* head, judged by the validator': 7,
   'whose mailbox a pull is: the seat on the body line or the head, a legacy login, neither': 8,
   "finding a seat's open mailbox: by seat, never by login": 10,
@@ -637,6 +654,7 @@ async function selfTest() {
   t('--head names the branch and skips the push; the body still names the seat', [ph.branch, ph.push, ph.actions[0].head, ph.actions[0].body.split('\n')[0]], ['claude/project-thread-x', false, 'claude/project-thread-x', 'Mailbox-of: triage#1 · os-bill']);
   t('no draft key is sent — the relay forces draft itself', 'draft' in p.actions[0], false);
   t('⭐ a --head --close will leave warns, naming the claude/mailbox-<slug> spelling; a claude/mailbox-* head, the pushed default and a close do not', [/--head claude\/project-thread-x is not a claude\/mailbox-\* branch, so --close will LEAVE it/.test(headLeftWarning(ph)), headLeftWarning(ph).includes('claude/mailbox-triage-1'), headLeftWarning(planOpen({ repo: 'o/r', seat: 'triage', login: 'os-bill', head: 'claude/mailbox-triage-1' })), headLeftWarning(p), headLeftWarning(planClose({ repo: 'o/r', pull: 1 }))], [true, true, null, null, null]);
+  t('⭐ a refused push names the three commands one per line, spelt as the settings allow rules, then the --head re-run', (() => { const m = pushRefusedMessage(p, 1).split('\n'); return [m.length, m[1].trim(), m[2].trim(), m[3].trim(), m[4].includes('then pass --head claude/mailbox-ui-4'), m[0].includes('with-fleet exit 1'), m[4].includes('mailbox/os-bill')]; })(), [5, 'git switch -c claude/mailbox-ui-4 origin/main', 'git commit --allow-empty -F FILE', 'git push -u origin claude/mailbox-ui-4', true, true, true]);
   const pe = planOpen({ repo: 'objectstack-ai/objectstack', seat: 'Epic:#27293#1', login: 'sunhaolin' });
   t('⭐ an epic seat\'s plan: its branch, its Mailbox-of line, its To: line, and the validator accepts it', [pe.branch, pe.actions[0].title, pe.actions[0].body.split('\n')[0], pe.actions[0].body.includes('the line `To: epic:#27293#1`'), pe.errors], ['mailbox/sunhaolin/epic-27293-1', 'pm:mailbox — epic:#27293#1 · sunhaolin', 'Mailbox-of: epic:#27293#1 · sunhaolin', true, []]);
 
