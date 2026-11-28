@@ -1168,7 +1168,10 @@ export const CEILINGS = new Map([
   // ceiling +6, the measured remainder only, pinned AT the measurement (2 under the 2264 the
   // row held before the fence dropped its key). Standing ruling (2026-10-27, tap A):
   // 「A:先削重复,余额按实测提高」 (ruling record 6513306068, letter B).
-  ['skills/objectstack-ui/SKILL.md', 2262], // +6 to the measurement (was 2256)
+  // 2262 -> 2228: the Action Types table drops its `ask_ai` row and the footnote under it
+  // drops the same name, the type having left `ActionType` (ADR-0160 D7). 9075 bytes (9048
+  // priced) -> 8937 (8910 priced) -> 2228 tokens; the row follows the measurement down.
+  ['skills/objectstack-ui/SKILL.md', 2228], // -34 to the measurement (was 2262)
   // 8333 -> 6193: RE-LOCK at the landed count after the #19715 split (decision
   // batch #213 item 1, maintainer 「1 2 4 同意」): the worked R1, the report
   // template and the v17-canonical shapes block moved VERBATIM into
