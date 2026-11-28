@@ -22,7 +22,7 @@
  *   - a ⌘-click opens no tab, and the name is no anchor a new tab follows;
  *   - the name cell draws no 「Open as full page」 ↗;
  *   - a `?recordId=` link opens no drawer and reads no record;
- *   - the row menu still offers the object's `list_item` action (Revoke);
+ *   - the row menu still offers the object's `record_row` action (Revoke);
  *   - CONTROL: the same object served with no restriction — the row click
  *     opens the drawer, as every object's does.
  *
@@ -107,7 +107,7 @@ const OBJECTS = [
         objectName: OBJECT_NAME,
         type: 'script',
         target: 'revoke_credential',
-        locations: ['list_item', 'record_header'],
+        locations: ['record'],
       },
     ],
     listViews: {
@@ -267,7 +267,7 @@ describe('objectstack#33219 — a list-only object\'s rows open no record page',
     expect(findOne).not.toHaveBeenCalled();
   });
 
-  it('the row menu still offers the object\'s `list_item` action', async () => {
+  it('the row menu still offers the object\'s `record_row` action', async () => {
     await mountList(LIST_ONLY_OPERATIONS);
     expect(await rowMenuItems('okta-staging')).toContain('Revoke');
   });

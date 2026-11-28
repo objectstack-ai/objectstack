@@ -135,7 +135,7 @@ describe('ActionEngine.getActionsForLocation — visibility filter', () => {
     const engine = makeEngine(ctx);
     engine.registerAction(
       { name: 'in_header_self', type: 'api', visible: 'record.id == ctx.user.id' } as any,
-      { locations: ['record_header'] }
+      { locations: ['record_page'] }
     );
     engine.registerAction(
       { name: 'in_section_self', type: 'api', visible: 'record.id == ctx.user.id' } as any,
@@ -146,7 +146,7 @@ describe('ActionEngine.getActionsForLocation — visibility filter', () => {
       { locations: ['record_section'] }
     );
     expect(engine.getActionsForLocation('record_section').map(a => a.name)).toEqual(['in_section_self']);
-    expect(engine.getActionsForLocation('record_header').map(a => a.name)).toEqual(['in_header_self']);
+    expect(engine.getActionsForLocation('record_page').map(a => a.name)).toEqual(['in_header_self']);
   });
 
   it('respects priority ordering after filtering', () => {

@@ -46,7 +46,7 @@ describe('resolveBulkActions', () => {
   });
 
   it('surfaces nothing for an object action the view never names', () => {
-    const rowOnly = { name: 'convert_lead', label: 'Convert', locations: ['list_item'] };
+    const rowOnly = { name: 'convert_lead', label: 'Convert', locations: ['record_row'] };
     const { defs, undeclared } = resolveBulkActions({ objectActions: [rowOnly, PUSH_DOWN] });
 
     expect(defs).toEqual([]);

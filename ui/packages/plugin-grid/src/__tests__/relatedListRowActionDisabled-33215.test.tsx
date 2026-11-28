@@ -98,7 +98,7 @@ describe('enlarged related list — inline primary row action honours `disabled`
     name: 'allocate',
     label: 'Allocate',
     variant: 'primary',
-    locations: ['record_header', 'record_related'],
+    locations: ['record_page', 'record_related'],
     disabled: "record.status == 'locked'",
     disabledReason: REASON,
   };

@@ -18,7 +18,7 @@
  * 128×10 box with zero `[role=menu]` children. The guard read
  * `(canEdit && onEdit) || (canDelete && onDelete) || menuDefs.length > 0 || rowActions.length > 0`
  * — handlers and DECLARATIONS — while the items were filtered a second time, per
- * item and per record, by `visibleWhen` / `visible`. The object's `list_item`
+ * item and per record, by `visibleWhen` / `visible`. The object's `record_row`
  * actions (approve / reject / recall) are gated for approvers, so an admin in the
  * "全部" view failed every one of them row by row: guard true, zero items.
  *
@@ -121,7 +121,7 @@ describe('RowActionMenu — the "⋮" counts renderable items, not handlers (#35
   });
 
   it('suppresses the trigger when every CUSTOM action is invisible for the row', () => {
-    // sys_approval_request as the reporter sees it: the declared list_item
+    // sys_approval_request as the reporter sees it: the declared record_row
     // actions all gate on being the approver, and this admin is not.
     renderMenu({
       rowActionDefs: [

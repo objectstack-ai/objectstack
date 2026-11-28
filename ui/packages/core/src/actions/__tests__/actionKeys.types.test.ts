@@ -88,7 +88,7 @@ const CASES: readonly Case[] = [
   { what: 'bulkEnabled is a retired tombstone, so any value is a compile error', rejected: true, code: `{ bulkEnabled: true }` },
 
   // ── Shapes the runner genuinely accepts and must keep accepting ────────────
-  { what: 'locations accepts a real spec location', rejected: false, code: `{ locations: ['record_header'] }` },
+  { what: 'locations accepts a real spec location', rejected: false, code: `{ locations: ['record_page'] }` },
   { what: 'order accepts a number', rejected: false, code: `{ order: 10 }` },
   { what: 'variant accepts a spec variant', rejected: false, code: `{ variant: 'primary' }` },
   { what: 'component accepts a spec renderer', rejected: false, code: `{ component: 'action:button' }` },

@@ -114,12 +114,12 @@ if (BUILT_ENTRY_PRESENT) {
 const BODY_MARKER = 'OS6252_DIST_BODY_MARKER';
 
 const ACTIONS: Record<string, Record<string, unknown>> = {
-  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_header'], order: 2 },
+  convert: { name: 'convert', label: 'Convert Lead', type: 'flow', locations: ['record_page'], order: 2 },
   scripted: {
     name: 'scripted',
     label: 'Run Script',
     type: 'script',
-    locations: ['record_header'],
+    locations: ['record_page'],
     order: 3,
     body: { language: 'js', source: `return { marker: '${BODY_MARKER}' };` },
   },

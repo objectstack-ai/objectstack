@@ -44,7 +44,7 @@ describe('[ADR-0095 D3] sys_user list_platform_admins', () => {
     expect(roster.map((a) => a.name)).toEqual(['list_platform_admins']);
     expect(action()).toMatchObject({
       type: 'api',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       visible: { dialect: 'cel', source: 'current_user.isPlatformAdmin == true' },
       refreshAfter: false,
     });

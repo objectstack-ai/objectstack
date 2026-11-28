@@ -62,7 +62,7 @@
  * legs plus two this site adds:
  *
  *   - the producer is the same one: `app-shell`'s `ObjectView` derives it from
- *     `objectDef.actions` filtered by `locations.includes('list_item')` and
+ *     `objectDef.actions` filtered by `locations.includes('record_row')` and
  *     writes it onto a `fullSchema: ListViewSchema`; `plugin-view`'s
  *     `ObjectView` composes the same key onto a `list-view` node.
  *   - the platform contract REFUSES `rowActionDefs` by name on BOTH the list

@@ -671,12 +671,12 @@ export function InterfaceListPage({ page, className, onConfigChange, reserveEdit
         // The author explicitly chose these as page buttons, so surface them in
         // the toolbar regardless of the action's own `locations` (the action:bar
         // filters by location).
-        .map((a: any) => ({ ...a, locations: ['list_toolbar'] }))
+        .map((a: any) => ({ ...a, locations: ['list'] }))
     : [];
   // Typed as the `action:bar` node it is (objectui#11355), not as the
   // `BaseSchema` the `schema` prop accepts: a key `ActionBarSchema` does not
   // declare is refused here.
-  const buttonBar: ActionBarSchema = { type: 'action:bar', location: 'list_toolbar', actions: buttonActions, size: 'sm', variant: 'outline' };
+  const buttonBar: ActionBarSchema = { type: 'action:bar', location: 'list', actions: buttonActions, size: 'sm', variant: 'outline' };
 
   // The page's `label` and `description` are `I18nLabel`s — a string or an
   // inline locale map — resolved in the viewer's language (#25901). Only a page

@@ -359,7 +359,7 @@ describe('the runner `disabled` re-check answers current_user on a page with no 
               title: 'Northwind',
               maxVisible: 10,
               actions: [
-                { name: nameOf('header_click', 'granted'), label: LABEL, type: HANDLER, locations: ['record_header'], disabled: CANNOT_DELETE },
+                { name: nameOf('header_click', 'granted'), label: LABEL, type: HANDLER, locations: ['record_page'], disabled: CANNOT_DELETE },
               ],
             },
           }),
@@ -390,8 +390,8 @@ describe('`record:quick_actions` with NO `ActionProvider` above it — the engin
             h(RecordQuickActionsRenderer, {
               schema: {
                 actions: [
-                  { name, label: LABEL, type: 'script', locations: ['record_header'], visible: CAN_DELETE },
-                  { name: 'print', label: COMPANION_LABEL, type: 'script', locations: ['record_header'] },
+                  { name, label: LABEL, type: 'script', locations: ['record_page'], visible: CAN_DELETE },
+                  { name: 'print', label: COMPANION_LABEL, type: 'script', locations: ['record_page'] },
                 ],
               } as never,
             }),

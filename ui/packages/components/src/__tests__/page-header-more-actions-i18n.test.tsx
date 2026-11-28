@@ -32,6 +32,8 @@ import { I18nProvider } from '@object-ui/i18n';
 // of depending on the full DOM setup to have run one
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010/#3021).
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -45,10 +47,10 @@ const schema = {
   type: 'page:header',
   title: 'Acme Corp',
   actions: [
-    { name: 'convert', locations: ['record_header'], label: 'Convert', type: 'flow' },
-    { name: 'clone', locations: ['record_header'], label: 'Clone', type: 'flow' },
-    { name: 'share', locations: ['record_header'], label: 'Share', type: 'flow' },
-    { name: 'archive', locations: ['record_header'], label: 'Archive', type: 'flow' },
+    { name: 'convert', locations: ['record_page'], label: 'Convert', type: 'flow' },
+    { name: 'clone', locations: ['record_page'], label: 'Clone', type: 'flow' },
+    { name: 'share', locations: ['record_page'], label: 'Share', type: 'flow' },
+    { name: 'archive', locations: ['record_page'], label: 'Archive', type: 'flow' },
   ],
 };
 

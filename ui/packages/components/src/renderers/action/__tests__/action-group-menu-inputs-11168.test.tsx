@@ -150,7 +150,7 @@ describe('action:group — the published inputs (objectui#11168)', () => {
     expect(inputs.has('visible')).toBe(true);
     expect(inputs.has('name')).toBe(false);
     // The two published keys are keys the spec row accepts, `name` is not.
-    expect(specRow('action:group').safeParse({ location: 'list_toolbar', visible: true }).success).toBe(true);
+    expect(specRow('action:group').safeParse({ location: 'list', visible: true }).success).toBe(true);
   });
 
   it('`name` is RETIRED: the spec refuses it, and nothing the group renders reads it', () => {
@@ -199,10 +199,10 @@ describe('action:group — the published inputs (objectui#11168)', () => {
 describe('action:group — each published key is honoured through `SchemaRenderer`', () => {
   it('`location` renders only the members whose `locations` include it', () => {
     const actions = [
-      member('here', { locations: ['list_toolbar'] }),
-      member('there', { locations: ['record_header'] }),
+      member('here', { locations: ['list'] }),
+      member('there', { locations: ['record_page'] }),
     ];
-    mount({ type: 'action:group', location: 'list_toolbar', actions });
+    mount({ type: 'action:group', location: 'list', actions });
     expect(screen.getByRole('button', { name: 'HERE' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'THERE' })).toBeNull();
     cleanup();
