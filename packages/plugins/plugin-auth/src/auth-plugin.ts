@@ -159,6 +159,7 @@ import {
   ssoProviderDeleteRefusal,
   type SignInMethodFloorDeps,
 } from './sign-in-method-floor.js';
+import { describeEmailPasswordLiveStatus, type AuthLiveStatus } from './auth-settings-live-status.js';
 import { judgePlatformAdmin, judgeHeldSession, isPlatformAdminUser, type PlatformAdminActor } from './platform-admin-gate.js';
 import {
   decideDemoStaffEnvironmentGate,
@@ -254,6 +255,15 @@ interface SettingsReadSurface {
     key: string,
     predicate: (input: unknown) => unknown,
     options?: { requestHeaders?: readonly string[] },
+  ): void;
+  /**
+   * State what runs at the top of the namespace's page, read on each page
+   * request (`SettingsService.registerLiveStatus`). Optional, like `subscribe`.
+   * See auth-settings-live-status.ts.
+   */
+  registerLiveStatus?(
+    namespace: string,
+    provider: (input: { ctx: Record<string, unknown>; locale?: string }) => Promise<AuthLiveStatus | undefined>,
   ): void;
 }
 
@@ -3159,10 +3169,41 @@ export class AuthPlugin implements Plugin {
     // the one-off moves of the toggle-era values onto the levels.
     await this.bindOrganizationAccessPolicy(ctx, settings);
 
-    await applySettings();
+    // The pass a change event started, so the page's statement below reads the
+    // running config after it, not mid-way.
+    let pass: Promise<void> = Promise.resolve();
+    const runPass = (): Promise<void> => (pass = applySettings());
+
+    // Setup → Authentication states what runs when the switch says otherwise:
+    // with nothing stored the switch shows the manifest default while the
+    // running config takes the deployment's declaration. See auth-settings-live-status.ts.
+    if (typeof settings.registerLiveStatus === 'function') {
+      const floorDeps = this.signInMethodFloorDeps(ctx, this.authManager);
+      try {
+        settings.registerLiveStatus('auth', async ({ ctx: pageCtx, locale }) => {
+          await pass;
+          const manager = this.authManager;
+          if (!manager) return undefined;
+          return describeEmailPasswordLiveStatus({
+            running: manager.getPublicConfig().emailPassword.enabled,
+            shown: await settings.get('auth', 'email_password_enabled', pageCtx),
+            heldOffByHost: emailPasswordHeldOffByHost(floorDeps),
+            locale,
+          });
+        });
+      } catch (err: any) {
+        ctx.logger.warn(
+          '[auth] Setup → Authentication: the live status was NOT registered '
+            + `(${String(err?.message ?? err)}), so where the deployment declares email and password sign-in off `
+            + 'with nothing saved, the page shows the switch on with nothing saying it is off.',
+        );
+      }
+    }
+
+    await runPass();
     if (typeof settings.subscribe === 'function') {
       settings.subscribe('auth', () => {
-        void applySettings();
+        void runPass();
       });
       ctx.logger.info('Auth: bound to settings namespace=auth');
     }
