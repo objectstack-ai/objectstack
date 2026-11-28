@@ -1,5 +1,226 @@
 # @object-ui/app-shell — Changelog
 
+## 18.6.0-next.2
+
+### Minor Changes
+
+- ab04434: feat(spec): a package's display name per locale — the translation bundle's `packages` group, read by Setup's package list and Studio's package switcher
+  
+  Clause-②: yes (widening) — the translation bundle (`TranslationDataSchema`, `PlatformTranslationDataSchema`, `ServedTranslationDataSchema`, `TranslationItemSchema`) accepts a new group `packages`, keyed by `manifest.id`, each row `{ name?, description? }`; a bundle that wrote `packages` was refused as an unknown key before. `@object-ui/i18n` `useObjectLabel()` gains `packageName` and `packageDescription`.
+  Metadata-protocol: added — a new translation group `packages.MANIFEST_ID.name` / `.description`
+  Skills-docs: follow-up owed — skills/objectstack-i18n/SKILL.md
+  
+  A package had one name, the plain-string `manifest.name`, so a zh-CN administrator read every package in Setup's package list, and every package with no app of its own in Studio's package switcher, in English, beside a launcher that already named the same apps in Chinese.
+  
+  A package now names itself per locale in the translation bundle it already ships:
+  
+  ```ts
+  export const zhCN: TranslationData = {
+    packages: { 'com.acme.reporting': { name: '报表', description: '经营报表' } },
+  };
+  ```
+  
+  - The key is the package's `manifest.id`. A key that is not a manifest id — a namespace like `crm`, or a display name — is refused at parse, naming the rule, because a row keyed by one would never render. `package`, and the leaf spellings `label`, `title` and `displayName`, are answered with the declared spelling.
+  - The console draws the translated name where a reader sees a package — Setup's package list (row, detail title, description, search, the installed-apps group) and Studio's package switcher for a package that ships no app — and falls back to `manifest.name`. A package that publishes an app is still named by the app's label in the switcher.
+  - `manifest.name` stays exactly as authored on every wire and in every editor: the translation is a display overlay, so the edit dialog that prefills from the listed manifest never saves a translated name back.
+  - A disabled package keeps its translated name: its bundle is loaded at boot whether or not the package is enabled.
+  - `os i18n extract` scaffolds `packages.MANIFEST_ID.name` / `.description` from the manifest, and `os i18n check` / `os lint` report a locale that leaves them out as `i18n/missing-package` — a warning, like every other missing translation. A stack that declares a non-default locale and has never named its package in it sees two new warnings per locale on upgrade; the ObjectStack examples now name theirs.
+  
+  `MANIFEST_ID_PATTERN` is now declared in `kernel/address-grammar.ts` beside `NAMESPACE_PATTERN`; `kernel/manifest.zod.ts` re-exports it, so every existing import keeps working.
+
+### Patch Changes
+
+- 5b32625: fix(auth): a cloud-managed runtime's password refusal is shown in the session's language and points at the identity provider's button
+  
+  Clause-②: yes (widening) — `@object-ui/auth` `ForgotPasswordFormProps` gains the optional `errorMessages`; `@object-ui/i18n` gains `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset` in every locale
+  Metadata-protocol: none
+  
+  A cloud-managed runtime refuses the password doors (sign-in, forgot password, reset password, set password) with 409 `RESOURCE_CONFLICT`. Its code never reached the pages. The hosted relay and the set-password route answer in the platform's error envelope, `{ success: false, error: { code, message } }`, which the auth client did not read. Forgot and reset dropped the code where the client threw. So each of those pages showed the server's English sentence or `Auth request failed with status 409`, whatever the language.
+  
+  - **`@object-ui/auth`.** The client's error builder reads `code`, `message`, `details` and `userMessage` from the envelope's `error` when the flat body has none; a better-auth refusal answers exactly as before. `forgotPassword`, `resetPassword` and `setInitialPassword` now keep the refusal's code and status too. `ForgotPasswordForm` gains an `errorMessages` prop, the same code-to-text map `LoginForm` takes; without it the server's message is shown as before.
+  - **`@object-ui/app-shell`.** `signInRefusalMessages` maps `RESOURCE_CONFLICT` to a sentence that says the deployment signs people in through its identity provider and points at its button above the form. The new `passwordDoorRefusalMessages` carries the matching sentence for the forgot, reset and set-password doors, and the package's forgot-password page passes it.
+  - **`@object-ui/i18n`.** Two keys, `auth.login.errors.managedPasswordSignIn` and `auth.login.errors.managedPasswordReset`, in every locale.
+  - **`@object-ui/console`.** The forgot-password, reset-password and set-password pages show the same sentence.
+  
+  On the sign-in door only a cloud-managed runtime answers this code, so a self-hosted sign-in is unchanged. On the reset and set-password doors a self-hosted deployment answers the same 409 `RESOURCE_CONFLICT` in two cases: an account its identity provider provisions while SSO-only mode is on, and a pending SSO person not yet signed in. Those pages now show the same localized sentence in place of the server's English one; it is true for that reader too. Nothing to migrate.
+- 5f48cb0: feat(console): the create-workspace dialog shows the unpaid-organization limit refusal and its next step
+  
+  Clause-②: yes (widening) — `@object-ui/i18n` gains `organization.errors.unpaidOrganizationLimitReached` and `organization.viewPlans` in every locale
+  Metadata-protocol: none
+  
+  The hosted control plane refuses a create past its cap on free organizations with 403 `UNPAID_ORGANIZATION_LIMIT_REACHED`. The body carries a sentence in the request's language (`message` and `userMessage`) and `details.next_step`, either `upgrade_to_team` or `contact_support`. The create-workspace dialog now recognizes this code:
+  
+  - It shows the control plane's own `userMessage`, which names the next step. A refusal that arrives without one shows the console's sentence instead (new key `organization.errors.unpaidOrganizationLimitReached`, in all eleven console locales). That sentence names no number and no plan.
+  - When the next step is `upgrade_to_team` and the host serves its upgrade entry (`upgradeUrl` on `/api/v1/runtime/config`), the dialog also shows a link to it (new key `organization.viewPlans`). The console never builds that address itself. If the host serves no entry, no link is shown and the sentence alone gives the step. A `contact_support` step shows no link, because the sentence already names the contact address.
+  
+  better-auth's own organization-limit refusal (`YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS`) and every other code behave as before. Nothing to migrate.
+- 0b539b6: feat(app-shell): 「Who sees this view」 — pick a shared view's or a dashboard's audience from the known capabilities, and see which positions will see it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The audience gate is the existing, server-enforced `requiredPermissions` (all of the capabilities listed are required). The console now sets it from a closed list and shows who it reaches; no key, value or gate changes, and nothing is granted from the view (granting stays in Setup).
+  
+  - **`@object-ui/app-shell`.** The view switcher's in-place create card offers 「Who sees this view」 for a shared view: the capabilities the environment knows (declared, or granted by a permission set), each with the permission sets granting it, and a read-only preview of the positions whose permission sets grant every capability picked. The preview reads each position's sets from the server (`GET /meta/position?include=grants`, the sets the resolver grants its holders), never from a position's raw definition; a list served without them leaves the positions unknown. While a gate is picked, the card says it applies to its creator too. It starts from the open view's gate, which a new shared view used to inherit silently, and the pick replaces it; an empty pick writes no gate. A failed catalog read offers nothing to type. The shared hint no longer says every shared view is seen by everyone who can see the list. In Studio, the view panel's and the dashboard settings' audience row is the new `ref-multi:capability` picker: a closed list (no typed-name box when the catalog is unread, empty or failed), each option with its granting sets, and the same preview under it. The picker reads the catalog once its row is on screen, so an editor whose audience section stays closed sends no request.
+  - **`@objectstack/spec`.** The view and dashboard forms' `requiredPermissions` rows declare `widget: 'ref-multi:capability'` (the list is closed: a host with no catalog offers nothing to add). The view hint's last sentence now says only what holds on every carrier: the person setting the gate no longer sees the view in the list either.
+  - **`@objectstack/platform-objects`.** The `metadataForms` bundles carry the narrowed view hint (zh-CN, ja-JP and es-ES translated; the other locales the English source).
+  - **`@object-ui/i18n`.** The create card's new strings and the corrected shared hint, in all eleven console locales.
+  
+  Nothing to migrate.
+- 27ee984: fix: `navigation.size: 'auto'` reads, and opens, as the host's fixed default width in every locale and on every record drawer
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form's help text for a view's `navigation.size` told authors in nine locales (ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru, zh-Hant) that `'auto'` is derived from the object's field count and the viewport. It is not: `'auto'` keeps the host's fixed default width, the same for every object (the console's record side panel opens at 460px). Those nine leaves now say what en and zh-CN already say.
+  
+  The record drawer of the bare data page (`/apps/:app/:object/data`) and of an interface list page opened at the overlay's own 42rem, not at that 460px default, and could not be dragged wider or narrower. Both now open as the object list's drawer does: at 460px, or at the width the reader last dragged in any side preview. An interface list page also takes its source view's `navigation.size` bucket, or its pixel `width`, which then wins over the shared dragged width.
+  
+  Comments and TSDoc that described `'auto'` as the field-count derivation, paired the record flow's `size` with `FormView.modalSize`, or called the deprecated `navigation.width` a renderer fallback now say what the code does. The record flow's `size` is read only by the console's create / edit dialog, which passes `'full'` as its form dialog's `full` size (95vw from the `sm` breakpoint up; below it every size is a full-screen sheet) and never receives `'full'` today, since it derives with no viewport; the record drawer's width does not read it. An authored `width` still wins over `size`. No author action is needed.
+- 8361dfc: feat(app-shell): 「Design layout」's menu adds the app's AI inquiry page, and 「Set as home」 makes it the app's home
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The design mode's menu picker gains 「AI inquiry」, which adds the app's AI inquiry page: a `type: 'component'` navigation entry whose `componentRef` is `ai:chat`. Like 「Link」 it lists nothing. A small form takes the entry's name and the page's copy (heading, subtitle, question-box hint, and up to four suggested questions, one per line); a field left empty keeps the page's default text. The form refuses, under the field, what `AiChatNavParamsSchema` refuses, and cannot be sent until it is mended. An app carries at most one such entry, so the kind is not offered once the app has one, nested in a group included, or when its stored menu holds one the reader is not shown.
+  
+  That entry's 「⋮」 menu gains 「Edit inquiry page」, which edits the same copy again, and 「Set as home」, which moves the entry to the first place of the top level. The home follows the app's existing landing rule: a declared `landing` comes first; with none, from 768 px up the first entry shown lands; below 768 px the app root is the app's menu, where the entry becomes its first row. So the move is the whole edit: no `landing` is written, and an app that declares `landing` keeps landing where it declares.
+  
+  The entry is saved like every other menu edit: into the app's own package when it is writable, else into its customization package, and published at once. Who sees it is set in Studio, as for every entry. `@object-ui/i18n` carries the new strings in all eleven locales.
+  
+  Nothing to migrate.
+- 531e55b: feat(app-shell): the `ai:chat` menu entry is hidden from a member who cannot get an agent, and the app's home falls to the next entry
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An app's AI inquiry entry (`type: 'component'`, `componentRef: 'ai:chat'`) is now shown only to a member the access-filtered agent catalog (`GET /api/v1/ai/agents`) serves at least one agent. On a deployment with no AI, or for a member with no AI seat, the entry is left out of the sidebar, the phone's app menu, the command palette and the `nav:menu` block. If it was the app's home, the home is the next entry the member is shown.
+  
+  - **A declared `landing`** still comes first. A landing entry whose `item` is the `ai:chat` entry is passed over for such a member, like any entry the member is not shown: the next declared entry that holds lands, and with none the first entry shown lands.
+  - **While the catalog is loading** the entry is not drawn, and the app root waits on its loading skeleton instead of opening the page or the next entry. It lands once the catalog answers, so the home never opens one page and then jumps to another.
+  - **A direct link to the page** is not redirected. The page draws its "AI assistant unavailable" state.
+  - The catalog is read only while an app in the list carries an `ai:chat` entry. Apps without one read nothing new.
+  - `useAiSurfaceEnabled` takes an optional `{ enabled }` and no longer reports loading for ever when the catalog is empty and is answered from the session cache. Before, a member with no seat who opened the `ai:chat` page after the console had read the catalog saw a blank loading page and never the unavailable state.
+  - `@object-ui/plugin-chatbot`: `useAgents` returns `settled`, true once a catalog read for the current `apiBase` has answered or failed. The fields it already returned are unchanged.
+  
+  Nothing to migrate.
+- 4af32b9: feat(app-shell): opening the assistant from 「Ask AI」 after closing it starts a new conversation, and the drawer's header names the conversation (ui ADR-0057 Amendment A5)
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **What an opening from the entry shows.** The entry is the top bar's 「Ask AI」 button, the keyboard toggle (Ctrl/Cmd+Shift+I), Home's 「Ask AI」 and the record pane's 「Ask AI」. After the user closes the drawer (×, the entry or the toggle again, dismissing the phone sheet), and the first time in a browser tab, it opens a new conversation; the last one stays in history. After the console closed the phone sheet because the page under it moved (a link in an answer, Back), it shows the same conversation. While a write the AI proposed waits for the user's approval in the conversation shown at the close, it shows that conversation. A build conversation (the `build` agent, a package, an app whose `defaultAgent` is `build`) opens as before. A named conversation (a history row, an `/ai…` address), a reload, the assistant bus and filling the window are unchanged.
+  - **A new conversation leaves no empty row.** It is started with `forceNew`: nothing is created until the first message is sent.
+  - **The header.** One row in the side panel, the full window and the phone sheet: the conversation's label as the history list shows it ("New conversation" before the first send), then ＋ (a new conversation), the history as an icon button (side panel and sheet; the full window shows the history beside the chat), 「···」 and ×. The drawer is no longer titled "AI Assistant".
+  - **Writes awaiting approval reach the assistant bus.** The chat now records, per conversation, an AI-proposed write that waits for the user's approval, so the entry's amber marker also shows for it while the chat is closed. The marker's text (`console.ai.dock.planAwaitingApproval`, key unchanged) now reads "An action is waiting for your approval" (「有一项操作等待确认」) in every pack, since no plan is published any more.
+  - **The record pane's assistant button** reads 「Ask AI」 with the chat-bubble icon, like the top bar's, and opens as the entry does.
+- 3df181b: feat(app-shell): one empty-conversation layout for the AI home, the full-window drawer and the narrow drawer
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-chatbot` `ChatbotEnhancedProps` gains the optional `renderEmptyState`; `@object-ui/i18n` gains `console.ai.suggestionsLabel` and `console.ai.suggestions.page.*` (eight keys) in every locale
+  Metadata-protocol: none
+  
+  A conversation with no message now shows the same layout in all three places: a greeting, a line on what to ask, suggested questions and the recent conversations with their titles.
+  
+  - **The AI home page** (an app's `ai:chat` entry) keeps its large question box, its suggestions that send and its recent conversations that open on the page. Its heading is the entry's declared `title`; with none it now greets the user by the time of day and name, as Home does, where it read "Ask your data".
+  - **The console's assistant drawer** draws the layout before the first message: large when the drawer fills the window, compact in the side rail and the phone sheet. The composer stays where it is, under the conversation. The `ask` assistant's suggestions follow the page in view: on a record, "Summarize this record" and "What is related to this record?" put their text in the composer for the user to finish; on a list, a dashboard or a report, the page's two questions send at once. Elsewhere, and for other assistants, the starter questions are the ones they had. The recent conversations list the drawer assistant's last three (five in the full window), not the AI home's own, and open in the drawer.
+  - **`@object-ui/plugin-chatbot`.** `ChatbotEnhanced` takes `renderEmptyState`: a host's empty conversation drawn in place of the built-in one, given `send` (sends a text) and `fill` (puts it in the composer, focused, sending nothing).
+  
+  Nothing to migrate.
+- bb13a30: feat(app-shell): the assistant drawer's ☆ favourites a conversation, and the sidebar's Favorites open it in the drawer in place
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - **The drawer header's ☆.** Once the first message has created the conversation, the header's ☆ (before ＋) adds it to the user's favourites, and is pressed while it is one; pressed again, it removes it. It is drawn in the side panel, the full window and the phone sheet. While the conversation is a favourite, its stored label follows the header's title.
+  - **A conversation can be a favourite.** `FavoriteItem` gains the `conversation` type, id `conversation:ID`, with the conversation's id and agent (`conversationId`, `agent`); its `href` is the conversation's `/ai…` address. Conversation favourites count against the same cap of 20 as the other content favourites.
+  - **The sidebar row opens the drawer in place.** A favourite conversation is a row of the sidebar's Favorites section, with the chat-bubble icon. Clicking it opens the assistant drawer on that conversation, the way its history row does, and the page stays where it is. The address is followed only where no drawer can take it: a page without the drawer, the app's AI inquiry page, or a click that opens a new tab.
+  - **The label follows the conversation.** The sidebar reads each favourite conversation once and keeps the label its history row shows (the server's title, else the latest message the user wrote).
+  - **A deleted conversation is marked.** A conversation the server answers is gone, or is not this user's, is drawn struck through as unavailable (`sidebar.conversationUnavailable`, new in every pack), opens nothing, and is still removed from its ⋯ menu. A failed read of any other kind marks nothing.
+- 8b47659: feat(plugin-chatbot): the question card takes the composer's place when the AI ends its turn on a question
+  
+  Clause-②: yes (widening) — widened: `ChatbotEnhancedProps` gains the optional `conversationId`; `@object-ui/plugin-chatbot` (and its `/core` entry) exports `QUESTION_SKIP_STORAGE_PREFIX`; `QuestionCardQuestion` and `QuestionCardOption` keep their names and shape and are now the envelope types of `@objectstack/spec/ai` (`AskQuestionParsed`, `AskQuestionOptionParsed`), with `options` still read-only.
+  Metadata-protocol: none
+  
+  `ChatbotEnhanced` now draws the question card itself. When a turn ends on a question tool's result that `parseAskQuestionEnvelope` reads, and the envelope's `reply` is the turn's last text, the card replaces the composer:
+  
+  - It shows only once the stream has ended, and never while a typed message is queued (that message is sent, and sending something else skips the question), while a write approval waits in the same turn, after a skip, or on a `readOnly` transcript. Both shapes of a tool-ended turn count: one streamed message, or the two messages a reloaded conversation holds.
+  - The composer stays mounted, hidden and `inert`, so a draft and its attachments come back after Skip or an answer, and focus that was in it returns to it.
+  - One click answers: the option label goes out through `onSendMessage` as the next user message. If the send fails and the message is rolled back, the card returns with its choice still made.
+  - Skip is remembered on this device, per conversation, under `objectstack:ai-chat-question-skip:` plus the conversation id. The console passes its conversation id, and signing out clears these keys with the rest of the chat cache.
+  - The conversation draws the question from its envelope instead of its plain-text reply: while pending, the question alone; once answered or skipped, a collapsed "AI asks: …" that expands to its options. Copy still copies the full reply, and a pending question shows no Regenerate.
+- 7e4df28: feat(app-shell): the App Studio list draws its own title row, toolbar and columns, and New on a read-only base says where the item goes
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the App Studio area, a metadata type's list now has a title row with the type's icon, its name, "New X" (for example "New Object") and the help menu, and one toolbar row under it: a source dropdown (all sources / modified and new / system-shipped, each with its count) and the search box. The breadcrumb, the stat tiles, the refresh button, the sort dropdown and the "only customizations" toggle are gone from that list; a column header sorts it, the Name header by API name by default.
+  
+  The table runs full width with no outer frame. The name column draws the item's own icon tile (an object's `icon` and `color`), its label as the primary line and its API name small and mono below it. A column of numbers (an object's field count) is right-aligned, and the object list no longer draws a plural label column there. "Modified at" and "Source" are drawn only when the list's rows do not all show the same value in them. The Source badge reads System-shipped, Modified or New (系统自带 / 已修改 / 新建): an item the base's `.custom` package overrides is Modified, an item that package adds is New. The detail page's previous / next order reads the source filter the same way.
+  
+  On a read-only base whose New creates into the base's `.custom` package, New stays enabled and its tooltip says the package is read-only and the new item goes to that `.custom` package (new key `engine.list.createInPairHint`). On a writable package New is unchanged.
+  
+  Setup's list and the list outside Studio and Setup are unchanged. New `studio` keys: `engine.list.createNamed`, `engine.list.createInPairHint`, `engine.list.source.system`, `engine.list.source.modified`, `engine.list.source.new` and `engine.list.sourceFilter.{all,changed,system}`, in en and zh.
+- 7fbfd8f: feat(studio): the Studio menu draws no datasource row; a connection is managed in Setup → Integrations alone
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The 平台 Platform group of App Studio's left menu no longer lists Datasources, in any scope (a package, the organization's flows, the cross-package leg), and neither does the ⌘K palette, which lists the menu's own entries. The type stays registered `system`, the 全部类型 All types directory still lists it, and its tile and every `datasource` URL in the area still open Setup's Datasources page.
+- Updated dependencies [5b32625]
+- Updated dependencies [5f48cb0]
+- Updated dependencies [34f7078]
+- Updated dependencies [74cd5b6]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [57ab087]
+- Updated dependencies [3c53b85]
+- Updated dependencies [8361dfc]
+- Updated dependencies [531e55b]
+- Updated dependencies [0b87f12]
+- Updated dependencies [4af32b9]
+- Updated dependencies [3df181b]
+- Updated dependencies [bb13a30]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [8b47659]
+- Updated dependencies [7e4df28]
+- Updated dependencies [a145e24]
+- Updated dependencies [cb3f8b9]
+- Updated dependencies [7c85f5b]
+- Updated dependencies [6e2a8f2]
+  - @object-ui/auth@19.0.0-next.2
+  - @object-ui/i18n@19.0.0-next.2
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/lint@19.0.0-next.2
+  - @object-ui/plugin-view@19.0.0-next.2
+  - @object-ui/react@19.0.0-next.2
+  - @object-ui/plugin-chatbot@19.0.0-next.2
+  - @object-ui/plugin-report@19.0.0-next.2
+  - @object-ui/collaboration@19.0.0-next.2
+  - @object-ui/components@19.0.0-next.2
+  - @object-ui/fields@19.0.0-next.2
+  - @object-ui/plugin-calendar@19.0.0-next.2
+  - @object-ui/plugin-charts@19.0.0-next.2
+  - @object-ui/plugin-dashboard@19.0.0-next.2
+  - @object-ui/plugin-designer@19.0.0-next.2
+  - @object-ui/plugin-detail@19.0.0-next.2
+  - @object-ui/plugin-form@19.0.0-next.2
+  - @object-ui/plugin-grid@19.0.0-next.2
+  - @object-ui/plugin-kanban@19.0.0-next.2
+  - @object-ui/plugin-list@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @object-ui/layout@19.0.0-next.2
+  - @object-ui/plugin-editor@19.0.0-next.2
+  - @object-ui/core@19.0.0-next.2
+  - @object-ui/data-objectstack@19.0.0-next.2
+  - @object-ui/mobile@19.0.0-next.2
+  - @object-ui/permissions@19.0.0-next.2
+  - @object-ui/types@19.0.0-next.2
+
 ## 18.6.0-next.1
 
 ### Minor Changes

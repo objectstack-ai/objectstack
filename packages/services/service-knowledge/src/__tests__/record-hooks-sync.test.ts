@@ -14,11 +14,17 @@
  * - inside a unit of work the sync starts once the unit commits, and never
  *   when it rolls back;
  * - a predicate write is synced row by row;
- * - with a `realtime` service composed, each write is synced exactly once.
+ * - with a `realtime` service composed, each write is synced exactly once;
+ * - a recycle-bin restore (which runs no hook) is heard by the engine
+ *   middleware on the `restore` operation: the restored rows are searchable
+ *   again without a rebuild, the master first; a restore that fails, or whose
+ *   unit rolls back, indexes nothing; with or without a `realtime` service a
+ *   restore is synced exactly once.
  */
 
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
+import { RECYCLE_BIN_ENTRY_FIELDS } from '@objectstack/spec/data';
 import type {
   IKnowledgeAdapter,
   IRealtimeService,
@@ -48,6 +54,10 @@ function makeDriver() {
         if (!(value as unknown[]).every((clause) => matches(row, clause))) return false;
         continue;
       }
+      if (value !== null && typeof value === 'object' && Array.isArray((value as Row).$in)) {
+        if (!((value as Row).$in as unknown[]).some((v) => String(v) === String(row[key]))) return false;
+        continue;
+      }
       if (key.startsWith('$') || (value !== null && typeof value === 'object')) {
         throw new Error(`driver double: '${key}' is not implemented`);
       }
@@ -61,6 +71,8 @@ function makeDriver() {
     name: 'primary',
     version: '0.0.0',
     supports: { transactions: true },
+    /** When set, `create` of this object throws, as a store's failed write would. */
+    failCreateOf: undefined as string | undefined,
     rowsOf: (o: string) => Array.from(storeFor(o).values()),
     async connect() {},
     async disconnect() {},
@@ -74,6 +86,7 @@ function makeDriver() {
     },
     async findOne(o: string, ast: any) { return (await this.find(o, ast))[0] ?? null; },
     async create(o: string, data: Row) {
+      if (driver.failCreateOf === o) throw new Error(`driver double: the write of '${o}' failed`);
       const row = { ...data, id: (data.id as string) ?? `${o}_${++n}` };
       storeFor(o).set(String(row.id), row);
       return { ...row };
@@ -111,7 +124,7 @@ function makeDriver() {
 
 const quiet = { debug() {}, info() {}, warn() {}, error() {} };
 
-async function makeEngine() {
+async function makeEngine(opts: { recycleBin?: boolean } = {}) {
   const engine = new ObjectQL({ logger: quiet } as any);
   const driver = makeDriver();
   engine.registerDriver(driver, true);
@@ -126,6 +139,25 @@ async function makeEngine() {
         body: { name: 'body', type: 'text' },
         status: { name: 'status', type: 'text' },
       },
+    } as any, '__test__');
+  }
+  if (opts.recycleBin) {
+    // A detail of the article, deleted and restored with it as one entry.
+    engine.registry.registerObject({
+      name: 'kb_note',
+      label: 'kb_note',
+      fields: {
+        id: { name: 'id', type: 'text', primaryKey: true },
+        article: { name: 'article', type: 'master_detail', reference: 'kb_article' },
+        body: { name: 'body', type: 'text' },
+      },
+    } as any, '__test__');
+    // The bin, declared as `@objectstack/platform-objects` declares it.
+    engine.registry.registerObject({
+      name: 'sys_recycle_bin',
+      label: 'Recycle Bin Entry',
+      managedBy: 'engine-owned',
+      fields: { ...RECYCLE_BIN_ENTRY_FIELDS },
     } as any, '__test__');
   }
   return { engine, driver };
@@ -210,8 +242,8 @@ function source(object = 'kb_article', name = 'kb'): KnowledgeSource {
 
 const SYSTEM = { executionContext: { positions: [], permissions: [], systemPermissions: [], isSystem: true } };
 
-async function boot(opts: { realtime?: boolean } = {}) {
-  const { engine, driver } = await makeEngine();
+async function boot(opts: { realtime?: boolean; recycleBin?: boolean; sources?: KnowledgeSource[] } = {}) {
+  const { engine, driver } = await makeEngine({ recycleBin: opts.recycleBin });
   const realtime = opts.realtime ? makeRealtime() : undefined;
   if (realtime) engine.setRealtimeService(realtime);
   const hooks = new Map<string, Array<() => unknown>>();
@@ -229,7 +261,7 @@ async function boot(opts: { realtime?: boolean } = {}) {
       throw new Error(`[Kernel] Service '${name}' not found`);
     },
   };
-  const plugin = new KnowledgeServicePlugin({ sources: [source()], buildAtBoot: false });
+  const plugin = new KnowledgeServicePlugin({ sources: opts.sources ?? [source()], buildAtBoot: false });
   await plugin.init(ctx);
   await plugin.start(ctx);
   for (const fn of hooks.get('kernel:ready') ?? []) await fn();
@@ -384,5 +416,143 @@ describe('record sync with a realtime service: one trigger, each write synced on
     await t.settled();
     expect(del).toHaveBeenCalledTimes(1);
     expect(t.docs.size).toBe(0);
+  });
+});
+
+const RESTORE_AS_SYSTEM = { context: { isSystem: true } } as any;
+
+function noteSource(): KnowledgeSource {
+  return { name: 'notes', label: 'notes', adapter: 'memory', source: { kind: 'object', object: 'kb_note', content: ['body'] } };
+}
+
+type Booted = Awaited<ReturnType<typeof boot>>;
+
+/**
+ * Insert an article with one note and let both sync, then delete the article
+ * through the engine (the note goes with it, into the same entry) and let the
+ * delete de-index. Answers the rows and the entry's id.
+ */
+async function deleteIndexedArticle(t: Booted) {
+  const article = (await t.engine.insert('kb_article', { title: 'Leave policy', body: 'Twenty days of paid leave' })) as Row;
+  const note = (await t.engine.insert('kb_note', { article: article.id, body: 'Carry-over ends in March' })) as Row;
+  await t.settled();
+  expect(await found(t.service, 'paid leave')).toEqual([String(article.id)]);
+
+  await t.engine.delete('kb_article', { where: { id: article.id } } as any);
+  await t.settled();
+  expect(t.driver.rowsOf('kb_article')).toEqual([]);
+  expect(t.docs.size).toBe(0);
+  const entry = (t.driver.rowsOf('sys_recycle_bin') as Row[]).find((e) => e.record_id === String(article.id));
+  expect(entry).toBeDefined();
+  return { article, note, entryId: String(entry!.id) };
+}
+
+/** The `[object, id]` of each upsert the service was asked for, in order. */
+const upserted = (spy: { mock: { calls: unknown[][] } }) =>
+  spy.mock.calls.map(([object, record]) => [object, String((record as Row).id)]);
+
+describe('a recycle-bin restore without a realtime service: the restore middleware', () => {
+  it('a deleted indexed record restored from the bin is searchable again without a rebuild, the master first', async () => {
+    const t = await boot({ recycleBin: true, sources: [source(), noteSource()] });
+    expect(t.recordHooks?.watchesRestores).toBe(true);
+    expect(t.logger.info.mock.calls.map((c) => String(c[0])).some((l) => l.includes('A recycle-bin restore re-indexes'))).toBe(true);
+    const { article, note, entryId } = await deleteIndexedArticle(t);
+    const upsert = vi.spyOn(t.service, 'handleRecordUpsert');
+
+    const result = await t.engine.restore(entryId, RESTORE_AS_SYSTEM);
+    expect(result?.rows).toEqual([
+      { object: 'kb_article', id: String(article.id) },
+      { object: 'kb_note', id: String(note.id) },
+    ]);
+    await t.settled();
+
+    expect(await found(t.service, 'paid leave')).toEqual([String(article.id)]);
+    expect(await found(t.service, 'Carry-over')).toEqual([String(note.id)]);
+    expect(upserted(upsert)).toEqual([
+      ['kb_article', String(article.id)],
+      ['kb_note', String(note.id)],
+    ]);
+  });
+
+  it('a restore inside a unit of work that rolls back indexes nothing', async () => {
+    const t = await boot({ recycleBin: true });
+    const { entryId } = await deleteIndexedArticle(t);
+    const upsert = vi.spyOn(t.service, 'handleRecordUpsert');
+
+    await expect(t.engine.transaction(async () => {
+      expect(await t.engine.restore(entryId, RESTORE_AS_SYSTEM)).not.toBeNull();
+      // A beat inside the unit: a sync started now would see the restored row.
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      throw new Error('the caller gives up');
+    })).rejects.toThrow('the caller gives up');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await t.settled();
+
+    expect(t.driver.rowsOf('kb_article')).toEqual([]);
+    expect(upsert).not.toHaveBeenCalled();
+    expect(t.docs.size).toBe(0);
+    expect(await found(t.service, 'paid leave')).toEqual([]);
+  });
+
+  it('a restore whose write fails writes nothing back and indexes nothing', async () => {
+    const t = await boot({ recycleBin: true });
+    const { entryId } = await deleteIndexedArticle(t);
+    const upsert = vi.spyOn(t.service, 'handleRecordUpsert');
+    // The master is written first, then the note's write fails: the restore's own unit rolls the master back.
+    t.driver.failCreateOf = 'kb_note';
+
+    await expect(t.engine.restore(entryId, RESTORE_AS_SYSTEM)).rejects.toThrow("the write of 'kb_note' failed");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await t.settled();
+
+    expect(t.driver.rowsOf('kb_article')).toEqual([]);
+    expect((t.driver.rowsOf('sys_recycle_bin') as Row[]).some((e) => String(e.id) === entryId)).toBe(true);
+    expect(upsert).not.toHaveBeenCalled();
+    expect(t.docs.size).toBe(0);
+  });
+
+  it('a restore that landed with a stale roll-up (ERR_SUMMARY_RECOMPUTE) still re-indexes its rows', async () => {
+    const t = await boot({ recycleBin: true });
+    const { article, entryId } = await deleteIndexedArticle(t);
+    vi.spyOn(t.engine as any, 'recomputeSummaries').mockResolvedValueOnce([
+      { childObject: 'kb_article', parentObject: 'kb_shelf', parentId: 's1', field: 'article_count', error: new Error('locked') },
+    ]);
+
+    await expect(t.engine.restore(entryId, RESTORE_AS_SYSTEM)).rejects.toMatchObject({ code: 'ERR_SUMMARY_RECOMPUTE' });
+    await t.settled();
+
+    expect(t.driver.rowsOf('kb_article')).toHaveLength(1);
+    expect(await found(t.service, 'paid leave')).toEqual([String(article.id)]);
+  });
+
+  it('teardown: a restore after destroy() is not synced', async () => {
+    const t = await boot({ recycleBin: true });
+    const { entryId } = await deleteIndexedArticle(t);
+    const upsert = vi.spyOn(t.service, 'handleRecordUpsert');
+    await t.plugin.destroy();
+
+    expect(await t.engine.restore(entryId, RESTORE_AS_SYSTEM)).not.toBeNull();
+    await t.settled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+});
+
+describe('a recycle-bin restore with or without a realtime service: synced once', () => {
+  it.each([
+    ['with a realtime service', true],
+    ['without one', false],
+  ])('%s, a restore reaches the service once for its indexed row', async (_label, realtime) => {
+    const t = await boot({ realtime, recycleBin: true });
+    expect(t.recordHooks === undefined).toBe(realtime);
+    const { article, entryId } = await deleteIndexedArticle(t);
+    // A source added after boot re-runs the hooks' registration: the restore is still heard once.
+    t.service.registerSource(source('faq', 'faq'));
+    const upsert = vi.spyOn(t.service, 'handleRecordUpsert');
+
+    await t.engine.restore(entryId, RESTORE_AS_SYSTEM);
+    await t.settled();
+
+    expect(upserted(upsert).filter(([object]) => object === 'kb_article')).toEqual([['kb_article', String(article.id)]]);
+    expect(await found(t.service, 'paid leave')).toEqual([String(article.id)]);
   });
 });

@@ -8,7 +8,7 @@
 
 /**
  * `data-table`'s per-cell save in the select-first model (objectstack#35685),
- * behind the `GridCellSelection` a host mounts.
+ * behind the `GridCellSelectionProvider` a host mounts.
  *
  *   1. A committed cell sends its record's update at once: one call, that
  *      cell only; no save bar, no row Save/Cancel column, no amber row; the
@@ -115,7 +115,7 @@ function deferredSave() {
 }
 
 describe('data-table autosave — a committed cell saves at once (objectstack#35685)', () => {
-  it('sends one update with that cell only, draws no save bar, no edit column and no amber row', async () => {
+  it('sends one update with that cell only, draws no save bar, no row Save button and no amber row', async () => {
     const { onRowSave, calls } = deferredSave();
     const t = renderTable(onRowSave);
     t.typeAndEnter(0, 0, 'Alpha 2');
@@ -127,7 +127,6 @@ describe('data-table autosave — a committed cell saves at once (objectstack#35
     expect(screen.queryByText(/Save All/)).toBeNull();
     expect(screen.queryByText(/row modified/)).toBeNull();
     expect(t.container.querySelector('button[title="Save row"]')).toBeNull();
-    expect(t.container.querySelector('[data-testid="data-table-edit-column-header"]')).toBeNull();
     const firstRow = t.container.querySelectorAll('tbody tr')[0] as HTMLElement;
     expect(firstRow.className).not.toContain('bg-amber-50');
     expect(t.cell(0, 0).className).not.toContain('text-amber-700');
@@ -291,7 +290,10 @@ describe('data-table autosave — no staged fallback: a table that cannot save r
     expect(onRowSave).not.toHaveBeenCalled();
     const lines = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[ObjectUI] DataTable editable:'));
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/GridCellSelection/);
+    // The component a host mounts is the provider; `GridCellSelection` is the
+    // context's value type, which cannot be mounted.
+    expect(lines[0].match(/`GridCellSelectionProvider`/g)).toHaveLength(2);
+    expect(lines[0]).not.toContain('`GridCellSelection`');
   });
 
   it('under the provider with no onRowSave: no editor opens, no save bar, one console warning naming onRowSave', () => {

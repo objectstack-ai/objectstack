@@ -1,6 +1,6 @@
 {
   "name": "@object-ui/plugin-detail",
-  "version": "19.0.0-next.1",
+  "version": "19.0.0-next.2",
   "type": "module",
   "license": "MIT",
   "description": "DetailView plugin for ObjectUI - comprehensive detail page with sections, tabs, and related lists",

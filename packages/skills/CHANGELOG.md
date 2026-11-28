@@ -1,5 +1,91 @@
 # @objectstack/skills
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- 1f03dc5: fix(ask): an AI client sends the user's whole phrase to `list_datasets`, and re-sends a word it cut or reworded instead of asking the user about it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An AI client answering a business question through the governed datasets often sent a shortened word ("claims" for "number of claims", "amount" for "claimed amount"). The server offers such a word only possible readings, never a match, so the client asked the user which number they meant on a question that already named it.
+  
+  - `list_datasets`' `nextStep.note`, in all four languages, now says before the question: a word the client cut out of a longer phrase of the question, or reworded, is not asked about; the client calls `list_datasets` once more with that phrase as the user wrote it, never the whole question, and asks only when the word is the user's own. The answer to that second call is followed like any other: a phrase that matches nothing and has no candidate takes the labelled fallback to the object tools. `matches`, `candidates`, `decision` and `terms` do not change, and a measure candidate for the user's own word is still asked about, never selected.
+  - `list_datasets`' description and the MCP `initialize` selection rule say the same, and ask for the question's business phrases whole, as the user wrote them.
+  - The `objectstack-ask` skill (and `GET /mcp/skill`, generated from it) asks for one term per thing, its whole noun phrase without the verbs and question words around it, with one worked example.
+- 776af34: docs(skills): `objectstack-ai` teaches `knowledge_source` as a metadata item
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai` § Knowledge Sources (RAG) now teaches the shape the 19 spec accepts. A source is a `knowledge_source` item shipped in a package (`knowledgeSources`, `*.knowledge-source.ts` / `.yml`) or authored in Studio or over MCP, with registration in code as a second door for the same schema. The key table lists `name`, `label`, `description`, the optional `adapter` (omitted, the source binds to the deployment's store), `source.object`, `source.content` (an explicit, non-empty list: `'*'` is refused because embedding is egress), `source.metadataFields`, `source.where`, `source.split`, `refresh.onRecordChange` and `aiExposed`. A source the app ships in `knowledgeSources` mounts the knowledge service and its store; an app that ships none and authors its sources at run time needs `requires: ['knowledge']`, or its items are never indexed. A source is identified by its package and `name`: `search_knowledge` lists a package's source as `NAMESPACE-NAME`, and a code registration and an environment item of one name are one slot. The closing note says that `topK` is a `search_knowledge` argument and that no shipped store has a rerank or hybrid-weight setting. The section says that a source's first build sends every listed field of every matching record to the embedding provider, and that a run-time save needs `manage_knowledge_sources` and passes save-time admission. It names each key retired in 19 with its fix: `id` → `name`, `contentFields` → `content`, `embedding`, `vectorStore`, `adapterConfig`, `refresh.cron`, and the `file` and `http` arms. `split.strategy` is required once `split` is written. The eval cases for knowledge sources move to the same shape, a new case asks for a wildcard source, and another for a source an app authors at run time.
+- 64f2d7a: docs(skills): objectstack-ui says a select badge is coloured only when its option declares `color`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ui/rules/list-views.md` gains one sentence under Column Features: a `select` badge is coloured only when its option declares `color`, as one of `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink` or a `#` hex, and any other option renders neutral. It teaches the renderer behaviour that landed with #36882: no colour is derived from an option's value, so an agent that wants a coloured status or priority badge declares the colour on the option.
+- 815e882: docs(skills): four skill pages follow code that has merged — the `_milestones` translation key, the remedy for a hidden related-list entry, `kanban.cardFooter`, and the rule that refuses an ungranted action write
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-i18n/SKILL.md`: the object sub-key table gains a `_milestones.{field}.{value}` row. Its `summary` is the timeline sentence of the `activityMilestones` entry that fires on that field and value, with the same `{field}` tokens; the row is composed at read time in the reader's language, a select token shows as its option label, the stored row is unchanged, and field redaction applies as it does to the stored sentence. The `_relatedLists` row's remedy for a hidden entry now says the entry is re-stated shown, with the owner's label.
+  
+  `skills/objectstack-data/rules/relationships.md`: the same remedy; a bare child name in a `.custom` arrangement, labelled or not, covers each of that child's `child.field` lists; and an import scope the engine cannot filter by (such as a formula) answers `reference_not_found`.
+  
+  `skills/objectstack-ui/rules/list-views.md`: the kanban example and its notes carry `cardFooter: { comments, attachments }`. `comments` counts the record's open top-level threads, `attachments` its files, shown only where the object has `enable.files`; no other member is accepted.
+  
+  `skills/objectstack-ui/rules/actions.md`: a body that writes without `capabilities: ['api.write']` is named by its rule, `action-body-write-capability-undeclared`, in place of the sentence about the sandbox throwing.
+  
+  Each addition is paid for in its own file (shortened examples and asides); no token ceiling moves.
+- 62dd9e1: docs(skills): the `objectstack-ai` skill describes the refusal the two retired agent keys get today
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md`: the paragraph above the retired-key table called `agent.tools` and `agent.knowledge` tombstones whose parse error carries its migration, and cited two line numbers of `agent.zod.ts` that no longer point at either key. Both tombstones left the schema in protocol 18. The paragraph now says what the strict `AgentSchema` does: it refuses each as an unknown key, and the refusal names https://objectstack.ai/docs/protocol-upgrade. The table header says the same in short. In the `agent.tools` row, the clause that said a migration deletes the key and names each listed tool now says the strict schema refuses the key as unknown: the conversion that did that left the load path in 17.0.0. The replacements both rows teach are unchanged, and the file is 4 tokens shorter.
+- 4de4e3e: docs(skills): `objectstack-ai` no longer teaches an authored AI button on a record page
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  ADR-0160, seventh amendment (D6, "Entry point"): the entry to the in-app assistant is the shell's 「问 AI」 entry, and no page declares an AI button of its own.
+  
+  `skills/objectstack-ai/SKILL.md`: the subsection *The Ask AI button — `type: 'ask_ai'`* under *Actions as AI Tools* is removed, with its `defineAction` example. One sentence stands in its place: no page declares an AI button of its own, so there is no action to write for one, and the shell's 「问 AI」 entry opens the in-app assistant and carries the current record automatically. The file's token ceiling follows the measurement down, 6791 to 6609.
+  
+  `evals/skills-tools-knowledge.json`: case 10 keeps its prompt, an Ask AI button on the contract record page, and now expects the opposite answer: no action is written, and the answer names the shell's 「问 AI」 entry. Its `must_contain` is that entry's name, and its `must_not_contain` holds `defineAction(` and `locations:`, two tokens that only an authored action carries.
+  
+  The `objectstack-ui` action-type table is unchanged: it is held row for row to the members of `ActionType`, which still include `ask_ai`.
+- b492198: docs(skills): the checked action examples no longer carry a `locations` key
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Six examples drop their `locations` key: the "Mark as done" JSON in `skills/objectstack-ui/SKILL.md` (Actions), and five `defineAction` examples in `skills/objectstack-ui/rules/actions.md` (`crm_reassign_lead`, `crm_convert_lead`, `crm_print_a3`, `crm_open_invoice_pdf`, `crm_add_invoice_line`). Nothing an author can write changes, and the text around the examples is as it was: an action still draws only where its `locations` or a list view places it, so an action copied from one of these examples needs its `locations` added. Two token ceilings follow their files down to the measurement (2264 to 2256, 3890 to 3844).
+- dc45b1e: feat(qa): the skill-evals grader takes an any-of form, `must_contain_any`; `objectstack-ai` case 6 moves to it
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A skill eval case can now list `assertions.must_contain_any` beside `must_contain` and `must_not_contain`: a list of groups, each a list of tokens, and a group is met when at least one of its tokens is in the answer. Every group is required, so `[["a", "b"], ["c"]]` reads "(`a` or `b`) and `c`". Matching is the same as the other two forms: a literal, case-sensitive substring, nothing normalised, no model judge. The reader refuses a `must_contain_any` that is not a list of groups, a group that is empty or not a list of strings, a group holding an empty token, and a case with no token in any of the three forms. A failing run record names each unmet group whole in `unmetAny` (the key is absent when every group is met), and the round summary prints it in the missed column as `(none of: a / b)`. The runner runs from a checkout only; of `@objectstack/scenarios`, the published README is what changes.
+  
+  The case hash covers the groups only when a case has any, so every case without the form keeps its hash and `skill-evals --regrade` reads its earlier records as before. A case that gains a group, or has one edited, has a new hash: its earlier records are set apart, and it compares across rounds only after a re-run.
+  
+  `skills/objectstack-ai/evals/skills-tools-knowledge.json` case 6 (an operator script asked to approve AI pending actions on an API token) now requires one of `ai:approve`, `signed-in session`, `refused` or `never decides` in place of both `signed-in session` and `refused`, which failed correct answers that worded the refusal another way or answered in another language. Its prompt, reference answer and forbidden token are unchanged, and so is the skill text.
+- a145e24: docs: the retired agent keys are refused as unknown keys, not tombstones
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `agent.tools` and `agent.knowledge` were removed in protocol 17, and their tombstones left the shape at protocol 18. Since then the strict `AgentSchema` refuses each as an unknown key, and the refusal names https://objectstack.ai/docs/protocol-upgrade. Three texts still described the older behaviour and now say what happens today:
+  
+  - **`@objectstack/skills`.** In the `objectstack-ai` skill's `skills-tools-knowledge` evals, case 5's `expected_output` no longer calls the two keys protocol-17 tombstones. The case's prompt and assertions are unchanged.
+  - **`@objectstack/spec`.** The comment in `src/ai/agent.zod.ts` on the removed `AIKnowledgeSchema` no longer says `agent.knowledge` is tombstoned below it. No schema, type or export changes.
+  
+  The `ai/agents` docs page says the same in its `tools` and `knowledge` rows: the key is not on the type, so there is no `never` member for `tsc` to refuse by name. Nothing to migrate.
+
 ## 19.0.0-next.1
 
 ### Patch Changes
