@@ -56,7 +56,12 @@ function matchesMetadataWhere(r: Row, where: Record<string, unknown>): boolean {
 const PKG = 'com.acme.alpha';
 const NS = 'crm';
 
-function makeStubEngine() {
+/**
+ * `rollback: false` gives the engine a default driver that declares no
+ * transactions, so `engineCanRollBack` answers false and a package publish
+ * judges its whole batch (`judgeOnly`) before it promotes any of it.
+ */
+function makeStubEngine(options: { rollback?: boolean } = {}) {
     const rows = new Map<string, Row>();
     let nextId = 0;
 
@@ -113,6 +118,12 @@ function makeStubEngine() {
         async transaction<T>(cb: (ctx: any, info: { owned: boolean }) => Promise<T>): Promise<T> {
             return cb(undefined, { owned: true });
         },
+        ...(options.rollback === false
+            ? {
+                getDefaultDriverName: () => 'stub',
+                getDriverByName: () => ({ supports: { transactionsUnsupported: true } }),
+            }
+            : {}),
         registry: {
             registerItem: () => {},
             registerObject: () => {},
@@ -242,6 +253,22 @@ describe('[#35924] the publish judges an object draft by the current ObjectSchem
         expect(res.failed[0]).toMatchObject({ type: 'object', name, code: 'INVALID_METADATA' });
         expect(rowsFor(rows, name)).toEqual([{ state: 'draft', package_id: PKG }]);
     });
+
+    it('a package publish that judges before it writes (no rollback) refuses it in the judge pass: no draft of the batch goes live', async () => {
+        const { engine, rows } = makeStubEngine({ rollback: false });
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const name = 'crm_ledger';
+        const sibling = 'crm_journal';
+        await protocol.saveMetaItem({ type: 'object', name: sibling, item: sealedLedger(sibling), packageId: PKG, mode: 'draft' });
+        await stagePreRefinementDraft(protocol, rows, name, preRefinementLedger(name));
+
+        const res: any = await protocol.publishPackageDrafts({ packageId: PKG } as any);
+
+        expect(res).toMatchObject({ success: false, outcome: 'refused', publishedCount: 0 });
+        expect(res.failed.find((f: any) => f.name === name)).toMatchObject({ type: 'object', code: 'INVALID_METADATA' });
+        expect(rowsFor(rows, name)).toEqual([{ state: 'draft', package_id: PKG }]);
+        expect(rowsFor(rows, sibling)).toEqual([{ state: 'draft', package_id: PKG }]);
+    });
 });
 
 describe('[#35924] what the publish still promotes', () => {
@@ -257,6 +284,17 @@ describe('[#35924] what the publish still promotes', () => {
 
     it('CONTROL — a fresh valid draft publishes with its package, as before', async () => {
         const { engine, rows } = makeStubEngine();
+        const protocol = new ObjectStackProtocolImplementation(engine);
+        const name = 'crm_ledger';
+        await protocol.saveMetaItem({ type: 'object', name, item: sealedLedger(name), packageId: PKG, mode: 'draft' });
+
+        expect(await protocol.publishPackageDrafts({ packageId: PKG } as any))
+            .toMatchObject({ success: true, outcome: 'published', publishedCount: 1, failedCount: 0 });
+        expect(rowsFor(rows, name)).toEqual([{ state: 'active', package_id: PKG }]);
+    });
+
+    it('CONTROL — a fresh valid draft publishes with its package where the batch is judged first (no rollback), as before', async () => {
+        const { engine, rows } = makeStubEngine({ rollback: false });
         const protocol = new ObjectStackProtocolImplementation(engine);
         const name = 'crm_ledger';
         await protocol.saveMetaItem({ type: 'object', name, item: sealedLedger(name), packageId: PKG, mode: 'draft' });
