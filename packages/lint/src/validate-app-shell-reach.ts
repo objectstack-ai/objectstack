@@ -94,15 +94,30 @@ function collectNavObjects(items: unknown, into: Set<string>): void {
   }
 }
 
-/** One collection holder: the stack itself, then each `packages[].manifest` body. */
+/** One collection holder: the stack itself, or one `packages[].manifest` body. */
 interface Holder {
   body: AnyRec;
   /** Path prefix of the holder, `''` for the stack itself. */
   prefix: string;
 }
 
-function holdersOf(stack: AnyRec): Holder[] {
-  const holders: Holder[] = [{ body: stack, prefix: '' }];
+/**
+ * The holders whose apps and objects are JUDGED: the stack itself only. An
+ * assembled artifact's `packages[]` is judged by the CLI's per-package run
+ * (`runPerPackageAuthoringRules`), which hands each package to these rules as
+ * a stack of its own; judging it here too would report each item twice.
+ */
+function judgedHolders(stack: AnyRec): Holder[] {
+  return [{ body: stack, prefix: '' }];
+}
+
+/**
+ * The holders whose navigation COUNTS toward reach: the stack and every
+ * package of an assembled artifact, so an entry one package contributes into
+ * another's app reaches the object wherever the object is judged.
+ */
+function reachHolders(stack: AnyRec): Holder[] {
+  const holders = judgedHolders(stack);
   packagesOf(stack).forEach((entry, i) => {
     if (isRec(entry.manifest)) holders.push({ body: entry.manifest, prefix: `packages[${i}].manifest.` });
   });
@@ -151,9 +166,8 @@ function contributedAppNames(holders: readonly Holder[]): Set<string> {
 export function validateAppNavigationPresent(stack: AnyRec): AppShellReachFinding[] {
   const findings: AppShellReachFinding[] = [];
   if (!isRec(stack)) return findings;
-  const holders = holdersOf(stack);
-  const contributed = contributedAppNames(holders);
-  for (const holder of holders) {
+  const contributed = contributedAppNames(reachHolders(stack));
+  for (const holder of judgedHolders(stack)) {
     for (const { app, path, name } of appsOf(holder)) {
       if (hasEntry(app.navigation)) continue;
       if (recordsOf(app.areas).some((area) => hasEntry(area.navigation))) continue;
@@ -196,12 +210,12 @@ function hasMasterDetailField(obj: AnyRec): boolean {
 
 /**
  * `object-unreachable-from-navigation` and `object-without-view` over every
- * object the stack (and each package of an assembled artifact) declares.
+ * object the stack declares.
  */
 export function validateObjectShellReach(stack: AnyRec): AppShellReachFinding[] {
   const findings: AppShellReachFinding[] = [];
   if (!isRec(stack)) return findings;
-  const holders = holdersOf(stack);
+  const holders = reachHolders(stack);
 
   const reached = new Set<string>();
   let navigates = false;
@@ -220,7 +234,7 @@ export function validateObjectShellReach(stack: AnyRec): AppShellReachFinding[] 
 
   const views = holders.flatMap((holder) => recordsOf(holder.body.views));
 
-  for (const holder of holders) {
+  for (const holder of judgedHolders(stack)) {
     const objects = holder.body.objects;
     if (!Array.isArray(objects)) continue;
     objects.forEach((obj, i) => {

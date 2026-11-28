@@ -108,6 +108,19 @@ describe('[#35143] object-unreachable-from-navigation and object-without-view', 
     expect(run(contributed)).toEqual([]);
   });
 
+  it('in an assembled artifact, navigation a package contributes counts, and package objects are left to the per-package run', () => {
+    const artifact = {
+      objects: [objects[0]],
+      views: [accountView],
+      packages: [
+        { manifest: { id: 'orders', navigationContributions: [{ app: 'crm', items: [navTo('crm_account')] }] } },
+        { manifest: { id: 'core', apps: [app()], objects: [objects[1]] } },
+      ],
+    };
+    expect(run(artifact)).toEqual([]);
+    expect(validateAppNavigationPresent(artifact)).toEqual([]);
+  });
+
   it('a master-detail child and an API-disabled object are not judged; a stack with no app is not judged', () => {
     const child = { name: 'crm_note', fields: { account: { type: 'master_detail', reference: 'crm_account' } } };
     const hidden = { name: 'crm_log', enable: { apiEnabled: false }, fields: { body: { type: 'text' } } };
