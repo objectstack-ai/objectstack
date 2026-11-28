@@ -50,8 +50,8 @@ authored after that retirement per the ruling's sequencing (3A).
 ## TypeScript Usage
 
 ```typescript
-import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, GetPackageCustomizationsRequestSchema, GetPackageCustomizationsResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, PackageExportBundleSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
-import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, GetPackageCustomizationsRequest, GetPackageCustomizationsResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, PackageExportBundle, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
+import { DiscardPackageDraftsResponseSchema, DuplicatePackageResponseSchema, EnsureCustomizationPackageRequestSchema, EnsureCustomizationPackageResponseSchema, GetPackageCustomizationsRequestSchema, GetPackageCustomizationsResponseSchema, ImportUnmanagedPackageRequestSchema, ImportUnmanagedPackageResponseSchema, ListPackageCommitsResponseSchema, MoveIntoPackageItemSchema, MoveIntoPackageMovedItemSchema, MoveIntoPackageRefusedItemSchema, MoveIntoPackageRequestSchema, MoveIntoPackageResponseSchema, PackageExportBundleSchema, PackageExportManifestSchema, PackagePublishResultSchema, ReassignOrphanedMetadataResponseSchema, RevertPackageCommitResponseSchema, RollbackToPackageCommitResponseSchema } from '@objectstack/spec/api';
+import type { DiscardPackageDraftsResponse, DuplicatePackageResponse, EnsureCustomizationPackageRequest, EnsureCustomizationPackageResponse, GetPackageCustomizationsRequest, GetPackageCustomizationsResponse, ImportUnmanagedPackageRequest, ImportUnmanagedPackageResponse, ListPackageCommitsResponse, MoveIntoPackageItem, MoveIntoPackageMovedItem, MoveIntoPackageRefusedItem, MoveIntoPackageRequest, MoveIntoPackageResponse, PackageExportBundle, PackageExportManifest, PackagePublishResult, ReassignOrphanedMetadataResponse, RevertPackageCommitResponse, RollbackToPackageCommitResponse } from '@objectstack/spec/api';
 
 // Validate data
 const result = DiscardPackageDraftsResponseSchema.parse(data);
@@ -315,6 +315,128 @@ A navigation item another installed package contributes to an app the base owns,
 | **itemCount** | `number` | ✅ | How many items the commit touched. |
 | **items** | `{ type: string; name: string; member?: string; existedBefore: boolean; … }[]` | ✅ | The items the commit touched. |
 | **createdAt** | `string` | optional | When the commit was made (ISO-8601 string), when recorded. |
+
+
+---
+
+## MoveIntoPackageItem
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the loose item (singular, e.g. `flow`, `dataset`, `object`). |
+| **name** | `string` | ✅ | Machine name of the loose item. |
+| **member** | `string` | optional | The bundle member to move, for a bundled type (an email template's locale). Omitted, the canonical member. |
+
+
+---
+
+## MoveIntoPackageMovedItem
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the moved item. |
+| **name** | `string` | ✅ | Name of the moved item; a move never renames. |
+| **member** | `string` | optional | The bundle member moved, for a bundled type. |
+| **states** | `Enum<'active' \| 'draft'>[]` | ✅ | Which of the item's rows moved: its published row, its pending draft, or both. |
+| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
+| **qualifiedAddress** | `string` | optional | The package-qualified address the item answers at after the move (`NAMESPACE/NAME`), present beside `environmentAddress`. |
+| **aiFaceName** | `{ before: string; after: string }` | optional | The AI face name change (ADR-0150 D6), present for a tool, skill, agent or object-less action whose face the move changes. |
+
+### Nested Shape: `MoveIntoPackageMovedItem.aiFaceName`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **before** | `string` | ✅ | The name AI clients listed the item under before the move. |
+| **after** | `string` | ✅ | The name AI clients list it under after the move. |
+
+
+---
+
+## MoveIntoPackageRefusedItem
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the refused item. |
+| **name** | `string` | ✅ | Name of the refused item. |
+| **member** | `string` | optional | The bundle member, for a bundled type. |
+| **code** | `string` | ✅ | The refusal's code: the save door's own (`WRITABLE_PACKAGE_REQUIRED`, `NAMESPACE_PREFIX`, …), `NOT_LOOSE` for an item bound to a package or not found, or `REFERENCE_LEFT_BEHIND` for an item that names a loose item the selection leaves behind. |
+| **error** | `string` | ✅ | What refused the item and what to do. |
+| **references** | `{ type: string; name: string }[]` | optional | For `REFERENCE_LEFT_BEHIND`: every loose item this item names that the selection leaves behind. Adding them to the selection moves them together. |
+
+### Nested Shape: `MoveIntoPackageRefusedItem.references[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the loose item left behind. |
+| **name** | `string` | ✅ | Name of the loose item left behind. |
+
+
+---
+
+## MoveIntoPackageRequest
+
+Body of `POST /packages/:id/move-in`: the selection of loose items to move into the package the path names.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **items** | `{ type: string; name: string; member?: string }[]` | ✅ | The loose items to move: one, several, or every loose item of a type, across types. Each names an item bound to no package; an item a package holds, a customization pair item and an overlay of a shipped item are not loose and are refused. Listed once each. |
+| **dryRun** | `boolean` | optional | Judge the move and answer what it would do, writing nothing. Omitted or false, the move is made. |
+
+### Nested Shape: `MoveIntoPackageRequest.items[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the loose item (singular, e.g. `flow`, `dataset`, `object`). |
+| **name** | `string` | ✅ | Machine name of the loose item. |
+| **member** | `string` | optional | The bundle member to move, for a bundled type (an email template's locale). Omitted, the canonical member. |
+
+
+---
+
+## MoveIntoPackageResponse
+
+Answer of the move door: what moved (or would move) and what each moved item's addresses become, or every refusal with nothing moved.
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **outcome** | `Enum<'moved' \| 'would_move' \| 'refused'>` | ✅ | `moved`: every item moved. `would_move`: a dry run that would move every item; nothing was written. `refused`: at least one item is refused, so nothing moved. |
+| **targetPackageId** | `string` | ✅ | The package the items move into. |
+| **moved** | `{ type: string; name: string; member?: string; states: Enum<'active' \| 'draft'>[]; … }[]` | ✅ | Every item, with what the move changes in its addresses. Empty on `refused`. |
+| **refused** | `{ type: string; name: string; member?: string; code: string; … }[]` | ✅ | Every refused item, each with its own code. Empty unless `outcome` is `refused`. |
+| **commitId** | `string` | optional | The package commit the move recorded (absent on a dry run or a refusal). |
+
+### Nested Shape: `MoveIntoPackageResponse.moved[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the moved item. |
+| **name** | `string` | ✅ | Name of the moved item; a move never renames. |
+| **member** | `string` | optional | The bundle member moved, for a bundled type. |
+| **states** | `Enum<'active' \| 'draft'>[]` | ✅ | Which of the item's rows moved: its published row, its pending draft, or both. |
+| **environmentAddress** | `string` | optional | The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at `qualifiedAddress` and, while it is the only holder of its name, at its bare name. |
+| **qualifiedAddress** | `string` | optional | The package-qualified address the item answers at after the move (`NAMESPACE/NAME`), present beside `environmentAddress`. |
+| **aiFaceName** | `{ before: string; after: string }` | optional | The AI face name change (ADR-0150 D6), present for a tool, skill, agent or object-less action whose face the move changes. |
+
+### Nested Shape: `MoveIntoPackageResponse.refused[number]`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **type** | `string` | ✅ | Metadata type of the refused item. |
+| **name** | `string` | ✅ | Name of the refused item. |
+| **member** | `string` | optional | The bundle member, for a bundled type. |
+| **code** | `string` | ✅ | The refusal's code: the save door's own (`WRITABLE_PACKAGE_REQUIRED`, `NAMESPACE_PREFIX`, …), `NOT_LOOSE` for an item bound to a package or not found, or `REFERENCE_LEFT_BEHIND` for an item that names a loose item the selection leaves behind. |
+| **error** | `string` | ✅ | What refused the item and what to do. |
+| **references** | `{ type: string; name: string }[]` | optional | For `REFERENCE_LEFT_BEHIND`: every loose item this item names that the selection leaves behind. Adding them to the selection moves them together. |
 
 
 ---

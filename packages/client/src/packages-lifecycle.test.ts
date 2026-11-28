@@ -43,6 +43,7 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
         ['discardDrafts', (c: ObjectStackClient) => c.packages.discardDrafts('p1', { actor: 'admin' }), 'POST', `${BASE}/p1/discard-drafts`, { actor: 'admin' }],
         ['revert',        (c: ObjectStackClient) => c.packages.revert('p1'),                  'POST', `${BASE}/p1/revert`, undefined],
         ['adoptOrphans',  (c: ObjectStackClient) => c.packages.adoptOrphans('p1'),            'POST', `${BASE}/p1/adopt-orphans`, {}],
+        ['moveIn',        (c: ObjectStackClient) => c.packages.moveIn('p1', { items: [{ type: 'flow', name: 'f' }], dryRun: true }), 'POST', `${BASE}/p1/move-in`, { items: [{ type: 'flow', name: 'f' }], dryRun: true }],
     ] as const)('%s hits its lifecycle route', async (_name, call, method, url, expectedBody) => {
         const { client, fetchMock } = createMockClient({ success: true, data: { ok: true } });
         await call(client);
