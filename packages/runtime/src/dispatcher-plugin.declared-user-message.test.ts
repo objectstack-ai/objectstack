@@ -508,3 +508,173 @@ describe('[#37828] the dispatcher throw-transparent exit: a userMessage varies b
         expect(varyWrites(res)).toEqual([]);
     });
 });
+
+/**
+ * [#38123] The RETURNED exit (`sendResultBase`) asks #37828's rule of the body
+ * it sends. A domain that catches its own fault composes the answer and RETURNS
+ * it, so it never reaches the throw-transparent exit above: every producer of a
+ * returned `userMessage` leaves through the plugin's `sendResult`, and each is
+ * driven here through its REAL mounted route:
+ *
+ *  - `errorFromThrown`: `POST /automation/_record-starts`, whose catch hands the
+ *    `/data` read's throw over; the throw is the real `recordNotFoundError` with
+ *    the caller's own context, so its sentence follows `Accept-Language`;
+ *  - `deps.error` carrying a `userMessage`: the resume door's `FLOW_FAILED`
+ *    (`POST /automation/:name/runs/:runId/resume`, ruling B′ on #24914);
+ *  - the trigger door's `FLOW_FAILED` (`POST /automation/:name/trigger`);
+ *  - the `/actions` door (`POST /actions/:object/:action`, a flow action);
+ *  - the dispatch foot's `PERMISSION_DENIED` 403, answered with its mark.
+ *
+ * Each case reads the one `Vary` write, in the contract's multi-value form (the
+ * form the hosts APPEND), written after every other header the answer carries;
+ * each producer's unmarked answer writes none.
+ */
+describe('[#38123] the dispatcher RETURNED exit: a userMessage varies by Accept-Language', () => {
+    let errSpy: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => { errSpy = vi.spyOn(console, 'error').mockImplementation(() => {}); });
+    afterEach(() => { errSpy.mockRestore(); });
+
+    const varyWrites = (res: any) => res.headers.filter(([name]: [string]) => name.toLowerCase() === 'vary');
+    /** The Vary write is the LAST header written: nothing after it can replace it. */
+    const lastHeaderName = (res: any) => res.headers[res.headers.length - 1]?.[0];
+
+    const FLOW = 'crm_convert_lead_wizard';
+    const MARK = '该客户名称已被另一位销售代表占用，请联系主管。';
+    const failed = (mark?: string) => ({
+        success: false, status: 'failed', error: `Node 'create_account' failed`, durationMs: 9,
+        ...(mark !== undefined ? { userMessage: mark } : {}),
+    });
+
+    /**
+     * One kernel serving the routes above, from one scripted engine and one
+     * `/data` read that refuses every id with the protocol's own error.
+     */
+    async function mount(result: Record<string, unknown>) {
+        const { server, handlers } = makeFakeServer();
+        const automation = {
+            handlerReady: true,
+            execute: vi.fn(async () => result),
+            resume: vi.fn(async () => ({ ...result, status: 'stranded' })),
+            getFlow: vi.fn(async (name: string) => (name === FLOW ? { name } : null)),
+            listRecordUpdateStarts: vi.fn(() => []),
+        };
+        const flowAction = { name: 'convert_lead', label: 'Convert Lead', objectName: 'crm_lead', type: 'flow', target: FLOW };
+        const objects: Record<string, any> = {
+            crm_lead: { name: 'crm_lead', actions: [flowAction], fields: { status: {} } },
+        };
+        const objectql: any = {
+            executeAction: vi.fn(),
+            getSchema: (n: string) => objects[n],
+            registry: { getObject: (n: string) => objects[n], getItem: () => undefined },
+            find: vi.fn(async () => []),
+            insert: vi.fn(), update: vi.fn(), delete: vi.fn(),
+        };
+        const metadata: any = {
+            load: vi.fn(async () => null),
+            loadDiagnosed: vi.fn(async () => ({ data: null, degraded: false, errors: [] })),
+            listObjects: vi.fn(async () => Object.values(objects)),
+            getObject: vi.fn(async (n: string) => objects[n]),
+        };
+        const protocol = { getData: vi.fn(async ({ object, id, context }: any) => { throw recordNotFoundError(object, id, context); }) };
+        const services: Record<string, unknown> = { automation, objectql, data: objectql, metadata, protocol, auth: SIGNED_IN_AUTH };
+        const resolve = (name: string) => services[name];
+        const kernel = { getService: resolve, getServiceAsync: async (name: string) => resolve(name), context: { getService: resolve } };
+        const plugin = createDispatcherPlugin({ prefix: '/api/v1', securityHeaders: false });
+        await plugin.start?.({
+            getKernel: () => kernel,
+            getService: (name: string) => (name === 'http.server' ? server : undefined),
+            environmentId: undefined,
+            logger: { info() {}, warn() {}, error() {}, debug() {} },
+            hook: () => {},
+            on: () => {},
+        } as any);
+        return async (route: string, params: Record<string, string>, body: unknown, lang = 'en') => {
+            const handler = handlers[`POST /api/v1${route}`];
+            expect(handler, `POST /api/v1${route} must be mounted`).toBeTypeOf('function');
+            const res = makeRes();
+            await handler({ body, query: {}, params, headers: { 'accept-language': lang } }, res);
+            return res;
+        };
+    }
+
+    const RECORD_STARTS = { object: 'crm_lead', recordId: 'l_nowhere', changes: { status: 'won' } };
+
+    describe('errorFromThrown — the record-update preview refusing an id the caller cannot read', () => {
+        const SENTENCES: Array<[string, string]> = [
+            ['en', 'This record does not exist, or you do not have access to it.'],
+            ['zh-CN', '该记录不存在，或您无权访问它。'],
+            ['ja-JP', 'このレコードは存在しないか、アクセスする権限がありません。'],
+        ];
+        for (const [lang, sentence] of SENTENCES) {
+            it(`${lang}: 404 RECORD_NOT_FOUND in that language, and Vary: Accept-Language appended last`, async () => {
+                const send = await mount(failed());
+                const res = await send('/automation/_record-starts', {}, RECORD_STARTS, lang);
+                expect(res.statusCode).toBe(404);
+                expect(res.body.error.code).toBe('RECORD_NOT_FOUND');
+                expect(res.body.error.userMessage).toBe(sentence);
+                expect(varyWrites(res)).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+                expect(lastHeaderName(res)).toBe('Vary');
+            });
+        }
+
+        it('CONTROL the same route\'s unmarked 400 VALIDATION_FAILED writes no Vary', async () => {
+            const send = await mount(failed());
+            const res = await send('/automation/_record-starts', {}, { object: 'crm_lead', recordId: 'l_nowhere' }, 'zh-CN');
+            expect(res.statusCode).toBe(400);
+            expect(res.body.error.code).toBe('VALIDATION_FAILED');
+            expectNoUserMessageAnywhere(res);
+            expect(varyWrites(res)).toEqual([]);
+        });
+    });
+
+    /** Each door's MOUNTED route pattern, and the params its handler reads. */
+    const FLOW_DOORS: Array<[string, string, Record<string, string>]> = [
+        ['deps.error with a userMessage — the resume door', '/automation/:name/runs/:runId/resume', { name: FLOW, runId: 'run_1' }],
+        ['the trigger door', '/automation/:name/trigger', { name: FLOW }],
+        ['the /actions door', '/actions/:object/:action', { object: 'crm_lead', action: 'convert_lead' }],
+    ];
+    for (const [door, route, params] of FLOW_DOORS) {
+        describe(`${door}: 400 FLOW_FAILED`, () => {
+            it('marked: the userMessage on the wire, and Vary: Accept-Language appended last', async () => {
+                const send = await mount(failed(MARK));
+                const res = await send(route, params, {});
+                expect(res.statusCode).toBe(400);
+                expect(res.body.error.code).toBe('FLOW_FAILED');
+                expect(res.body.error.userMessage).toBe(MARK);
+                expect(varyWrites(res)).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+                expect(lastHeaderName(res)).toBe('Vary');
+            });
+
+            it('CONTROL unmarked: no userMessage, no Vary', async () => {
+                const send = await mount(failed());
+                const res = await send(route, params, {});
+                expect(res.statusCode).toBe(400);
+                expect(res.body.error.code).toBe('FLOW_FAILED');
+                expectNoUserMessageAnywhere(res);
+                expect(varyWrites(res)).toEqual([]);
+            });
+        });
+    }
+
+    describe('the dispatch foot\'s PERMISSION_DENIED 403', () => {
+        it('marked: the userMessage on the wire, and Vary: Accept-Language appended last', async () => {
+            const res = await throwFromAnalyticsQuery(
+                declaring({ status: 403, code: 'PERMISSION_DENIED', userMessage: 'Ask an admin for the Reporting role.' }, 'principal lacks cube_read on pipeline'),
+            );
+            expect(res.statusCode).toBe(403);
+            expect(res.body.error.code).toBe('PERMISSION_DENIED');
+            expect(res.body.error.userMessage).toBe('Ask an admin for the Reporting role.');
+            expect(varyWrites(res)).toEqual([['Vary', [LOCALIZED_ANSWER_VARY]]]);
+            expect(lastHeaderName(res)).toBe('Vary');
+        });
+
+        it('CONTROL unmarked: no userMessage, no Vary', async () => {
+            const res = await throwFromAnalyticsQuery(
+                declaring({ status: 403, code: 'PERMISSION_DENIED' }, 'principal lacks cube_read on pipeline'),
+            );
+            expect(res.statusCode).toBe(403);
+            expectNoUserMessageAnywhere(res);
+            expect(varyWrites(res)).toEqual([]);
+        });
+    });
+});

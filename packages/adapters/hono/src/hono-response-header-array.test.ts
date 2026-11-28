@@ -16,8 +16,9 @@
  * real door produces.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import type { Hono } from 'hono';
+import { LOCALIZED_ANSWER_VARY } from '@objectstack/types';
 
 const mockDispatcher = {
   getDiscoveryInfo: vi.fn().mockReturnValue({ version: '1.0', routes: {} }),
@@ -100,5 +101,87 @@ describe('#27506: a string[] header value is one header line per element', () =>
     expect(res.status).toBe(200);
     expect(setCookieLines(res)).toEqual(COOKIES);
     expect(res.headers.get('x-one')).toBe('line');
+  });
+});
+
+/**
+ * [#38123] `toResponse`'s `response` arm asks #37828's rule of the body it
+ * sends: an answer a dispatcher domain caught and composed itself never reaches
+ * `thrownJson`, and a `userMessage` in its body is in the caller's language.
+ *
+ * Each row is the nested ADR-0112 body one of the dispatcher's returning
+ * producers composes, written out because this package's `@objectstack/runtime`
+ * is a stub (the real producers are driven through their mounted routes in
+ * `@objectstack/runtime`'s `dispatcher-plugin.declared-user-message.test.ts`):
+ * `errorFromThrown` over the real `recordNotFoundError` for a zh-CN caller, the
+ * resume door's `deps.error` and the `/actions` door's `FLOW_FAILED` with an
+ * app hook's mark, and the dispatch foot's marked `PERMISSION_DENIED`.
+ */
+describe('[#38123] the returned answer: a userMessage varies by Accept-Language', () => {
+  const ORIG_CORS_ORIGIN = process.env.OS_CORS_ORIGIN;
+  afterAll(() => {
+    if (ORIG_CORS_ORIGIN === undefined) delete process.env.OS_CORS_ORIGIN;
+    else process.env.OS_CORS_ORIGIN = ORIG_CORS_ORIGIN;
+  });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockDispatcher.handleAuth.mockResolvedValue({ handled: false });
+  });
+
+  const MARK = '该客户名称已被另一位销售代表占用，请联系主管。';
+  const refusal = (status: number, code: string, message: string, userMessage?: string) => ({
+    handled: true,
+    response: {
+      status,
+      body: { success: false, error: { code, message, httpStatus: status, ...(userMessage !== undefined ? { userMessage } : {}) } },
+    },
+  });
+  const PRODUCERS: Array<[string, number, string, string, string]> = [
+    ['errorFromThrown', 404, 'RECORD_NOT_FOUND', 'Record l_nowhere not found in crm_lead', '该记录不存在，或您无权访问它。'],
+    ['deps.error, the resume door', 400, 'FLOW_FAILED', "Node 'create_account' failed", MARK],
+    ['the /actions door', 400, 'FLOW_FAILED', "Flow 'crm_convert_lead_wizard' failed", MARK],
+    ['the dispatch foot', 403, 'PERMISSION_DENIED', 'principal lacks cube_read on pipeline', 'Ask an admin for the Reporting role.'],
+  ];
+  const varyTokens = (res: Response): string[] =>
+    (res.headers.get('vary') ?? '').split(',').map((token) => token.trim()).filter(Boolean);
+  const noCors = (): Hono => createHonoApp({ kernel, prefix: PREFIX, cors: false });
+
+  for (const [producer, status, code, message, mark] of PRODUCERS) {
+    it(`${producer}: ${status} ${code} with its userMessage on the wire, and Vary: Accept-Language`, async () => {
+      mockDispatcher.dispatch.mockResolvedValueOnce(refusal(status, code, message, mark));
+      const res = await noCors().request(`http://localhost${PATH}`, { method: 'POST', headers: { 'Accept-Language': 'zh-CN' } });
+      const body = await res.json() as any;
+      expect(res.status, JSON.stringify(body)).toBe(status);
+      expect(body.error.code).toBe(code);
+      expect(body.error.userMessage).toBe(mark);
+      expect(varyTokens(res)).toEqual([LOCALIZED_ANSWER_VARY]);
+    });
+
+    it(`CONTROL ${producer}: the unmarked ${status} gets no Vary`, async () => {
+      mockDispatcher.dispatch.mockResolvedValueOnce(refusal(status, code, message));
+      const res = await noCors().request(`http://localhost${PATH}`, { method: 'POST' });
+      expect(res.status).toBe(status);
+      expect(res.headers.get('vary')).toBeNull();
+    });
+  }
+
+  it('appended, not set: a Vary the route wrote keeps its token beside Accept-Language', async () => {
+    const answer = refusal(404, 'RECORD_NOT_FOUND', 'Record l_nowhere not found in crm_lead', '该记录不存在，或您无权访问它。');
+    mockDispatcher.dispatch.mockResolvedValueOnce({ ...answer, response: { ...answer.response, headers: { Vary: 'Accept-Encoding' } } });
+    const res = await noCors().request(`http://localhost${PATH}`, { method: 'POST' });
+    expect(res.status).toBe(404);
+    expect(varyTokens(res)).toEqual(['Accept-Encoding', LOCALIZED_ANSWER_VARY]);
+  });
+
+  it('appended, not set: with CORS on, Origin keeps its place beside Accept-Language', async () => {
+    process.env.OS_CORS_ORIGIN = 'https://app.example.com';
+    mockDispatcher.dispatch.mockResolvedValueOnce(refusal(404, 'RECORD_NOT_FOUND', 'Record l_nowhere not found in crm_lead', '该记录不存在，或您无权访问它。'));
+    const res = await createHonoApp({ kernel, prefix: PREFIX }).request(`http://localhost${PATH}`, {
+      method: 'POST',
+      headers: { Origin: 'https://app.example.com' },
+    });
+    expect(res.status).toBe(404);
+    expect(varyTokens(res)).toContain(LOCALIZED_ANSWER_VARY);
+    expect(varyTokens(res)).toContain('Origin');
   });
 });

@@ -854,6 +854,15 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
         if (result.response.headers) {
           Object.entries(result.response.headers).forEach(([k, v]) => setResponseHeader(c, k, v));
         }
+        // [#38123] The RETURNED answer's half of #37828's rule: an answer a
+        // dispatcher domain caught and composed itself (`errorFromThrown`, a
+        // `deps.error` carrying a `userMessage`, the `/actions` door) never
+        // reaches `thrownJson`. A `userMessage` in its body is in the caller's
+        // language, so the answer varies by `Accept-Language`
+        // (`answerVariesByLanguage`, `@objectstack/types`). Appended after the
+        // dispatcher's own headers, so CORS's `Vary: Origin` and a route's own
+        // `Vary` keep their tokens.
+        if (answerVariesByLanguage(result.response.body)) c.header('Vary', LOCALIZED_ANSWER_VARY, { append: true });
         return c.json(result.response.body, result.response.status);
       }
       if (result.result) {
