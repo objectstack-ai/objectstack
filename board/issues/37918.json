@@ -2,8 +2,8 @@
   "number": 37918,
   "kind": "issue",
   "title": "App Studio 改版（2-1）：列表页照前端样式——标题行加「新建」，工具栏只留来源下拉和搜索，表格铺满、名称列业务名在上接口名在下；只读包的「新建」带说明（并入 #37580）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,7 +13,6 @@
   "labels": [
     "area:ux",
     "enhancement",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -22,11 +21,15 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T11:20:06Z",
-  "updated_at": "2026-11-27T14:29:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T00:44:17Z",
+  "closed_at": "2026-11-28T00:43:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 6,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37918",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibzywxH36FPH6ayWMUe\n\nFiling gate: ③ · Source: topic #37424 (the maintainer's decision 7, \"List page\", and decision 8, \"Read-only hint\", in its body; the topic was taken over by seat repo:objectstack#3, comment 7216856007, on the maintainer's words 「开一个专区，继续 studio 专题」 and 「开区，studio 并发5」, 2026-11-27). Sub-issue of #37424 (phase 2). It folds #37580 with that card's premise corrected (see \"Folded\" below).\nGrade: area:ux · Feature · p2 · evidence: read on origin/main c3da7536 — the Studio list in `ui/packages/app-shell/src/views/metadata-admin/ResourceListPage.tsx` still draws the layout decision 7 retires, and the New button carries no read-only hint.\nReader: zone `o3-studio` (seat repo:objectstack#3), one `os-dev`.\nDedupe: open and closed cards searched for `ResourceListPage` and \"列表页\" under #37424: #37580 (folded here), no other.\n\n## 维护者速读\n\n- 用户能看到什么变化：App Studio 里每类元数据的列表页照前端改。标题行放类型图标、名称、「新建 X」和帮助；下面一行工具栏只有来源下拉（全部 / 已修改和新建 / 系统自带）和搜索。去掉面包屑、数字卡片、刷新按钮和排序下拉，点列头排序。表格铺满不加外框，名称列先显示业务名、接口名小字在下，带对象自己的图标和颜色。来源标签是「系统自带 / 已修改 / 新建」。\n- 只读软件包里的「新建」：实测主干上它不是「能点、点了被拒」。没有配对的 `.custom` 包时按钮本来就不画；有配对时按钮可用，是有意的，新建的东西进 `.custom` 包。所以这张卡不把它置灰，而是按决定 8 给它加一句悬停说明，说清东西会建到哪里。\n- 需要你做的：无。\n\n## What (the maintainer's decision 7, verbatim from #37424)\n\n> 7. **List page.**\n>    - The title row holds the type icon, the name, \"New X\" and help.\n>    - The toolbar holds a source dropdown (all / modified and new / system-shipped) and a search box.\n>    - Gone: the breadcrumb, the stat tiles, the refresh button and the sort dropdown. Sorting is by column header.\n>    - The table is full-bleed with no outer frame. The name column shows the item's own icon and colour (object `icon` and `color` are declared in spec), the label as the primary line and the API name small and mono below. Numbers are right-aligned.\n>    - \"Modified at\" and \"Source\" hide when every row shows the same value. The plural label column is removed from the object list.\n>    - Source badges read 系统自带 / 已修改 / 新建.\n\nand decision 8, verbatim: \"**Read-only hint.** A lock beside the app name in the switcher row, plus a tooltip on \\\"New\\\". There is no per-list banner.\" The lock shipped with #37456; the tooltip on New is this card's.\n\n- Scope: the list as the App Studio area draws it (the area host is present). Setup's list (`useInSetupApp`) and the cross-package directory keep their own headers; where a change is shared code, the PR names what each of the other two draws after it and why.\n- The target look is the topic's mockups 1 and 2 (#37424 comment 7181963746; branch `claude/app-studio-mockups-37424`, commit `602c200913dae36f6a539f73aa9fbc5cdc3502ce`, `docs/design/app-studio/Main.png` and `WithCustom.png`; sample data).\n- Every string the user reads is an i18n key with en and zh.\n\n## Folded: #37580, premise corrected\n\n#37580 says that on a read-only package the list's New \"stays enabled\" and should be disabled with a tooltip. Read on origin/main c3da7536, that premise does not hold:\n- `ResourceListPage.tsx`: `canCreateHere` requires `(!host?.readOnly || createInPair)`, and the button is drawn only when `canCreate` holds. On a read-only package without a pair, New is not drawn at all.\n- `createInPair = !!host?.readOnly && host.pairCreate === true`; `StudioMetadataArea.tsx` sets `pairCreate = readOnly && !kernel && !!customization && !customization.walled`. Where it holds, New is enabled on purpose and creates into the base's `.custom` pair (ADR-0146 D3; #36897).\n\nSo the target stays (decision 8's hint on New) and the fix changes: on a read-only base where New creates into the pair, New gets a tooltip that says the package is read-only and the new item goes to its `.custom` package. Today's `engine.studio.pkg.readonlyHint` (\"switch to or create a writable package to edit\") contradicts that path, so a new en+zh key is expected; the PR names it. New is not disabled. Writable packages are unchanged.\n\n## Acceptance\n\n- Each line of decision 7 is met and tested in the Studio area list; each removed element (breadcrumb, stat tiles, refresh, sort dropdown) is asserted absent there.\n- \"Modified at\" and \"Source\" hide when every row has the same value, and show otherwise (tested both ways).\n- On a read-only base with a pair, New is enabled and its tooltip names the read-only package and the pair (tested, with an ablation that goes red). On a writable package, New and its behaviour are as today (tested).\n- Light and dark screenshots of an all-system-shipped list and a list with modified and new rows, on the PR."

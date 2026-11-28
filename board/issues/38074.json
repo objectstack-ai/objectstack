@@ -1,0 +1,34 @@
+{
+  "number": 38074,
+  "kind": "issue",
+  "title": ".claude/settings.json: allow a cloud seat to create and push its own mailbox branch (`claude/mailbox-*`), so an auto-mode seat can sit without a manual mode switch",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:skills",
+    "pm:dispatched",
+    "priority:p2",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T01:14:33Z",
+  "updated_at": "2026-11-28T01:41:12Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38074",
+  "body": "security#2 · sunhaolin · session_017xRBcW9L8Noz9BxEwjwiov\n\nFiling gate ③ (maintainer direct dispatch) · Source: maintainer — verbatim in the security#2 session on 2026-11-28: 「在仓库的 .claude/settings.json 里加一条允许规则再提交。立卡」, then 「立卡并派发」.\n\n## Problem\n\nA cloud seat opens its mailbox with `scripts/pm/mailbox-open.mjs --head claude/mailbox-<slug>`. The relay has no ref-creating op, so the seat must first create one empty commit on `origin/main` and push it to `claude/mailbox-<slug>` itself. `mailbox-open.mjs` says this when it refuses.\n\nIn an auto-mode cloud session, no allow rule covers that commit or that push. On 2026-11-28 the auto-mode classifier denied the push from the security#2 seat three times (`[Destructive or Unwanted Actions]`). One of those denials came after the maintainer had approved it in chat. The seat could only sit after the maintainer switched the session out of Auto mode.\n\n`.claude/settings.json` already allows the card-branch forms (#35443): `Bash(git commit -F *)` and `Bash(git push -u origin claude/issue-*)`. Mailbox branches have no equivalent.\n\n## What to change\n\n`.claude/settings.json`, following the shape #35443 used:\n\n- **`permissions.allow`** gains two rules:\n  - `Bash(git commit --allow-empty -F *)`\n  - `Bash(git push -u origin claude/mailbox-*)`\n- **`permissions.ask`** gains three guards, so that only the bare forms run without approval:\n  - `Bash(git commit --allow-empty -F * *)`\n  - `Bash(git push -u origin claude/mailbox-* *)`\n  - `Bash(git push -u origin claude/mailbox-*:*)`\n- **`scripts/pm/mailbox-open.mjs`:** where it refuses a cloud seat, its message names exactly these three commands, one per line, so a seat copies them straight into the allowed forms. Keep the existing `--head` instruction.\n  - `git switch -c claude/mailbox-<slug> origin/main`\n  - `git commit --allow-empty -F FILE`\n  - `git push -u origin claude/mailbox-<slug>`\n\nUnchanged:\n\n- the `deny` roster;\n- `main`'s ruleset;\n- the hooks, including `check:commit-card-trailers`, which still judges the mailbox commit's trailer pair.\n\n## Acceptance\n\n- `node scripts/pm/check-settings-deny-roster.mjs` passes, and the file parses as JSON.\n- The PR body lists what runs without approval and what still asks, as #35443 did.\n- `mailbox-open.mjs --self-test` (or its existing tests) passes with the reworded refusal pinned.\n\n## Business reason\n\nWho benefits: every cloud PM seat. Each seat opens one mailbox per tenure, and at present, in Auto mode, that step needs the account owner present to switch modes. Without this change a seat summoned in Auto mode stalls half-seated, or the owner has to babysit the step.\n\n## Reader\n\n- **Dispatched by:** security#2, by the maintainer's direct order above, to one os-dev as `mode:subagent`.\n- **Size:** S. **Tier:** H (governed `.claude/**` surface).\n- **Merge:** the maintainer merges it himself, as with #35443.\n\n## Dedupe\n\nSearched open and closed cards for `settings.json allow`: 66 hits, none on mailbox branches. The nearest are #35443 (card branches, merged), #23860 and #23432 (other allow rows, closed). Searched for `mailbox branch push denied`: no open card on this."
+}

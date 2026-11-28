@@ -1,0 +1,33 @@
+{
+  "number": 38096,
+  "kind": "pull_request",
+  "title": "fix(lint): refuse a lookupFilters $record path to a structured field",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:12:19Z",
+  "updated_at": "2026-11-28T02:19:59Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38096",
+  "body": "Fixes #34562\n\nClause-②: no\nMetadata-protocol: narrowed\nSkills-docs: none — no page under `skills/` teaches a `$record` path to a structured field (the two `$record` samples in `skills/objectstack-data/rules/field-types.md` read a date and a lookup hop to a select)\n\n## 维护者速读\n\n- 用户能看到什么变化：元数据作者在查找字段的过滤条件里，把\"取当前记录的值\"指向地址、JSON、重复组这类结构型字段时，校验会直接报错并给出改法；用户界面无变化。\n- 为什么做：延续上一张\"多值字段不能作单值比较\"的修复，结构型字段同样没有单个可比较的值，以前校验放行、过滤看似生效实则不生效。\n- 出错会怎样：最坏情况是作者原本能保存的这类写法现在被拒，需要改指向单值字段；撤回本改动即可恢复放行。\n- 要你做什么：无。\n\n## What changes\n\n`object-field-ref-unknown`, position `lookupFilters[N].value.$record`: a path whose HEAD (a plain path) or LEAF (behind one single-valued relationship hop) is a structured field is now refused, beside the multi-valued refusal and with the same hint (`singleValuedPrescription`, unchanged). The set is `STRUCTURED_JSON_TYPES` imported from `@objectstack/spec/data`, never re-listed. The verdict names it `a structured field`; the multi-valued verdict text is byte-identical.\n\nA hop THROUGH a structured head (`s_address.city`) was already refused as the family's \"not a relationship\" miss and still is, once (pinned).\n\nFiles: `packages/lint/src/validate-object-field-refs.ts`, `packages/lint/src/validate-object-field-refs.test.ts`, `.changeset/34562-record-structural-lint.md`.\n\nRead first (by risk):\n1. `validate-object-field-refs.ts`, `multiValuedSegment` — the predicate now returns the noun (`what`); multi-valued is tested first so its findings keep their wording.\n2. `validate-object-field-refs.ts`, the `singleValued` refusal block — the message interpolates `what`.\n3. The new `describe('a path to a structured field (#34562)')` block in the test file.\n\n## Tests\n\n- New block beside the multi-valued block: `it.each` over every member of `STRUCTURED_JSON_TYPES` at the head and at the leaf (14 cases), each asserting the rule id, the full message and the full hint text; a coverage case that the five the card names are members; a CONTROL case (scalar head and leaf beside the structured fields) that stays clean; the hop-through case.\n- Red without the fix: restoring the source file to the merge base turns exactly the 14 head/leaf cases red (`Tests 14 failed | 134 passed (148)`), control, coverage and hop-through stay green; restored.\n\n## Acceptance notes\n\n- `composite` and `record` (in the spec set, not in the card's five) are kept: `composite` values parse as `z.record(z.string(), z.unknown())` (`field-value.zod.ts`), `record` is a name-keyed map of sub-objects (`field.zod.ts`), and `filter-cross-field-comparison-class.ts` already classes the whole `STRUCTURED_JSON_TYPES` set as `list-or-object`, no comparison class. Neither has a scalar value.\n- The hint is the multi-valued one verbatim (\"a multi-valued field holds a list\"), per the ruling; it reads slightly off for an object-valued field. Not reworded here.\n- The verdict says `a structured field`, not `a structured TYPE field`: the type-named form put two fixture verdicts over the file's 200-character one-line ceiling.\n- Measured first-party exposure, `git grep -n '\\$record' origin/main -- examples packages/platform-objects packages/plugins skills` at 815e882b: 18 hits, zero `lookupFilters` `$record` paths to a structured field (the two lookup-filter hits are the skills samples above; the rest are flow `$record` variables in plugin-approvals).\n- OPEN, two gaps this PR cannot close inside its file surface:\n  1. `check-adr-0087-registration` is red by design: a `Metadata-protocol: narrowed` changeset needs a semantic ledger entry under `packages/spec/src/migrations/entries/semantic/` (the sibling of `18.lookup-filter-record-path-multi-valued-refused.ts`) and the marker `adr-0087: registered ID`; `no-migration-prescription` is refused on a narrowing. That directory is outside this card's file surface.\n  2. `Clause-②: no` beside `Metadata-protocol: narrowed` is a `contradiction` in `check-changeset-no-major.mjs` (narrowed needs the `(narrowing)` arm, as the predecessor PR declared `Clause-②: no (narrowing)`). Both lines are copied from the claim verbatim; the seat owns the correction.\n\n## Verification\n\nTwo-minute check: `pnpm --filter @objectstack/lint exec vitest run src/validate-object-field-refs.test.ts -t \"structured field\"` — expect 17 passing tests.\n\n<details><summary>Readings at head 9c2f41e6</summary>\n\n- `pnpm --filter @objectstack/lint typecheck && pnpm --filter @objectstack/lint test`: exit 0, `Test Files 243 passed (243)`, `Tests 9824 passed | 5 skipped (9829)` (taken at 5909b7ea; later commits touch only the changeset).\n- Derived gate list (`dispatch-gates.mjs --commands`): 61 families run locally. Red: `check-adr-0087-registration` (gap 1 above). NOT MEASURED: `check-plugin-teardown-shape --self-test` (shallow clone), `check:dual-build-cjs-loads` and `check:lean-entry-closure` (need a full build), `check:query-options-erasure` and `check:type-check-debt` (300 s local timeout); CI runs them. `check:docs-transcript-drift` green after building lint; `check:nul-bytes` green. Every other family exit 0.\n\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_017xRBcSAaBEfQpU2yJexSJ8)_\n"
+}

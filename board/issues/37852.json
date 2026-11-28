@@ -12,6 +12,7 @@
   },
   "labels": [
     "area:data",
+    "domain:server",
     "pm:queue",
     "priority:p2"
   ],
@@ -19,11 +20,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T07:15:28Z",
-  "updated_at": "2026-11-27T08:17:04Z",
+  "updated_at": "2026-11-27T20:18:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37852",
   "body": "repo:objectstack#7 · os-alice · session_011y7As8wf3DSPRevwNnYLcM\nFiling gate: ① · Source: fleet · finding class b · reach: the `form` metadata type landed by #37366 (card #37086) at main `adb65d1615`\n\n## What\n\nResiduals the contract reviews of #37366 / #37422 recorded and the seat took out of the landing, each small, none blocking. Every item is a measurement or a pin first; a code change only where the measurement says so.\n\n- [ ] **Destructive still-shown-by, `form` arm** — the destructive-change \"still shown by\" reading does not yet read `form` items; measure whether a removal that a form still references is reported, and add the arm (with a CONTROL) if not.\n- [ ] **Unmanaged copy, form-name prefix** — when a form is copied out of a package, confirm the name takes the same `OBJECT.KEY`-style prefix rule as the other copied types; pin it either way.\n- [ ] **Transaction ownership in batch routes** (review N10) — `packages/rest/src/batch-routes.ts` (~line 566): state, or pin, which side owns a transaction that was opened outside the route when the batch carries form writes.\n- [ ] **`revertCommit` docblock** (review N12) — the docblock's description of the walk order does not match the code; correct the text.\n- [ ] **Rollback pins for page and permission set** — the rollback path fixed alongside the form work also covers `page` and `permission_set` items; add the regression pins for those two types.\n- [ ] **Container listing and withdrawn members** — the container listing still decides membership from the member's own listing flag rather than the member's current published state; measure and align the listing with the read side's rule.\n\n## Acceptance (proposed, for triage)\n\nEach box closes with a test (or a measured reason no change is needed) named in the PR. No public text names more than the rule."

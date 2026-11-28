@@ -1,0 +1,31 @@
+{
+  "number": 38063,
+  "kind": "issue",
+  "title": "objectql: the unserved knowledge_source boot warning says \"it is loaded, indexed or searched\" for one item (missing negation), and its test pins the wrong text",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:server",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T00:33:10Z",
+  "updated_at": "2026-11-28T01:20:40Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38063",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38059 (#38039; out-of-scope finding of the dev report 7230969358, class a) · Source: topic #37000\nGrading: area:ai · Bug · p3 (suggested: a boot warning states the opposite of the fact for one item) · reach: any boot that holds exactly one `knowledge_source` and no knowledge service · evidence: read on main 27ee98438e — `packages/objectql/src/knowledge-source-unserved.ts:43` renders `${count === 1 ? 'it is' : 'none is'} loaded, indexed or searched`; `knowledge-source-unserved.test.ts:20` pins `'it is loaded, indexed or searched'`.\nDedupe: `is:issue describeUnservedKnowledgeSources` → checked at filing; none open.\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：部署里只有一个知识源、又没装知识服务时，启动警告写成\"它会被加载、索引或检索\"，意思正好说反了（多个时的\"都不会\"是对的）；测试还把这句错话钉住了。\n- 做什么：改成\"它不会被加载、索引或检索\"，并改正测试。\n- 谁受益：看启动日志排查知识检索的运维和作者。\n- 需要你做的：无。\n\n## What\nIn `describeUnservedKnowledgeSources`, the singular arm must read \"it is not loaded, indexed or searched\". Correct the pin in `knowledge-source-unserved.test.ts` to the negated text, and assert the singular line does not contain the un-negated phrase.\n\n## Acceptance\n- The one-item line says the item is not loaded, indexed or searched; the plural line is unchanged.\n- The test pins the negated singular text and goes red on the old text."
+}

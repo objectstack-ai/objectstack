@@ -1,0 +1,30 @@
+{
+  "number": 38080,
+  "kind": "issue",
+  "title": "专题：表单独立成 form 元数据（19 版不兼容改动：旧表单写法拒绝并给出改法、存量表单升级转换、控制台读写表单、示例与技能改用 forms:）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T01:44:27Z",
+  "updated_at": "2026-11-28T01:44:27Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38080",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed topic parent. The maintainer, verbatim, 2026-11-28: 「#37408 元数据的声明式动作 继续暂停，其他同意」, approving triage's topic review (close, tidy, open).\n\n## 维护者速读\n- 是什么：表单从「视图」里独立出来，成为单独的 `form` 元数据。19 版起视图只管列表，旧的表单写法会被拒绝并给出改法，已存的表单在升级时自动转换。\n- 为什么要专题：原来的父卡已经关了，剩下三张 p1 和几张收尾卡没人统一盯着，而它们必须在 19.0 正式版前完成。\n- 要你做什么：无，ADR 修订类的子卡会单独请你批准。\n\n## Children\n- #37112 Major 19: `view` is lists only; old form shapes are refused with a prescription (p1)\n- #37111 Upgrade converts stored forms (p1)\n- #37087 Console reads and edits `form` items (p1)\n- #37088 First-party sources author forms as `form` items (p2)\n- #37105 Skills teach `forms:` (p2)\n- #37852 Form metadata type follow-ups after #37086 (p2)\n\nDone when: every child is closed before 19.0.0 GA."
+}

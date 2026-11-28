@@ -1,0 +1,31 @@
+{
+  "number": 38077,
+  "kind": "pull_request",
+  "title": "chore(claude): allow a cloud seat to create and push its mailbox branch",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset"
+  ],
+  "assignees": [
+    "sunhaolin"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T01:39:42Z",
+  "updated_at": "2026-11-28T02:10:13Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38077",
+  "body": "Closes #38074\n\nClause-②: no\nMetadata-protocol: none\nRule-change: ruled\nRuling-ref: the maintainer, verbatim in the security#2 session on 2026-11-28 (recorded on the card's Source line): 「在仓库的 .claude/settings.json 里加一条允许规则再提交。立卡」, then 「立卡并派发」.\n\n## 维护者速读\n\n- 用户无感:云端值班席位开信箱时,自建信箱分支的提交与推送在自动模式下不再弹审批。\n- 为什么做:让每个云端值班席位在自动模式下自己就能坐席,不必等账号主人切模式。\n- 出错会怎样:最坏是信箱分支的推送不再经审批;改动只在两条精确写法上放行,撤回即删这几行。\n- 要你做什么:审阅后亲自合并这个草稿 PR。\n\n## What changes\n\n`.claude/settings.json`:\n\n- `permissions.allow` gains two entries:\n  ```\n  \"Bash(git commit --allow-empty -F *)\",\n  \"Bash(git push -u origin claude/mailbox-*)\"\n  ```\n- `permissions.ask` gains three entries scoped to those two rules, so that only the bare forms run without approval. Ask takes precedence over allow.\n  ```\n  \"Bash(git commit --allow-empty -F * *)\",\n  \"Bash(git push -u origin claude/mailbox-* *)\",\n  \"Bash(git push -u origin claude/mailbox-*:*)\"\n  ```\n\n`scripts/pm/mailbox-open.mjs`:\n\n- The refusal printed when the default branch's push is refused (a cloud seat) moves into a pure exported `pushRefusedMessage(plan, status)` and now names the three commands, one per line, spelt as the allow rules above, then keeps the `--head` re-run:\n  ```\n  git switch -c claude/mailbox-SLUG origin/main\n  git commit --allow-empty -F FILE\n  git push -u origin claude/mailbox-SLUG\n  then pass --head claude/mailbox-SLUG (--close deletes that name) ...\n  ```\n- The self-test pins it: one new case in the open-plan battery (floor 13 to 14) asserts the five lines, the three commands verbatim for seat `domain:ui#4`, the `--head` line and the exit status.\n\n## Why\n\nThe relay has no ref-creating op, so a cloud seat must create one empty commit on `origin/main` and push it to `claude/mailbox-SLUG` itself. In an auto-mode cloud session no allow rule covered that commit or push: on 2026-11-28 the classifier denied the push from the security#2 seat three times, once after the maintainer had approved it in chat, and the seat could only sit after the session was switched out of Auto mode. The card-branch forms already had this shape (#35443); mailbox branches had no equivalent. The maintainer merges this PR himself.\n\n## Reach\n\n- **Runs without approval:** exactly `git commit --allow-empty -F FILE` and `git push -u origin claude/mailbox-SLUG`, the forms the refusal now names.\n- **Still asks:** anything after the message file (for example `-a`, `--amend`, `-n`, `--no-verify` or a pathspec), anything after the mailbox branch (a second refspec, a tag, a force, delete, prune or mirror flag, `--no-verify`), and a `src:dst` refspec on the mailbox branch.\n- **Spelling:** a message file path containing a space also asks, because the matcher reads the space as \"something after\". A commit or push spelt any other way (`-m`, a bare `git push`, `--allow-empty` after `-F`) still asks, as today.\n- **Chained lines:** a line that starts with either allowed form and continues (the commit chained to the push, or the push piped into `tail`) asks, because ask rules are tried against the whole line. The refusal prints each command on its own line for this reason.\n- **The switch:** `git switch -c claude/mailbox-SLUG origin/main` gains no rule here (the card names none); it is a local branch creation and is not what the classifier denied.\n- **Other sessions:** every rule starts with the allowed command's own prefix, so no push or commit outside these forms changes behaviour. The existing `git commit -F *` allow does not match `git commit --allow-empty -F ...`, since the prefix differs.\n- **Unchanged:** `main`'s ruleset, the `deny` roster (17 GitHub content-write tools) and the hooks, including `check:commit-card-trailers`, which still judges the mailbox commit's trailer pair.\n\n## Verification\n\n- `node scripts/pm/check-settings-deny-roster.mjs` passes locally.\n- The file parses as JSON.\n- `node scripts/pm/mailbox-open.mjs --self-test` passes with the reworded refusal pinned.\n\n<details><summary>Readings at 33ca9f33d4</summary>\n\n```\nnode scripts/pm/check-settings-deny-roster.mjs  EXIT=0\n  check-settings-deny-roster: 17 content-write tool(s) declared = enforced in .claude/settings.json\nJSON.parse(.claude/settings.json)  EXIT=0\nnode scripts/pm/mailbox-open.mjs --self-test  EXIT=0\n  mailbox-open self-test: 93 cases in 10 batteries pass.\nnode scripts/check-nul-bytes.mjs  EXIT=0\ndispatch-gates --commands (68 derived families): 66 EXIT=0\nNOT MEASURED: check:doc-formula-expressions, check:i18n-coverage\n  reason: PREREQUISITE NOT MET (exit 3), each needs workspace package builds\n  (@objectstack/formula; the CLI and examples); this diff touches no package. CI runs both.\n```\n\n</details>\n\nFiles to read first: `scripts/pm/mailbox-open.mjs` (the `pushRefusedMessage` hunk and its self-test case), then `.claude/settings.json` (the five added rows).\n\nTwo-minute check: `node scripts/pm/mailbox-open.mjs --self-test` prints `93 cases in 10 batteries pass`.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_017xRBcW9L8Noz9BxEwjwiov\n"
+}

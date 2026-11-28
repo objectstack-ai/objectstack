@@ -1,0 +1,31 @@
+{
+  "number": 38098,
+  "kind": "issue",
+  "title": "Settings: auth switches show the manifest default, not the deployment declaration that runs, when nothing is stored",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:cloud",
+    "bug",
+    "domain:server",
+    "pm:triage"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:15:44Z",
+  "updated_at": "2026-11-28T02:15:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38098",
+  "body": "repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK\n\nFiling gate: ① a product defect, left open by PR #38094 (`Fixes #38029`), which marks the case with a banner and does not change the value (os-dev report 7232213655, open question 1). Dedupe: words `source default declaration`, `email_password_enabled default`, `runtime declared default` find only #38029 / #38094.\n\n## 维护者速读\n\n- 要做的：没保存值时，设置 → 认证 里的开关显示部署实际宣告的值，而不是清单里的默认值。\n- 为什么：#38094 只加了一条提示横幅；开关本身仍显示「开」，跟着它的密码长度、复杂度等子项也仍然显示。\n- 影响：设置服务读默认值的地方（级联、校验、环境变量换算）；会改变公开的 `source: 'default'` 的含义，需要契约评审。\n\n## Facts (main after #38028; measured by the os-dev on #38029 at `SettingsService.get` and `GET /api/settings/auth`)\n\n- With `emailAndPassword.enabled: false` declared and nothing stored, `auth.email_password_enabled` answers `{ value: true, source: 'default' }` while the running config is off. #38094 heads the page with a `live_status` banner; the switch and every key gated on `email_password_enabled !== false` still read on.\n- The served `live` field (`SettingsNamespacePayloadSchema.live` in `packages/spec`) admits option-bearing keys only, so a toggle cannot be stated there today.\n- `bindAuthSettings` treats manifest defaults as UI defaults, so other auth keys whose declaration differs from the manifest default (`signup_enabled`, `require_email_verification`) likely show the same gap (inferred, not measured).\n- #38028 found that saving `true` on a managed runtime is treated by the settings service as no change, for the same reason.\n\n## Options\n\n- B (recommended by the dev): a settings-service seam for a runtime-declared default, a per-key provider read wherever the manifest default is read. The value resolves to the declaration with `source: 'default'`. Fixes every auth key with a declaration and the managed no-change save, without a spec shape change, but redefines what `source: 'default'` means on the published `ResolvedSettingValue`.\n- C: widen the served `live` field to booleans and teach the console to draw `live` over `values`. Spec and ui change, a widening.\n\n## Done when\n\nThe switch (and the keys gated on it) shows the running value when nothing is stored, on self-hosted and cloud-managed runtimes, with the #38094 banner reduced to the cases the value still cannot say."
+}

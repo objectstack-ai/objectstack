@@ -1,0 +1,31 @@
+{
+  "number": 38087,
+  "kind": "issue",
+  "title": "ci: the live PG + MySQL merge-queue leg (ruling B of #36614): read its observation window, finish the companion edits, then the maintainer decides the required set",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "domain:devx",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T01:57:39Z",
+  "updated_at": "2026-11-28T02:00:55Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38087",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: carries the remaining items of #36614 (its ruling's step 2 and the companion edits); #36614 keeps nothing and closes. Source: seat repo:objectstack#1 area `o1-F`, W0 survey 2026-11-28, on seat 1's routing.\n\n## 维护者速读\n\n- 做什么：改 SQL 驱动的 PR 在合并队列里跑真库测试，这一步已经上线（PR #37155）。剩下的是：观察一段时间的运行结果，补齐几处配套文字与工具，再由你决定是否设为必过。\n- 谁受益：避免再出现改驱动的 PR 合进主干后主干变红两个多小时的情况。\n- 需要你做的：观察结束后，席位会带读数请你决定是否加入必过项（GitHub 设置里的人工动作）。\n\n## Ruling (verbatim, #36614 comment 7135915693)\n\nThe maintainer chose 「B 合并队列里跑（分两步）」: \"only a PR that changed the driver runs the live-database leg in the merge queue; first observe a while, then the maintainer adds it to the required set.\"\n\n## Done on main\n\n- PR #37155 (merged 2026-11-25T02:40Z, `3b4f0b9832`, Fixes #37095): `.github/workflows/ci.yml:2488`, the `temporal-conformance` job runs on `merge_group` when `needs.filter.outputs.temporal_live != 'false'`, and never on `pull_request`. Its PR body records 「#37155 不需要」 (not required, for that PR).\n\n## Remaining items\n\n1. **Observation reading.** Read the job's `merge_group` runs since 2026-11-25T02:40Z: run count, red count and causes, minutes per run. Post it here. The ruling names no window length, so the reading states the count it covers.\n2. **Companion edits named by the ruling's shape (7135915693 item 1), checked against `origin/main` 815e882b:**\n   - `scripts/pm/dispatch-gates.mjs` / `dispatch-gates.data.mjs`: \"the leg derives for a driver surface\". No `temporal` derivation hit there today, so this is unverified as done.\n   - `scripts/pm/check-expected-skips.mjs:1318` still describes the job with `if: FULL_BATTERY_IF`. Check it against the live `if:` at `ci.yml:2488`.\n   - The THE TWO SPEEDS comment in `ci.yml`, the required-set paragraph in `AGENTS.md`, `docs/agents/multi-agent-discipline.md`, and the tombstone prose in `scripts/check-required-contexts.mjs`: re-read each, and fix whichever does not match main.\n3. **Maintainer step.** With the reading in hand, a decision card asks whether `Temporal Conformance (live PG + MySQL)` joins the required set. A ruleset change is a human act (`pm:awaiting-maintainer` once ruled).\n\nGoverned: item 2's `ci.yml` / `AGENTS.md` / `dispatch-gates.mjs` edits are Tier H.\n\nDedupe: `is:issue is:open temporal-conformance required merge_group` returned 3: #36614 itself and two seat posts.\nSuggested-grade: p2 · the parent's grade (a gate whose absence let main go red)."
+}

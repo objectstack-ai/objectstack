@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T12:18:56Z",
-  "updated_at": "2026-11-27T13:18:22Z",
+  "updated_at": "2026-11-27T22:16:23Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37943",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① L1/L2 follow-ups of one PR (`review follow-ups of PR #N`, one card per PR, later rounds append here). Source: fleet (author's Acceptance notes on PR #37931 for card #37855, \"stale ADR text seen and left untouched\"; seat record 7218028007 item 5).\nGrading: area:ux · Task · p3 · domain:ui. Prose only, `ui/docs/adr/**` (governed, Tier H).\nReader: seat repo:objectstack#3, zone o3-ux, after PR #37931 merges (same file).\nDedupe: `\"ADR-0057\"` open hits are #37855 (A5, the PR above), the #37853 topic and its C3/T-cards; none revises A2/A3 text.\n\nBusiness reason: ADR-0057 is what the AI drawer's implementation cards (C4 #37860, C5 #37861) are built from. Three sentences describe things that are gone, so a developer following them builds for a Studio copilot that no longer exists or looks for a dock key the code no longer writes.\n\n## Items\n- [ ] F1: A3 \"One container\" (`ui/docs/adr/0057-console-ai-chat-one-conversation-docked.md` ~:483 at 43ce73118d) still names Studio's copilot, which left with objectstack#37720.\n- [ ] F2: A2's `app:PKG:build` dock key (~:402, :411, :421) no longer matches the code; read the current key and record it, or mark the bullet superseded.\n- [ ] F3: A3 \"Entry\" (~:495) names a plan marker that nothing produces since #37720 retired the build chat (no pending plan is published to the assistant bus).\nEach as an in-place dated mark in the ADR's own `*(Amended …)*` form; no ruling changes."

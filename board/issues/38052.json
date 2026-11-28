@@ -1,0 +1,32 @@
+{
+  "number": 38052,
+  "kind": "issue",
+  "title": "docs(cli): the --yes option lines of os db orphans, os secret orphans and os secret rewrap don't say that a non-terminal run without --yes writes nothing and exits 1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:build",
+    "documentation",
+    "domain:docs",
+    "pm:queue",
+    "priority:p3"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T21:53:36Z",
+  "updated_at": "2026-11-28T01:03:33Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 2,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38052",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) out-of-scope finding, the contract review on PR #38042 (#36679), N2 in record 7228083567, carried in report 7228826855. Source: fleet.\nBlocked-by: #36679\n\n## 维护者速读\n\n- 问题：CLI 文档里三条命令的 `--yes` 选项没写清楚：在脚本或 CI 里（stdin 不是终端）不加 `--yes` 运行时，什么都不写，并以退出码 1 结束。写脚本的人看文档，不知道会失败。\n- 修法：照 `os migrate list-preferences` 那一行的写法，给这三行各补一句。只改一页手写文档的三行。\n- 优先级 p3。\n\n## What to change\n\n`content/docs/**/cli.mdx`, the `-y, --yes` option lines of:\n- `os db orphans` (about line 486)\n- `os secret orphans` (about line 667)\n- `os secret rewrap` (about line 731)\n\nEach gains one sentence in the same form as the `os migrate list-preferences` line (about line 2541): run without it, a run whose stdin is not a terminal (or one with `--json`) writes nothing and exits 1.\n\n## Acceptance\n\n- The three lines state the non-terminal behaviour, in the same words as the migrate line.\n- `meta.json` and the site structure are unchanged. This is an edit to one page, not a move.\n- The `os secret rewrap` line lands after #36679's PR (#38042) merges, because only then does rewrap exit 1."
+}

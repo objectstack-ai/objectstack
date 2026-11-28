@@ -2,8 +2,8 @@
   "number": 37585,
   "kind": "issue",
   "title": "skills: objectstack-i18n lists the object translation sub-keys but not `_milestones.<field>.<value>.summary` once PR #37582 lands",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,7 +14,6 @@
     "area:ai",
     "documentation",
     "domain:skills",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -23,11 +22,15 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-26T14:13:12Z",
-  "updated_at": "2026-11-27T17:29:30Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T01:02:36Z",
+  "closed_at": "2026-11-28T01:00:50Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
   "merged_at": null,
-  "comments": 4,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37585",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① · Source: fleet (the `Skills-docs: follow-up owed` line of the #37524 claim; PR #37582 adds the key)\n\n## What happens\n\nPR #37582 (Fixes #37524) adds a translation slot to object translation bundles: `objects.<object>._milestones.<field>.<value>.summary`. When a timeline shows a fired milestone, its row is re-composed at read time in the reader's language, and picklist values in it show as that language's option labels.\n\n`skills/objectstack-i18n/SKILL.md` teaches the object sub-keys in its table under \"All translatable content for a single object is aggregated under `objects.{object_name}`\" (`label`, `fields`, `_views`, `_actions`, `_sections`, `_tabs`, `_relatedLists`, `_validations`, `_actions….refusals`). Once #37582 merges, that table has no `_milestones` row. An agent that writes an app's translations from the skill leaves every milestone summary English, and the timeline mixes languages.\n\n`skills/**` is governed (Tier H), so this text does not ride the code PR.\n\n## Expected\n\n- One row in that table: `_milestones.{field}.{value}` → `summary`, the sentence a fired milestone writes to the timeline for that field and value. Say that the stored row is unchanged, that the reader's language is applied at read time, and that a field the reader cannot see keeps its sentence hidden in every language (as #37582 implements it).\n- Pay for the row in the same file under the token ratchet (no ceiling moves).\n- Write it against the merged #37582 tree: key spelling, the `{value}` form, and what the resolver substitutes.\n\nBlocked-by: #37582 (merge)\nCategory ①: a shipped skill would teach an incomplete key list for a slot the platform reads, so an app built from it leaves a visible string untranslated.\nPriority: p2, the grade of #37524 (a non-English timeline row shows English; it doesn't block a workflow and isn't wrong data).\nBusiness reason: non-English readers of a timeline that an app's milestones write see their own language only if the app's translation bundle carries the slot, and agents author those bundles from this skill.\nReader: seat 2 area s2-ux-T (repo:objectstack#2), after #37582 merges; Tier H, so os-zhuang approves.\nDedupe: `objectstack-i18n _milestones` (open issues) 1 hit, #37524 itself (the code card). No skills card exists.\nRelated: #37524, PR #37582."

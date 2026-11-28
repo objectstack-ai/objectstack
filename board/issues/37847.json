@@ -2,8 +2,8 @@
   "number": 37847,
   "kind": "issue",
   "title": "Studio condition builder: a sharing-rule (filter-compiled) condition is not told to the builder, so list membership is written in a CEL spelling the validator prescribes as .contains there",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "not_planned",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -14,18 +14,23 @@
     "area:build",
     "bug",
     "domain:ui",
-    "pm:queue",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T06:49:41Z",
-  "updated_at": "2026-11-27T08:41:44Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T01:27:34Z",
+  "closed_at": "2026-11-28T01:26:55Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37847",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① defect, same class as #36381 at a fourth site · Source: fleet (L1-a REWORK 7211865092 on PR #37846, out-of-scope finding of the card thread's report 7211812962; L1 judged \"file, don't drop\")\n\n## What happens\n\nPR #37846 (Fixes #36381) makes the Studio condition builder write list membership in the spelling the validator prescribes per site (`listMembershipSource` in `@objectstack/formula`): `has(r) && r != null && V in r` for `record.`/`previous.` reads, `r != null && V in r` for a bare flow name. The validator's third arm, `S.contains(V)` where the condition compiles to a query filter (a sharing-rule condition), is never written by the builder: no host that mounts the builder tells it the mount is filter-compiled.\n\nreach: not yet measured. The first step is to mount the builder on a sharing-rule condition, pick a list field and an \"is one of\" membership, save, and read what the validator answers and what the compiled filter does.\n\n## Expected\n\n- A filter-compiled mount tells the builder so, and the builder writes the `.contains` arm the validator prescribes there (one helper, no restated spelling), with a round-trip pin that the builder reads its own output back.\n- Or, if the measurement shows the sharing-rule editor never offers list membership, close this card with that reading.\n\nCategory ①: an admin's condition is written in a spelling the validator does not prescribe for that site.\nPriority: p2 — same grade as #36381; Studio authoring, not wrong data at rest. Suggested-grade: p2 · same class as #36381.\nBusiness reason: an admin defining who a sharing rule shares records with should get a condition that compiles and saves as written; today the builder may produce a spelling the validator rewrites or refuses only on this surface.\nReader: seat repo:objectstack#3, zone `o3-build` (area:build), after PR #37846 merges (same files).\nBlocked-by: #37846 (merge)\nDedupe: searched `filterCompiled sharing condition builder` (2 hits: #36381 open — the parent fix, #36167 closed) and `listMembershipCel` (0), open and closed.\nRelated: #36381, PR #37846, #36167."

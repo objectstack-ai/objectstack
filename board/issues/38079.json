@@ -1,0 +1,32 @@
+{
+  "number": 38079,
+  "kind": "issue",
+  "title": "指标集：成员可以声明「这个词有几种理解，我是其中一种」，平台据此反问，不选（ADR-0149 D1 修订）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ai",
+    "domain:spec",
+    "enhancement",
+    "pm:queue",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-28T01:42:21Z",
+  "updated_at": "2026-11-28T02:16:50Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38079",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ② cross-repo finding with measured evidence, asked for by seat repo:cloud#5 (mailbox #37784 comment 7231841088): cloud#5144's filing condition is met (phase A, PR cloud#5187, landed 85c4904). Source: fleet.\nGrading: area:analytics · Task · p2 · size M · reach: every app author who wants an ambiguous business word to make the in-app ask ask back · evidence: cloud ask eval, 56×5 on cloud main 9c1e877, two rounds against a control (below). Line numbers re-read by this seat on objectstack origin/main: `dataset.zod.ts` :155 / :456 / :649 and `dataset-term-matcher.ts` :86 still hold.\nDedupe: `is:issue readingOf` → 0; `ADR-0149 D1 reading` → 0 related.\nOwner of the ruling: the ADR-0149 owner. This refines D1's \"one word, one member\" and leaves it standing for synonyms. It adds an authorable spec key and amends an ADR, so the maintainer decides.\nParent: objectstack-ai/cloud#3825\n\n## 维护者速读\n\n- 问题：现在想让问数遇到有歧义的词（比如「逾期」「最大的客户」）时反问用户，唯一的办法是把它写成两个不同数据集里指标的同义词。两种理解在同一个对象上时，只能硬拆成两个数据集。\n- 做什么：给指标加一个可选键（暂名 `readingOf`），声明「我是这个词的一种理解」。同一个词可以出现在多个指标上；平台匹配到它时反问，不替用户选。同时要定多词短语和中文不分词时怎么匹配。\n- 证据：cloud 实测，有歧义的问题被正确反问的比例从 27/35 升到 30/35 和 31/35，泄漏 0。\n- 要你做的：这是新的可写 spec 键加 ADR 修订，需要你点头才开工。\n\n## Evidence (cloud ask eval, 56×5 on cloud main 9c1e877, two rounds against a control)\n\n- Ambiguous questions asked back with the right readings: 27/35 → 30/35 and 31/35.\n- 「逾期」: 2/5 → 4/5 and 4/5. \"biggest client\": 3/5 → 4/5 and 4/5.\n- The five undeclared ambiguous questions: 22/25 → 22 and 23/25. That is flat, so the gain comes from the declarations.\n- Leaks 0.\n- Matching gap from phase A: a declaration fires only when the model's term equals the word after normalization. \"biggest client\" arrived as ['client', 'biggest'] in 7 of 10 runs, and 「逾期」 as 「逾期的交付物」 in 6 of 10.\n\n**Why.** Today an app can make a word ask back only by giving it as a synonym of measures in two different datasets (the D1 cross-dataset collision). Two readings that live on one object have to be split into two datasets to get the question. A superlative (\"biggest client\") has to be spelled as a synonym of a total, which D1 does not mean. The cloud card measures whether declared readings move the in-app ask. The numbers go here when this is filed.\n\n**What (line numbers as read on 4de4e3e9; re-read before writing):**\n1. `packages/spec/src/ui/dataset.zod.ts:456` (`DatasetMeasureSchema`): add an optional key beside `synonyms` (`:649`), working name `readingOf`. It holds the words this measure is one reading of. The vocabulary limits are the same as for `synonyms` (`DatasetMemberSynonymsSchema`, `:155`).\n2. `checkDatasetVocabulary` (`:779`):\n   - a reading word may repeat on several members of one dataset;\n   - it may not equal any member's name, label or synonym in that dataset. The one-member refusal at `:862` stays for synonyms.\n   - Measures only: D3 selects a measure.\n3. `packages/spec/src/ai/dataset-tools.zod.ts`:\n   - `DatasetTermMatchedOn` (`:88`) gains `'reading'`.\n   - `DatasetNextStepDecision` (`:181`) stays closed: a term matched only on reading words is `several_measures` when 2 or more members carry it. With exactly one, the ADR amendment decides; the recommendation is to ask whether it is the one meant, as `candidates_only` does for a single candidate.\n   - A reading match never yields `one_measure`.\n   - The catalogue measure (`DatasetToolCatalogMeasureSchema`, `:261`) lists the key, like `synonyms`.\n4. Executor:\n   - `packages/services/service-analytics/src/dataset-term-matcher.ts:86` (`matchDatasetTerms`) matches reading words under the same normalization.\n   - `dataset-next-step.ts:416` counts them as above, and its note asks in rule 3's form.\n   - `LIST_DATASETS_DESCRIPTION` (`dataset-tools.ts:102`) gets one sentence.\n5. `docs/adr/0149-ai-answers-business-questions-through-the-dataset-semantic-layer.md`: an amendment note under D1 (`:104`) and D3 rule 1 (`:152`).\n   - ADR-0049 D6: the key names its reader, the matcher.\n   - The liveness ledger, the generated JSON Schema and the dataset metadata form (`dataset.metadata-form.ts`) follow, as for `synonyms`.\n\n**Acceptance.**\n- The spec tests cover these cases:\n  - a reading word on two measures of one dataset parses;\n  - a reading word equal to another member's synonym is refused;\n  - a synonym collision inside one dataset is still refused.\n- The executor tests cover:\n  - two readings → `several_measures`, with both members in `matches` under `matchedOn: 'reading'`;\n  - a reading match beside a single synonym match on another word keeps the precedence of `DATASET_NEXT_STEP_PRECEDENCE`.\n- The MCP door shows the same answer.\n\n6. Multi-word and phrase matching (added from the phase-A evidence). Decide, in `matchDatasetTerms`, how synonyms and reading words match multi-word terms and phrases, including how CJK text without word breaks is segmented. Cloud does not add its own looser match on top, because its `nextStep` must never claim a hit that the executor's `matches` lacks (the same two-layer issue as cloud#5145)."
+}

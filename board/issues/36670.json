@@ -2,8 +2,8 @@
   "number": 36670,
   "kind": "issue",
   "title": "hook and action refusals: the save door's code and reason readers stop at the closing quote, so `code: 'OVER' + suffix` is refused at save as code 'OVER'",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -15,7 +15,6 @@
     "bug",
     "domain:spec",
     "finding",
-    "pm:dispatched",
     "priority:p2"
   ],
   "assignees": [
@@ -24,9 +23,13 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-23T10:48:56Z",
-  "updated_at": "2026-11-27T20:14:22Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T21:22:21Z",
+  "closed_at": "2026-11-27T21:21:17Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
   "comments": 3,
   "locked": false,

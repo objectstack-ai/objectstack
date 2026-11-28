@@ -14,18 +14,20 @@
     "area:build",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-25T04:02:14Z",
-  "updated_at": "2026-11-25T06:14:03Z",
+  "updated_at": "2026-11-28T02:18:40Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37214",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYmRepQK9DkZeU7F53D\n\nFiling gate: ① a product defect with a named location · Source: fleet (seat repo:objectstack#4's ruling on the os-dev report for PR #37194 / card #37053, which split this fix out of that PR; filed by zone a4-U as that ruling asks)\n\n## What happens\n\nPR #37194 (#37053) adds a renderer-internal, producer-filled carrier `series[].measureFormat = { format, currency, percentScale }`. It sits beside `series[].aggregate`, and the report and dashboard producers fill it. The spec's strict `ChartSeriesSchema` refuses it.\n\nThe static SDUI chart node's mirror in `@object-ui/types`, `ChartDataSeriesSchema` (`ui/packages/types/src/zod/data-display.zod.ts`, a `z.looseObject`), refuses `aggregate` by name but not `measureFormat`. So an author, or an AI writing page metadata, who writes `measureFormat` on a static chart node has it accepted and honoured. A key that is internal by declaration becomes authorable.\n\nreach: read from code by the #37053 dev and this zone. It arises when PR #37194 merges. A page author reaches it by writing `measureFormat` on a static `chart` node's series. It has not been measured in a browser.\n\n## Expected\n\n`ChartDataSeriesSchema` refuses `measureFormat` by name, shaped like its `aggregate` refusal (a retirement tombstone that names the key). The `ChartDataSeries` TS twin makes it unwritable (`measureFormat?: never`).\n\n## Shape of the fix, per the seat's ruling\n\n- `Clause-②: yes (narrowing)` and `Metadata-protocol: narrowed`. The published loose schema accepts `{ name, measureFormat }` today, so refusing it narrows what a metadata author can write. Precedent: `@object-ui/types` `8a3eeef` (the `PageKindNodeSchema` mirror refusal).\n- One semantic ledger entry under `packages/spec/src/migrations/entries/semantic/` (ADR-0087). `check-adr-0087-registration` was measured refusing a `not-required (no-migration-prescription)` marker for this declaration.\n- A `!` PR title, a minor `@object-ui/types` changeset with FROM `{ name, measureFormat }` → TO the key refused, and a `Skills-docs:` line (`none` — the key is renderer-internal and taught nowhere).\n- The full dogfood battery on the final head. An L2 contract review is owed.\n\n## Acceptance\n\n- A static chart node that authors `measureFormat` is refused at `series.0.measureFormat`, with one issue naming the key. A series that authors both keys is refused at both, so the `aggregate` refusal stays. The zod input type and the TS twin are unwritable (`@ts-expect-error` pins). Put the pins in the existing series-refusal harness `chart-series-aggregate-refusal-11681.test.ts`.\n- The producers (report and dashboard) keep filling the carrier, and their chart pins stay green.\n\n## Prepared work\n\nThe #37053 dev wrote and verified this fix (73/73 tests and `@object-ui/types` type-check green, applied on PR #37194's head `22053f07a5`). It also drafted the ledger entry. Both are held by zone a4-U and will be handed to whoever claims this card.\n\nBlocked-by: #37194\n\nGrading: area:ux · Bug · moderate (a renderer-internal key is authorable, so declared-internal is not enforced) · reach named (static chart node, once PR #37194 merges) · evidence read → p2; triage to confirm.\n\nBusiness reason: a metadata author or an AI writing page metadata should be refused when it writes a key that the renderer reserves for its producers. Otherwise a hand-written `measureFormat` is honoured silently and can contradict the dataset's own facts.\n\nReader: the zone that claims it, from the prepared patch and ledger draft, at its own L2.\n\nDedupe: `measureFormat` (open and closed) → 1 hit, #37053 (the parent card); `ChartDataSeriesSchema refusal` → 2 hits, #37053 and an unrelated seat post. No card covers this refusal."

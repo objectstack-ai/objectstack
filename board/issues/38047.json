@@ -1,0 +1,37 @@
+{
+  "number": 38047,
+  "kind": "pull_request",
+  "title": "feat(console): the create-workspace dialog shows the unpaid-organization limit refusal and its next step",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "hotlong"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T20:52:50Z",
+  "updated_at": "2026-11-27T22:05:21Z",
+  "closed_at": "2026-11-27T22:05:19Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T22:05:19Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38047",
+  "body": "Fixes #34221\n\nClause-②: yes (widening) — `@object-ui/i18n` gains `organization.errors.unpaidOrganizationLimitReached` and `organization.viewPlans` in every locale\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：在云端控制台建第三个免费组织被拒时，「新建组织」对话框显示云端给的本地化说明（含下一步），云端若提供升级入口还会多一个「查看套餐并升级」链接。\n- 为什么做：云端已对每个账号限 2 个免费组织并返回新的拒绝码，控制台原来不认识它（来自云端免费组织上限那张卡的控制台一半）。\n- 出错会怎样：最坏是仍显示云端原句或控制台的通用兜底句，不会建出组织，也不影响其他拒绝；直接撤回本 PR 即可。\n- 要你做的：无。\n\n## What changes\n\n- `orgErrorMessage.ts` maps `UNPAID_ORGANIZATION_LIMIT_REACHED`. The row is marked `preferUserMessage`, so the control plane's own `userMessage` is shown as sent: it is written in the request's language and names the next step (ruling C on #32440, the same rule `SettingsPage` applies to the delete refusal). A refusal without a `userMessage` shows the new console key `organization.errors.unpaidOrganizationLimitReached`, in all eleven locales. That sentence names no number and no plan. Every other row ignores `userMessage` exactly as before.\n- New `readOrgCreateNextStep(err)` reads `details.next_step` (`upgrade_to_team` | `contact_support`), for this code only. Values this console does not know read as no step.\n- `CreateWorkspaceDialog` draws a link under the error when the step is `upgrade_to_team` AND the host serves `getUpgradeUrl()` (new key `organization.viewPlans`). The console never builds the address (ADR-0060; the runtime-config contract). `contact_support` draws no link: the sentence already names the contact address.\n- Producer read on cloud `origin/main` (`packages/service-cloud/src/unpaid-organization-cap.ts`): 403, flat `{ code, message, userMessage, details: { unpaid_organization_limit, unpaid_organizations, next_step } }`. `createOrganization` throws through `toAuthError`, which carries `code`, `userMessage` and `details` from the flat body, or from the ADR-0112 envelope's `error` when the flat body has none. `createWithGeneratedSlug` rethrows any refusal that is not a slug collision unchanged, so the code reaches the dialog.\n\n## Tests\n\n- `orgErrorMessage-4474.test.ts`, new describe: producer `userMessage` preferred; pack fallback when it is absent or blank; every pack defines the key, no digits, not the English; `readOrgCreateNextStep` for both steps, an unknown step, no details, another code, and a bare Error; CONTROL: `YOU_HAVE_REACHED_THE_MAXIMUM_NUMBER_OF_ORGANIZATIONS` still maps to its pack sentence and ignores a `userMessage`. The mapping-table code list gains the new code.\n- `CreateWorkspaceDialog.test.tsx`, new top-level describe: `upgrade_to_team` with a served entry shows the sentence and a link to it, with no retry and no provision; with no served entry there is no link; `contact_support` shows no link; a refusal without `userMessage` shows the zh pack sentence; CONTROL: better-auth's limit refusal shows no link.\n\n## Acceptance notes\n\n- Item 2 of the card (warn before the click) is not done: neither `/auth/config` nor discovery states the unpaid limit. The only source is the refusal itself.\n- The control plane's own runtime config (cloud `createStudioRuntimeConfigPlugin`) serves no `upgradeUrl` today. Tenant runtimes get one from `cloud-runtime-config-plugin`. So on the control plane console, where this cap fires, the link stays hidden until cloud serves the key there. The sentence still gives the step. Carrier: cloud.\n- The fallback sentence is generic about the step (\"upgrade one of them to a paid plan or contact support\"). It shows only when the producer sent no sentence, which the current cloud producer never does.\n\n## Verification\n\nRead first, by risk:\n1. `ui/packages/app-shell/src/console/organizations/orgErrorMessage.ts`: the `preferUserMessage` branch in `resolveOrgErrorMessage`, and `readOrgCreateNextStep`.\n2. `ui/packages/app-shell/src/console/organizations/CreateWorkspaceDialog.tsx`: the `setUpgradeUrl` line in the catch, and the link.\n3. `ui/packages/i18n/src/locales/*.ts`: the two new keys.\n\nTwo-minute check: `cd ui && pnpm exec vitest run packages/app-shell/src/console/organizations/__tests__/orgErrorMessage-4474.test.ts`. Expected: every test passes, including the six in the `UNPAID_ORGANIZATION_LIMIT_REACHED` describe.\n\nCommit `4dd68691` (all local readings below were taken on this head):\n\n<details><summary>Targeted tests (vitest, from ui/)</summary>\n\n`CreateWorkspaceDialog.test.tsx`, `orgErrorMessage-4474.test.ts`, `all-locales-key-parity.test.ts`, `en-zh-key-parity.test.ts`: Test Files 4 passed (4), Tests 113 passed (113), lock VERDICT command-exit 0.\n\nAblation: with the `preferUserMessage` branch disabled and the `setUpgradeUrl` read stubbed out on disk, 3 tests went red (the userMessage pin, plus the two dialog upgrade cases). Restored from HEAD, and the tree was clean afterwards.\n</details>\n\n<details><summary>Typecheck and lint</summary>\n\n`pnpm --filter @object-ui/i18n type-check && pnpm --filter @object-ui/app-shell type-check` (both include `tsconfig.test.json`): exit 0. `eslint` on the four touched app-shell files: 0 errors, 1 pre-existing warning (`react-hooks/refs` on `defaultNameRef`, untouched).\n</details>\n\n<details><summary>Derived gate families</summary>\n\n`node scripts/pm/dispatch-gates.mjs --commands --repo objectstack-ai/objectstack`: 42 local commands derived from the diff vs merge base `c151c4993`, all exit 0 (each captured before any pipe); `--ran` reconciliation exit 0. The repo-wide lint and the full farm are left to CI.\n</details>\n\n---\n\n_Generated by [Claude Code](https://claude.ai/code/session_01Q4EjjQkY5yXZrN9BEA3rEK)_\n\n<!-- signed: repo:objectstack#6 · hotlong · session_01Q4EjjQkY5yXZrN9BEA3rEK -->\n"
+}

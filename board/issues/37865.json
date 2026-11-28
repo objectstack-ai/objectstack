@@ -1,7 +1,7 @@
 {
   "number": 37865,
   "kind": "issue",
-  "title": "[PM seat] repo:objectstack · seat 8 — 🟢 os-mickey · 由 os-mickey 账户的项目负责 · area:fleet (p1/p2)",
+  "title": "[PM seat] repo:objectstack · seat 8 — 🟢 sunhaolin · area:data",
   "state": "open",
   "state_reason": null,
   "draft": null,
@@ -14,17 +14,17 @@
     "pm:seat"
   ],
   "assignees": [
-    "os-mickey"
+    "sunhaolin"
   ],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T07:35:10Z",
-  "updated_at": "2026-11-27T16:30:33Z",
+  "updated_at": "2026-11-28T01:47:00Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37865",
-  "body": "repo:objectstack#8 · os-mickey · session_01ASNY8UcT2uJmgTyCPnMiMZ\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 8** (the whole-repo lane). Only what another account must read lives here.\n- Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here).\n\n## Current PM — 🟢 os-mickey\n\n- **Holder:** `os-mickey` · `session_01ASNY8UcT2uJmgTyCPnMiMZ`, seated 2026-11-27 on the maintainer's summons in this session (`/pm-dispatch objectstack`). No `repo:objectstack` seat names this account and none is vacant, so the seat asked once; the maintainer chose a new seat 8 with intake area:fleet p1 + p2. The os-mickey account's project is responsible for this seat (由 os-mickey 账户的项目负责).\n- **Intake:** open `priority:p1` and `priority:p2` cards in `area:fleet`, on the maintainer's word in this session, verbatim: 「你处理 area:fleet p1 p2 任务」 and 「并发3」; after the seat named seat 3's area:fleet p1 intake, the maintainer answered 「3 号座位只开了 build 区」「你还是接 area:fleet p1 p2」. Claims arbitrate against seat 3's four-area p1 intake; `overlap-check.mjs` runs before every claim and push.\n- **Concurrency:** at most 3 running dev subagents (the maintainer's 「并发3」).\n- Excluded in any case: cloud cards (`repo:cloud` seats), security advisories, other repositories, and cards another seat already claimed (#37245 is seat 7's).\n- **Mailbox:** opened in the seating stroke (see the seat audit comment). **Patrol:** self-bound, recorded in the seat audit comment.\n- **Posture ledger lives in the project:** labels, assignee, `Claim:` comments carrying `Seat: repo:objectstack#8`, and the `head:claude/` PRs.\n\n## Leases\n\n- No zones: under the split threshold (`area-lease.md`); claims are card by card, each declaring its file surface.\n\n## Hot-file serial queue\n\n- `scripts/pm/dispatch-gates.mjs` + `dispatch-gates.data.mjs`: #37064 → #37254 → #35237 carrier item 3 (the `--tier` wording).\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Contract (L2) reviews go to the online review seats by mailbox (`Request: contract-review`) or an isolated contract-review-tier subagent.\n- Publication: objectstack. A merge to `main` publishes nothing; the release is the Version Packages PR, a human act."
+  "body": "repo:objectstack#8 · sunhaolin · session_017xRBcSAaBEfQpU2yJexSJ8\n\n⚠️ **Project-seat stub.** This post is the seat, **`repo:objectstack` seat 8** (the whole-repo lane). Job description: `.claude/skills/pm-dispatch/references/lanes/objectstack.md` and `references/area-lease.md` (⛔ not copied here). Posture and ledger live in the seated session; this stub keeps only what another account must read.\n\n## Current PM — 🟢 sunhaolin\n\n- **Account:** `sunhaolin` · **Session:** `session_017xRBcSAaBEfQpU2yJexSJ8` · **Seated:** 2026-11-28T01:15Z, on the maintainer's summon in that session: 「开一个 objectstack 全仓座位」 with intake `area:data`.\n- **Intake:** `area:data` (p0/p1 from any area per `card-pick.mjs`). Shared with seats 2, 3 and 7, which also name `area:data`: claim stamps arbitrate, `overlap-check.mjs` before every claim and push.\n- **Predecessor:** `os-mickey` · `session_01ASNY8UcT2uJmgTyCPnMiMZ`, clocked out 2026-11-27 (`check-handover.mjs` exit 0; previous body revision keeps that ledger).\n- **Mailbox:** PR #38073 · **Patrol:** `trig_01LeaR9sGBHMYmpQUtY8YTxa` · `45 * * * *` (UTC; hourly while cards are in flight, back to every 4 h at standby).\n- **Dispatch backend:** `mode:subagent` (`os-dev`, one card one worktree) from the seated session; `mode:cloud` for build-heavy cards. **batch 5** (maintainer, this session: 「batch 调到 5，可以用云卡」).\n\n## Leases\n\n- None. One session, no area threads: cards are claimed one by one, no zone split this shift.\n\n## Hot-file serial queue\n\n- None held.\n\n## Notes\n\n- Write path: the relay (`post-stamped.mjs`, `label-write.mjs`, `issue-create.mjs`, `fleet-write/dispatch.mjs`). ⛔ No GitHub MCP writes.\n- Posture ledger lives in the project (指针行「姿态台账住项目」).\n\n"
 }

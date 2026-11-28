@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T09:35:58Z",
-  "updated_at": "2026-11-27T10:16:23Z",
+  "updated_at": "2026-11-27T21:21:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37898",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (a declared key not yet enforced on a surface the ruling names, ADR-0049) · Source: fleet (PR #37888, Part of #37448: the dev's open question; contract review 7214835610, boundary flag)\n\n## What happens\n\nThe maintainer's ruling 7180466652 makes `uiReadonly` / `uiReadonlyWhen` lock every surface a person edits by hand, and names the in-app assistant acting for a person as one of them. PR #37888 routes every console surface through `fieldReadOnlyByHand`. The one surface left is the assistant: its writes are made by the AI service, which runs outside this repository and does not read the hand lock, so the assistant can still set a locked field for the person it acts for. The `uiReadonly` describe says so.\n\n## Expected\n\n- [ ] The AI service judges a write it makes for a person with the same verdict (`fieldReadOnlyByHand`, both halves: the static `uiReadonly` and the `uiReadonlyWhen` predicate on the record's values), and refuses or skips the locked field, telling the person why.\n- [ ] A pin where that service's writes run, with an ablation.\n- [ ] Once it lands, the `uiReadonly` describe, `describe_object` and the help texts drop the assistant exception, and #37448 closes.\n\nReader: the lane that holds the cloud AI service (this repository holds no `service-ai`). Not a decision: the ruling already settles it.\n\nGrade: area:ai · bug · reach: one surface of a declared lock · evidence: read on PR #37888 and its review\nSuggested-grade: p2\nSize: S\nRelated: #37448, PR #37888, #36806."

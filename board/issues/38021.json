@@ -2,7 +2,7 @@
   "number": 38021,
   "kind": "pull_request",
   "title": "docs(skills): four skill pages follow merged code (milestone translations, related-list remedy, kanban cardFooter, action write grant rule)",
-  "state": "open",
+  "state": "closed",
   "state_reason": null,
   "draft": false,
   "author": {
@@ -12,7 +12,6 @@
   },
   "labels": [
     "documentation",
-    "pm:awaiting-merge",
     "security",
     "size/s",
     "tooling"
@@ -23,10 +22,14 @@
   "milestone": null,
   "type": null,
   "created_at": "2026-11-27T16:38:55Z",
-  "updated_at": "2026-11-27T18:21:11Z",
-  "closed_at": null,
-  "closed_by": null,
-  "merged_at": null,
+  "updated_at": "2026-11-28T01:04:47Z",
+  "closed_at": "2026-11-28T01:00:48Z",
+  "closed_by": {
+    "login": "os-zhuang",
+    "id": 277994282,
+    "type": "User"
+  },
+  "merged_at": "2026-11-28T01:00:48Z",
   "comments": 5,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/pull/38021",

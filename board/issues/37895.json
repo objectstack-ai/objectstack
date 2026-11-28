@@ -23,11 +23,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T09:18:41Z",
-  "updated_at": "2026-11-27T15:15:39Z",
+  "updated_at": "2026-11-28T01:49:02Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 5,
+  "comments": 7,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37895",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nBlocked-by: #36495\n\nFiling gate: ① follow-up carved from #36495 by the claiming seat (execution-duties: an implementation card's file surface excludes `skills/**`). Source: maintainer rulings on #36495, 2026-11-27 — 7213534162 (start now, before 19.0.0 GA) and 7213827153 (vocabulary confirmed 「照卡上这套」).\nBusiness reason: the published skills are what agents read when they write an app. Once #36495 retires `record_header`, `record_more`, `list_item` and `list_toolbar`, skills that still teach them make every agent-written action use a refused or converted word; authors get a migration warning on code the agent just wrote.\nReader: seat repo:objectstack#3 (card thread at the contract-review tier: `skills/**` is MANDATORY ceiling, Tier H, maintainer or `GOVERNED_APPROVERS` merge).\nDedupe: searched `action locations skills`, `record_header skills`: none open.\n\n## What changes\nTeach the new action `locations` vocabulary — `list` (acts on no record) and `record` (acts on one record), with the exception words `record_page`, `record_row`, `record_related`, `record_section` — wherever the published skills and their eval samples teach the old page-part words. Files on origin/main naming an old word (grep, unverified for each hit's meaning): `skills/objectstack-ai/SKILL.md`, `skills/objectstack-ai/evals/skills-tools-knowledge.json`, `skills/objectstack-formula/SKILL.md`, `skills/objectstack-ui/SKILL.md`, `skills/objectstack-ui/evals/record-page.json`, `skills/objectstack-ui/evals/views-apps-actions-pages.json`, `skills/objectstack-ui/rules/actions.md`, `skills/objectstack-ui/rules/record-page.md`.\n\n## Acceptance\n- `git grep -nE \"record_header|record_more|list_item|list_toolbar\" -- skills/` returns only lines that describe the conversion from the old words.\n- Eval expected outputs use the new words; skill token ratchets follow the measurement; skills checks pass.\n- Lands after #36495 merges, before 19.0.0 GA."

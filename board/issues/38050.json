@@ -1,0 +1,33 @@
+{
+  "number": 38050,
+  "kind": "pull_request",
+  "title": "docs(knowledge): the 18 to 19 id row names the underscore exception and the dropSource cleanup",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:ai",
+    "size/s",
+    "tooling"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T21:16:51Z",
+  "updated_at": "2026-11-27T21:21:24Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38050",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFixes #38022\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 升级到 19 的运维读升级表时,会看到「以下划线开头的知识源 id 要改名并清理旧索引」这一例外,不再被告知「索引原样找回」。\n- 为 AI 知识库(epic 37000)的 18 到 19 升级文档补上一处与升级条目不一致的说法。\n- 只改文档与报错文案,不影响运行行为,可直接撤回。\n- 无。\n\n## What changes\n\n- `content/docs/protocol/knowledge.mdx`: the `id` row of the 18 to 19 table names the underscore exception (`name` refuses it, the source is rebuilt under a new name) and the `dropSource` cleanup, in the words of the upgrade entry `knowledge-source-registration-governed`. It states the memory adapter holds nothing across a restart. The row does not touch `adapter`, which #38026 made optional (rows and prose near it re-read on current main; no contradiction).\n- N1: the upgrade entry's reason says the adapter keeps the old index only where its store outlives the process (Turso, pgvector); the memory adapter holds nothing across a restart.\n- N2: the `id` tombstone in `knowledge-source.zod.ts` says the entry's manual notices still apply after `os migrate meta --from 18`; the reference page `content/docs/references/ai/knowledge-source.mdx` carries the same sentence.\n- `.changeset/37304-knowledge-source-governed-type.md` is not edited: it sits in `.changeset/pre/` (consumed by pre mode). A new patch changeset covers the spec string change.\n\n## Tests\n\nNOT MEASURED: `knowledge-source.test.ts` and `retired-key-migrate-sentence.test.ts` (the tombstone still ends with the migrate sentence and still begins with its pinned prefix), because the verify lock was never acquired in 4 attempts over about 36 minutes (holder was a dogfood run; VERDICT queue-timeout exit 99).\n\n## Acceptance notes\n\n- NOT MEASURED: `pnpm gen:docs` regeneration (needs the spec build, same lock). The reference page was edited by one exact-string substitution mirroring the zod edit; CI `check:generated` is the judge.\n\n<details><summary>Verification</summary>\n\n- check:doc-authoring, check:doc-anchors, check:doc-frontmatter, check:docs-nav-label, check:docs-image-tag: exit 0. check:docs-transcript-drift: exit 3, NOT MEASURED (prerequisite).\n- overlap-check at d60a6cef7d: VERDICT clean exit 0 (main, #38043, #38013, #37963 merge cleanly).\n- Two-minute check: open the knowledge protocol page, 18 to 19 table, `id` row: it names the underscore exception.\n\n</details>\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP\n\n"
+}

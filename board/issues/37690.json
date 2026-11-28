@@ -2,8 +2,8 @@
   "number": 37690,
   "kind": "issue",
   "title": "专题：Agent 对话界面改进（参考 Twenty：拆分组件、暂停式工具与审批卡、反问选项卡、反馈与重试）（拆分进行中，其余暂不派发）",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,21 @@
   "labels": [
     "area:ai",
     "enhancement",
-    "pm:epic",
-    "pm:on-hold"
+    "pm:epic"
   ],
   "assignees": [],
   "milestone": null,
   "type": null,
   "created_at": "2026-11-26T20:17:18Z",
-  "updated_at": "2026-11-27T11:55:25Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T01:42:16Z",
+  "closed_at": "2026-11-28T01:42:16Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37690",
   "body": "repo:cloud#5 · hotlong · session_01Q4EjjMouQg4opwRbvXunTA\n\nFiling gate: ③ maintainer-directed task · Source: maintainer — Jack, 2026-11-26T20:09Z（方案讨论线程）：「用 fable 审核后立专题，暂停，先不派发。」「拆分组件 之后的部分先不派发」「先删 build 的部分 可以先处理」\nGrade: area:ai · epic（无 type）· 无级（暂停中）· evidence: read（方案对照 objectstack / cloud 代码，Fable 已审）\nReader: 暂无。专题暂停，子卡等 Jack 点头后再立、再派发。\nDedupe: `org:objectstack-ai is:issue` 搜「对话界面」0 条；`ChatbotEnhanced split` 47 条（均为已关的 build 期卡或无关卡）；`AiPendingActionsInbox` 1 条（#32603，协议讨论，不重叠）；`ask_which` 1 条相关（#34578，工具标签，不重叠）；`requestTurnEnd` / `repairToolCall` / `resumable stream` 均 0 条。\n\n性质：专题卡（Epic），用来收拢范围、定拆卡顺序。**第 2 段（拆分组件）已解除暂停（Jack 2026-11-27T00:09Z：「对话界面改进 ，用fable评估，开始分拆」）；第 3 段仍暂不派发。**\n\n方案文档（Fable 审核后修订）：https://claude.ai/artifact/T3jdURwYHeKGxvi8g8xBY8\n相关：build 退役专题 objectstack-ai/cloud#5024；客户自定义 agent 专题 objectstack-ai/cloud#5023（暂停）；agent 效果专题 objectstack-ai/cloud#5027。\n\n## 一句话\n\n只看 agent 对话界面和它背后的 loop 里**已经在用**的功能，参考 Twenty 的设计和结构改进体验（Twenty 是 AGPL，只借鉴设计，不复制代码）。自写 loop 保留，不换成 `streamText` 多步模式。\n\n## 范围与顺序\n\n### 1. 删 build 专用对话组件（前置，已交 build 退役专题）\n\n由 objectstack-ai/objectstack#37682 处理（cloud#5024 子卡），Jack 已同意先做。本专题不重复立卡。\n\n### 2. 拆分组件（不改行为）—— 进行中\n\n方案经 Fable 对照代码评审（r1 → r2），拆成三张卡。A（PR #37799）与 C（PR #37803）已于 2026-11-27 11:53Z 合入 main；B 由 repo:objectstack#1 座位接手：\n\n- [x] #37728 拆分 A：`ChatbotEnhanced.tsx` 的类型、子组件和工具函数搬到 `plugin-chatbot/src/chat/`（约 3335 → 1700 行）\n- [ ] #37729 拆分 B：主组件里的工具卡渲染 `renderToolDetail` 搬成独立模块（已转 repo:objectstack#1 座位；按 Fable 意见缩小，`MessageItem` / `ChatComposer` 本轮不拆）\n- [x] #37730 拆分 C：`AiChatPage.tsx` 的 `ChatPane` 和辅助函数搬到独立文件（约 2152 → 550 行；与 A 并行）\n\n共同验收：只搬不改行为，原文件具名 re-export，三个公开入口文件 diff 为空，测试全绿且旧测试不改（C 有两处只改读取范围的例外，写在卡里）。\n\n### 3. 以下暂不派发（Jack 2026-11-26）\n\n1. **答案反馈、长消息折叠**。反馈接口已存在（cloud `routes/feedback-routes.ts`，`GET/POST/DELETE …/turns/:turnId/feedback`），前端未接；需定 HITL 续跑回合上的反馈挂在哪一回合。\n2. **失败回合的写入去重 → “重试”按钮语义**。已完成回合重发只回放；失败或中断的回合重跑时已执行的写入不去重，先补服务端写入去重或断点续跑，再把按钮改为只在失败或停止时出现的“重试”。\n3. **ask_which 选项卡**：前端把已有的 ask_which 画成选项卡（加“其他”），点选后作为新一轮发送；改动需同步问数评测 `ambiguous` 判分基线。\n4. **ADR → 暂停式工具 → 审批卡、待确认收件箱**。在现有 `requestTurnEnd` / `TurnEndSink` 上扩展“恢复时把人的回答写成该工具调用的结果”。开工前先写 ADR：修订 ADR-0013 加“已暂停”回合状态（回合幂等）、悬空工具调用与 `pending_approval` 占位、并行批次等齐、写入暂扣（held）与后台续跑、恢复后预算累计或重置、和 `proposal-replay.ts` 的关系、旧 HITL 标记消息兼容。之后做按动作类型的审批卡（字段当前值 → 新值）、同回合多条逐条过与“全部批准”、有待审批时输入框位置显示卡片、挂上已写好的 `AiPendingActionsInbox`。首期不做“批准前改参数”。\n5. **思考步骤时间线、记录行展示**：保留三档（隐藏/摘要/调试），摘要档改为“思考了 N 步 · 用时 X 秒”时间线，接上已有 `tool-display.ts`；查询类工具返回的记录画成可点记录行。\n6. **“+”菜单、引用回复**：附件和“加记录”合并，加记录复用 ChatFocusRow 并扩到任意搜索到的记录。忙时排队已有，不做；模型选择器归模型档位专题。\n7. **可续流、额度横幅与压缩提示、工具参数自动修复**：每回合一个流 id、服务端缓存事件、前端刷新后重连（先不搬后台作业）；额度用尽或每步扣额度停下时的横幅、上下文压缩提示行；参数不合 schema 时先自动修一次。\n\n## 不做\n\n多人协作线程、富文本、语音、表情回应、代码终端、前端组件预览、时间/日程卡、首期的“批准前改参数”。\n\n## 仓库\n\n前端在 objectstack（`plugin-chatbot`、`app-shell` 的 console/ai 与 ChatDock）；loop、反馈接口、ask_which、写入去重、可续流的服务端在 cloud（service-ai、service-ai-studio）。子卡立时按落点分仓，都挂本专题。\n\n## 状态\n\n第 2 段的三张拆分卡已立并挂在本专题下，按子卡自己的标签派发。父单保留 `pm:on-hold`，表示第 3 段七项仍不派发、不立子卡，恢复须 Jack 点头。\n\n"

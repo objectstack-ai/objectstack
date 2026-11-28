@@ -1,0 +1,32 @@
+{
+  "number": 38100,
+  "kind": "pull_request",
+  "title": "fix(plugin-grid): phone card amount slot takes a formula or summary that draws as money",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "size/m",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:17:53Z",
+  "updated_at": "2026-11-28T02:19:17Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38100",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoJgGMcVYe3tSvxAWdknWFST)_\n\nFixes #37890\nrepo:objectstack#3 · os-tesla · session_01L9qibvqGhhENZcAuiMxqA7\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 手机上看订单行、报价行这类明细列表时，卡片右下角的金额现在显示这一行的总额，不再错显示单价；电脑上的表格不变。\n- 属于手机端列表卡片的体验线，替 HotCRM 等有明细行的应用解决金额读错的问题。\n- 只改卡片挑哪一列当金额，数据和接口都不变；若挑错，最多是卡片上金额位置显示另一列，可以直接撤回。\n- 无\n\n## What changes\n- `ui/packages/plugin-grid/src/ObjectGrid.tsx`, `buildMobileCardRenderer`: the amount slot now takes the first shown body column whose value draws as money. That is a `currency` column, or a `formula` / `summary` column for which `resolveFormulaValueType(fieldDef, number)` (the exported `@object-ui/fields` rule the formula cell draws by) answers `currency`: a formula declaring `returnType: 'currency'`, or a summary declaring its currency (`currencyConfig`). The slot is still chosen once for the list, so every card keeps one shape.\n- Unchanged: a masked column is not promoted; a view that presents the field as another type (column `type`) keeps it a plain value; a number-returning formula is not an amount; view order still picks among several money columns; desktop table untouched.\n- No new export (seat ruling: option A). `patch` changeset for `@object-ui/plugin-grid`.\n\n## Why\nOn a phone, an order line (2 × 6,000.00, 10% off) showed its unit price 6,000.00 in the amount slot; the line total 10,800.00 is a formula returning currency, which the slot never considered. Reordering columns did not help: the total moved into the subtitle.\n\n## Tests\n`ui/packages/plugin-grid/src/__tests__/phoneCardAmount-34615.test.tsx`, a new top-level `describe` in the existing harness (390 px):\n- currency formula shown before the unit price → amount `CN¥10,800.00`, subtitle `2 · CN¥6,000.00`;\n- currency formula as the only money column → amount `CN¥10,800.00`;\n- summary declaring its currency → amount `CN¥777.00`;\n- unit price shown first stays the amount (view order unchanged);\n- CONTROL: number-returning formula → no amount line;\n- CONTROL: the currency formula presented as `type: 'text'` → no amount line.\n\n<details><summary>Readings (head f8008254 = b4dd4f20 + merge of origin/main 815e882b..f72f3353)</summary>\n\n- New describe at b4dd4f20: `Tests  11 passed (11)` for the harness file.\n- Ablation on the committed fix (ObjectGrid.tsx restored from base 815e882b, tree only, then restored from HEAD; `drawsAsMoney` count 0 → 2 on disk): `Tests  3 failed | 8 passed (11)`. The three red are exactly the predicted RED directions; both CONTROLs and all five #34615 cases stay green.\n- After merging origin/main (which brought #37929, also in plugin-grid) and rebuilding the closure (`turbo run build --filter='@object-ui/plugin-grid^...'`, 57/57): `pnpm --filter @object-ui/plugin-grid type-check` exit 0; `pnpm --dir ui exec vitest run packages/plugin-grid/`: `Test Files  319 passed (319)`, `Tests  2805 passed (2805)`.\n- eslint on the two changed files: 0 errors (155 warnings, none on the changed hunk).\n- `dispatch-gates --ran` at b4dd4f20: 39 derived, 39 run, all exit 0, 0 NOT MEASURED, 0 unrun.\n</details>\n\n## Acceptance notes\n- Premise measured on origin/main 815e882b before writing (390 px probe, readings on the card's pre-claim report): unit price first → slot `CN¥6,000.00`; total first → slot still `CN¥6,000.00`, total in subtitle; formula-only or summary-only → no slot, though the cell already drew currency.\n- `#37929` and `#37924` also touch `ObjectGrid.tsx`, in hunks far from this one; whichever lands later merges main.\n\n## Verification\nRead first (by risk):\n1. `ObjectGrid.tsx`: `drawsAsMoney` and the `amountCol` line under it.\n2. The new `describe` in `phoneCardAmount-34615.test.tsx`, especially the two CONTROL cases.\n\nTwo-minute check: `pnpm --dir ui exec vitest run packages/plugin-grid/src/__tests__/phoneCardAmount-34615.test.tsx` shows 11 passing; replace `drawsAsMoney(c)` with `c.type === 'currency'` and the same command shows 3 failing.\n\n## Human Minimum\n- [x] 1. Schemas start as Zod; `packages/spec` holds no runtime logic. (not touched)\n- [x] 2. Every name I added uses the casing for its kind.\n- [x] 3. No formatter ran; `pnpm lint` passes. (eslint on the two changed files: 0 errors)\n- [x] 4. One issue, one branch off an up-to-date `main`, one pull request.\n- [x] 5. A change that publishes carries a changeset, and both declaration lines are filled in here and in the changeset.\n- [x] 6. `packages/spec` touched: n/a.\n- [x] 7. No hand edits to `content/docs/references/`, `packages/*/CHANGELOG.md` or `content/docs/releases/`.\n- [x] 8. Title, body and comments are in English.\n- [x] The *Before Submitting* list in CONTRIBUTING.md is done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibvqGhhENZcAuiMxqA7)_\n"
+}

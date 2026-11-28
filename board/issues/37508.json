@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:ui",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T09:27:05Z",
-  "updated_at": "2026-11-27T06:31:33Z",
+  "updated_at": "2026-11-28T01:18:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37508",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding S3d of the seat's L2 on PR #37489 (#37225), record 7187820695; the seat asked the owning zone to card it under #37225. Source: reviewer.\nGrading: area:ux · Bug · p2 (triage grades) · reach: the metadata-admin field-selector widget, if any form declares it · evidence: L2 record 7187820695; os-dev report 7187574466.\n\n## 维护者速读\n\n- 做什么：后台元数据表单的「字段选择」控件读 /api/v1/objects/:name/fields，但服务端没有注册这个路由，也没有表单用这个控件。要么补路由，要么删掉这个休眠控件。\n- 谁受益：维护代码的人；以后有人启用这个控件时不会拿到 404。\n- 不做会怎样：一段没人能用的代码继续留着，启用即坏。\n- 需要你做的：无。\n\n## What\n\n- `ui/packages/app-shell/src/views/metadata-admin/widgets.tsx` `fetchFieldSelectorOptions` reads `/api/v1/objects/:name/fields`; no server route registers it and no form in either tree declares the widget (read-only inference in the #37225 dev report).\n- Confirm by census, then either point it at the route that serves an object's fields or retire the widget.\n\n## Acceptance\n\n- The widget reads a served route (pinned), or it is removed with its tests.\n\nBlocked-by: #37225"

@@ -14,18 +14,20 @@
     "area:fleet",
     "bug",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T05:38:05Z",
-  "updated_at": "2026-11-26T06:25:43Z",
+  "updated_at": "2026-11-28T02:19:56Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 3,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37446",
   "body": "repo:objectstack#5 · os-bill · session_01Utp6Ca6EBDpTBZk8v46Jjv\n\nFiling gate: ② review finding, the seat's analysis of the ADR-0087 refusal on PR #37433 (#36987); the seat asked the owning zone to file it under #36987, suggesting p1 (permissive gate). Source: reviewer.\nGrading: area:fleet · Bug · p1 suggested (triage grades) · reach: every `type-surface-only` marker on a function-typed property; a permissive misread lets a real narrowing pass predicate 4 · evidence: the refusal the #36987 dev captured on head ac218b24 (os-dev report 7183552545, attempt 2).\n\n## 维护者速读\n\n- 做什么：ADR-0087 登记检查把 `名字: (参数) => 返回类型` 这种属性读成「没写返回类型」，再判成擦除类型。\n- 谁受益：靠这道检查拦截公开类型收窄的审查者。\n- 不做会怎样：有人把具体返回类型的箭头属性改成方法签名，检查可能放行一次真实的收窄（这一点是从读取代码推断的，未跑完整检查验证）。\n- 需要你做的：无。\n\n## What\n\n- `scripts/check-adr-0087-registration.mjs`: `memberDefinitionsIn` (~:3606–3610) reads a function-typed property signature `name: (…) => T` as carrying no return annotation; ~:4229 then judges it erased. On PR #37433 both base (`Promise<AuthUser>`) and head (`Promise<void>`) of `ui/packages/auth/src/types.ts#updateUser` read \"carries NO return annotation\", though both are concretely annotated.\n- Permissive consequence (inferred from the reader, not a full gate run): a concrete arrow-property base with a method-signature head would read as \"moved off erased\" and pass predicate 4.\n- Read the return type of a function-typed property signature as its annotation, at both revs.\n\n## Acceptance\n\n- A function-typed property with a concrete return reads as annotated at both revs; pins for arrow-property → arrow-property, arrow-property → method signature (no longer passes as narrowed-from-erased), and a truly erased base (still admitted).\n\nBlocked-by: none. Order: independent of #36987's ruling.\n\nReader: area:fleet / domain:devx triage.\nDedupe: open issues for \"check-adr-0087-registration return annotation\" return none."

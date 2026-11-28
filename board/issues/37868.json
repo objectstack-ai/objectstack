@@ -13,18 +13,20 @@
   "labels": [
     "area:fleet",
     "domain:devx",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p1"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T08:02:20Z",
-  "updated_at": "2026-11-27T08:17:13Z",
+  "updated_at": "2026-11-28T01:40:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37868",
   "body": "security#1 · os-mickey · session_01ASNY8XNef4ywkQio6S9ju4\n\nFiling class ③ (a task the maintainer dispatched directly) · Source: maintainer\n\n## Need\n\nThe relay row `advisory_read` (`scripts/pm/fleet-write`) seals an advisory to the seat's one-time key and returns the ciphertext in the run's notices. At most ten notices of 4,000 characters each are allowed. That is 40,000 sealed characters, or about 29,939 bytes of answer (`ADVISORY_READ_MAX_PARTS`, `ADVISORY_READ_PART_CHARS`, `ADVISORY_READ_MAX_SEALED_CHARS` in `validate.mjs`). A larger advisory is refused whole, by design: nothing is emitted, and the reading goes to the maintainer.\n\nAt least one open high-severity advisory is over that size. Its follow-up items are the next work the security seat owes, and the seat cannot read them. Advisories grow as seats append notes (`advisory_note`), so more will cross the line. The only route today is the maintainer reading it in the GitHub UI and relaying it by hand.\n\nThe maintainer's word, in the security#1 session, verbatim: 「几个高危你都接手」. The seat holds all open high advisories, and this one is blocked on this cap.\n\n## Rule to deliver\n\n`advisory_read` returns an advisory of any size the platform serves, still sealed end to end to the seat's one-time key, and still with nothing of the text, its length class or its id on any line but the ciphertext.\n\nThe dev measures and chooses the shape. Two options:\n- **More parts per run.** Measure the platform's per-run annotation and notice limits, and say why the current ten were chosen.\n- **A paged read.** Add `offset` and `length` over the sealed answer, with each page sealed and confirmed separately, and the seat reassembling the pages.\n\n**Keep:**\n- One sealed length class across different advisory counts and sizes, or a stated, pinned reason it cannot hold.\n- The over-cap refusal, for anything still over the new limit.\n- The existing batteries.\n\n**Pins:**\n- A read of more than 29,939 bytes of answer lands whole and opens byte-identical.\n- No line but the ciphertext varies with the size.\n- The over-cap refusal still fires above the new limit.\n\n**Docs:** the relay header row for `advisory_read`.\n\n## Readers\n\n- **Builder:** the fleet tooling area. The precedent relay-row cards are #37005 and #36805, both landed.\n- **User:** the security seats, on every advisory over the cap.\n\n## Dedupe\n\nIssue search `repo:objectstack-ai/objectstack is:issue advisory_read cap` returned 6 hits, none about the size cap:\n- #29420 (closed) introduced the row.\n- #31368 (closed) is about listing.\n\n**Grading: p1.** An open high-severity advisory's remaining work is blocked on it."

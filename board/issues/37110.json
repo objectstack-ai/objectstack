@@ -2,8 +2,8 @@
   "number": 37110,
   "kind": "issue",
   "title": "service-knowledge: event sync re-reads inside the uncommitted write, so a rollback leaves the index stale until the next event or a reindex",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -13,18 +13,23 @@
   "labels": [
     "area:ai",
     "domain:server",
-    "pm:queue",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-24T19:47:08Z",
-  "updated_at": "2026-11-27T20:13:24Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-27T23:06:14Z",
+  "closed_at": "2026-11-27T23:03:40Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37110",
   "body": "repo:objectstack#4 · os-justin · session_01QSeKYpRrYuqSLCvbSk9zrL\n\nFiling gate: ① product defect (a consistency defect, reproducible by construction). Source: L1 review of PR #37075 (#36991), seat comment 7141806791; zone a4-K, epic #37000 phase 4 (event-sync failure handling).\nGrading: area:ai · Bug · p3 · reach: apps that mount `service-knowledge` with event sync and roll back writes after the record event is published · evidence: read (call sites below, measured by the dev of PR #37075 on origin/main 8aecf6d7).\n\n## 维护者速读\n- 问题：记录写入时，知识索引同步在写事务提交之前就跑了。如果这次写入最后回滚，索引会和数据库不一致：要么留下一条根据未提交数据建的文档，要么把一条本该在索引里的记录删掉，直到这条记录下次变动或整源重建。\n- 修法方向：放到专题第 4 期（事件同步的失败处理 / 队列）一起做：在提交后再同步，或提交后补偿。\n- 需要你做的：无。\n\n## What is true now (after PR #37075)\n- `data.record.created` / `data.record.updated` are published inside the write, after the `after*` hooks and before the write's own unit or a caller's transaction commits (`packages/objectql/src/engine-insert.ts:386` and `:1716`, `engine-update.ts:529` and `:2445`). Publishing awaits the in-process realtime adapter, which awaits each subscriber (`engine-realtime-publish.ts:484`, `in-memory-realtime-adapter.ts:98`).\n- `KnowledgeService.handleRecordUpsert` re-reads the row by `where ∧ id` under the system context; the ambient transaction store (`engine-driver-options.ts:304-306`) puts that read inside the open transaction, so it sees the uncommitted row.\n- `data.record.restored` is published after the restore's own unit commits (`packages/objectql/src/recycle-bin/restore.ts:451`, `:470`, `:756`) — not affected.\n\n## The two rollback outcomes\n1. The uncommitted row matched the source `where`: the document is upserted from a row that never committed, and stays until the record's next event or a `reindexSource`.\n2. The uncommitted row did not match: the document is deleted, so the committed row — which may still match — is missing from the index until its next event or a `reindexSource`.\n\nAlso (S1 in the same review): the per-document sync chain is awaited inline, so one request's write can wait behind another request's in-flight sync of the same document; on a single-connection pool (SQLite) that wait can last until the pool's acquire timeout. The index still ends consistent.\n\n## Acceptance (for whoever picks this up in phase 4)\n- A test that rolls back a write after the event is published, for both outcomes, and asserts the index matches the committed database afterwards.\n- No new adapter-contract member unless ADR #37001 lists it.\n\nParent: #37000 (phase 4). Reader: the zone that holds epic #37000's phase-4 rows.\nDedupe: `knowledge rollback index` 0 open · `event sync transaction knowledge` 0 open on this mechanism."

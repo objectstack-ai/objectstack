@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:server",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-27T07:34:36Z",
-  "updated_at": "2026-11-27T08:17:07Z",
+  "updated_at": "2026-11-28T01:20:14Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 1,
+  "comments": 2,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37864",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (contract review 7212586209 on PR #37845, Fixes #37811)\n\n## What happens\n\nPR #37845 makes the dispatcher's remaining fixed-English `501` answers follow the request's language. Its review accepted these as left open:\n\n- [ ] **The `capabilityUnavailable` family is still English.** `packages/runtime/src/domains/unavailable.ts` answers a mounted route with no implementation with the same remedy sentence discovery reports for the slot (`serviceUnavailableMessage`). It has about ten call sites across `ai.ts`, `automation.ts`, `notifications.ts` and `ui.ts`, and is the largest English `501` family left. Seat note 7210862044 on #37811 named it; PR #37845 kept it English on purpose, because the sentence is shared with discovery's `services.<slot>.message`. Localize both together, or rule that discovery stays English and the `501` gets its own keys.\n- [ ] **N1: the `requestLocaleOf` jsdoc** says the non-bridge doors reach it through `catalogNotImplemented`; `catalog-activation.ts` also calls it directly for the noun.\n- [ ] **N2: the MCP skill door's `501`** (`mcp.ts`, `handleMcpSkillRequest`) has no per-door language pin. Only one activation noun is rendered through its door in tests, and nothing ties `CatalogActivationType` to the noun keys.\n- [ ] **N3: `zh-CN` says `定制软件包`** for the customization package in three sentences; the console's `zh-Hans` bundle says `定制包`. Pick one term.\n- [ ] **N4: the source walk in `domain-501-language-37811.test.ts`** counts parentheses without reading string literals and sees only a literal `deps.error(…, 501)`. A `501` through a wrapper or `deps.errorFromThrown(e, 501)` is not caught.\n\n## Done when\n\nEach box above is fixed, or closed with a reason. English sentences, statuses and `error.code` stay byte for byte.\n\nGrade: area:ux · bug · reach: error-message language on unimplemented routes · evidence: the review record above\nSuggested-grade: p3\nSize: M\nRelated: PR #37845, #37811, PR #37813."

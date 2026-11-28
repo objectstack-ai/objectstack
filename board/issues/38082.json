@@ -1,0 +1,30 @@
+{
+  "number": 38082,
+  "kind": "issue",
+  "title": "专题：控制台首屏 2.5 秒内打开（首页、对象列表、记录页）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "pm:epic",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T01:46:08Z",
+  "updated_at": "2026-11-28T01:46:08Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38082",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed topic parent. The maintainer, verbatim, 2026-11-28: 「#37408 元数据的声明式动作 继续暂停，其他同意」, approving triage's topic review (close, tidy, open).\n\n## 维护者速读\n- 是什么：首页、对象列表、记录页第一次打开都要在 2.5 秒内显示主要内容，目前在 2.5 到 2.7 秒之间（最初是 3.6 到 4.6 秒）。\n- 现状：座位 2 已经在做，这个专题只是把相关卡收在一起。\n- 要你做什么：无。\n\n## Children\n- #37444 the 2.5 s LCP target for home, object list and record page (goal card)\n- #37575 main-thread script evaluation before LCP\n- #37572 the eager JS closure (1.95 MB)\n- #37903 metadata readers subscribe by selector"
+}

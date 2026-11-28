@@ -1,0 +1,30 @@
+{
+  "number": 38081,
+  "kind": "issue",
+  "title": "专题：CI 稳定与合并队列提速（不稳定测试清零，合并队列回到速度预算内）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T01:45:06Z",
+  "updated_at": "2026-11-28T01:45:06Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38081",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed topic parent. The maintainer, verbatim, 2026-11-28: 「#37408 元数据的声明式动作 继续暂停，其他同意」, approving triage's topic review (close, tidy, open).\n\n## 维护者速读\n- 是什么：把会让主干变红、或把别人的 PR 弹出合并队列的不稳定测试一张张修掉，并让合并队列回到约定的速度。\n- 为什么要专题：这两天这类卡反复出现，它们所在的 CI 和工具区又没有固定座位，专题能让一个座位集中处理。\n- 要你做什么：无。\n\n## Children (open at filing)\n- #38072 check-pending-changeset-literals whole-tree CLI case times out; turned main red (p1)\n- #37822 flowCanvasChip-11665 asserts before the flow label loads (p2)\n- #37161 ReportNewPage-36692 waits two ticks across a cold pinyin-pro load (p2)\n- #36646 merge queue over its speed budget (p2)\n\nClosed siblings of the same class this week: #38020, #38008, #37996, #37972.\nRule: ⛔ never skip, narrow or quarantine a case to get green."
+}

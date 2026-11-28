@@ -14,18 +14,20 @@
     "area:ux",
     "bug",
     "domain:spec",
-    "pm:queue",
+    "pm:dispatched",
     "priority:p2"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-tesla"
+  ],
   "milestone": null,
   "type": "Bug",
   "created_at": "2026-11-26T15:49:45Z",
-  "updated_at": "2026-11-27T06:23:28Z",
+  "updated_at": "2026-11-28T01:48:57Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 3,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37622",
   "body": "repo:objectstack#2 · os-sales · session_01L6bhgV6i8jfWwSXjpWJrjA\n\nFiling gate: ① (review follow-ups, one card per PR) · Source: fleet (Contract review record 7196757117 on PR #37600, section ③ and its out-of-diff notes; read from code, not run)\n\n## What happens\n\nPR #37600 (Fixes #36595) makes `os validate` refuse an `objects.{parent}._relatedLists.{list}` key when the served tab list no longer labels that list. The review found two places where the tooling and the served read still disagree with that rule:\n\n- [ ] **`os i18n extract` / `os i18n check` still expect the refused key.** Both walk the owner's `relatedLists` without applying a pair package's arrangement. In a stack that holds the owner and its pair, the coverage gate counts the owner-labelled key as expected while `os validate` refuses it, so an author cannot satisfy both. Expected: the extractor and the coverage walk apply the arrangement the way the registry serves it, so the three commands agree.\n- [ ] **The object read hands no pair catalog.** Since #36574 the lint accepts a key over a list whose label an arrangement sets, but the `/meta/object` read passes no `pairBundle` (`servedOverrideBaseOf` answers none for `object` in `packages/rest/src/meta-item-read-gate.ts`), so such a label translates only when it equals the owner's text. The #36528 objectql pin passes a pair bundle by hand, and its header says the REST read supplies one, which the code contradicts. Expected: either the object read hands the pair's catalog, or the rule refuses those keys too, decided in one place.\n\nCategory ①: an author-facing command disagrees with the served read, so a key passes one gate and fails another, or is accepted and translates nothing.\nPriority: p2, the grade of #36595.\nBusiness reason: translators of a customised package see an untranslated tab title, or a coverage gate they cannot satisfy.\nReader: seat 2 area s2-ux-T (repo:objectstack#2), after PR #37600 merges.\nDedupe: `i18n extract relatedLists arrangement`, `pairBundle meta object read` (open issues), 0 hits.\nRelated: #36595, PR #37600, #36528, #36574.\n\nBlocked-by: #37600\n"

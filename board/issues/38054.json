@@ -1,0 +1,36 @@
+{
+  "number": 38054,
+  "kind": "pull_request",
+  "title": "test(knowledge-pgvector): live PostgreSQL case with no adapter and no requires",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "size/s",
+    "skip-changeset",
+    "tests"
+  ],
+  "assignees": [
+    "os-elon-musk"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T22:17:27Z",
+  "updated_at": "2026-11-28T00:45:56Z",
+  "closed_at": "2026-11-28T00:45:54Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-28T00:45:54Z",
+  "comments": 4,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38054",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFixes #38040\n\n## 维护者速读\n- 用户无感:只是测试,不改任何运行行为。\n- 补上真实 PostgreSQL 上「知识源不写存储、也不声明需要知识服务」这一条的端到端验证,承接知识检索那一组改动。\n- 只是新增测试,可直接撤回;已在真实 PostgreSQL 上跑过,去掉新接线的任何一处都会让它变红。\n- 需要你做的:无。\n\n## What changes\n`capability-mount.live-postgres.test.ts` gains a second block beside the explicit control: a stack that ships one `knowledge_source` with no `adapter` and lists no `knowledge` token. It asserts the item alone adds the token (`stackItemCapabilities` into `resolveServedCapabilities`, `byItems`), the deployment-store mark is `{ deploymentAdapter: 'pgvector' }` (`resolveCapabilityArgument`), the service mounts and the store is healthy, passages land in the pgvector tables of the live schema, and `search_knowledge` returns them with the source id. The explicit case is unchanged.\n\n## Tests\nLive suite on private PostgreSQL 16 + pgvector (UTF8, `OS_EXPECT_LIVE_DIALECT_MATRIX=1`), head `abf7914641`, under `os-verify-lock` (`VERDICT command-exit 0`, held 186s, shared box): 1 file, 4/4 passed (2 control, 2 new). Typecheck of `knowledge-pgvector`: exit 0.\n\nAblation 1 (`stackItemCapabilities` returns nothing, core rebuilt): the new block is red, `expected [] to deeply equal ['knowledge']`; the control passes. Ablation 2 (`resolveCapabilityArgument('knowledge')` returns no argument, core rebuilt): the new block is red, `expected undefined to deeply equal { deploymentAdapter: 'pgvector' }`; the control passes. Restored, core rebuilt (exit 0), final re-run 4/4 green. In ablation 1 the core d.ts build errored on the mutation's unused variables (TS6133), but the JS was emitted and the red shows the mutation was live. Record: comment 7230806559.\n\n## Acceptance notes\noverlap-check against origin/main: VERDICT clean exit 0. No source change; no changeset (test only).\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nhttps://claude.ai/code/session_016WV4cwPhGV4g9p1BGQaZbP\n\n"
+}

@@ -1,0 +1,34 @@
+{
+  "number": 38090,
+  "kind": "pull_request",
+  "title": "fix(spec): the retired messageFormat refusal names the {{variable}} placeholder t() fills",
+  "state": "open",
+  "state_reason": null,
+  "draft": true,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:system",
+    "size/s",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T02:05:14Z",
+  "updated_at": "2026-11-28T02:06:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38090",
+  "body": "<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6JaoXS7Daoe6Cmrje6WLBetHfU)_\n\nFixes #37894\nrepo:objectstack#3 · os-tesla · session_01L9qibwkdBniBpoGeJ6E9WM\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n- 搭建者在多语言配置里还写着已退役的消息格式设置时，报错现在说对了占位符写法：用双花括号，单花括号会原样显示；以前的报错教人写单花括号，照做的翻译会把占位符原样印给用户。\n- 属于「错误的元数据在作者门口被拒，并给出正确处方」这条线，替照着报错写翻译的搭建者和 AI 解决占位符填不上的问题。\n- 只改报错文字和一句文档，哪些配置被拒完全不变；若新说法有误，最多是提示不准，可以直接撤回。\n- 无\n\n## What changes\n- `packages/spec/src/system/translation.zod.ts`: the `messageFormat` tombstone guidance on `TranslationConfigSchema` now reads \"interpolation is always simple `{{variable}}` substitution (double braces — a single-brace `{variable}` is left as written)\". The schema's docblock says the same. `messageFormat` is refused exactly as before; no key, value, export or `.describe()` changes.\n- `content/docs/ui/translations.mdx`: the \"No ICU MessageFormat\" bullet carried the same sentence; it now says `{{variable}}` too.\n- `patch` changeset for `@objectstack/spec`.\n\nSurvey behind the sentence, every path that fills a translation bundle's placeholders, read at 815e882b:\n- server `t()`, `FileI18nAdapter` (`packages/services/service-i18n/src/file-i18n-adapter.ts`, `interpolate`): `{{name}}` only;\n- server `t()`, the kernel's in-memory fallback (`packages/core/src/fallbacks/memory-i18n.ts`): the same pattern;\n- the console's i18next (`ui/packages/i18n/src/i18n.ts` leaves prefix and suffix at i18next's default): `{{name}}`;\n- spec's `interpolateValidationMessage` (platform validation and operation messages): `{{name}}`.\nNone of them fills a single-brace `{name}`.\n\n## Tests\n- `packages/services/service-i18n/src/file-i18n-adapter.test.ts`, new top-level `describe` \"the retired `messageFormat` guidance names the placeholder `t()` fills\". It takes both spellings from the refusal itself (`TranslationConfigSchema.safeParse` with `messageFormat` set), never retyped, and feeds them to `FileI18nAdapter.t()` and `createMemoryI18n().t()`:\n  - the spelling the guidance names is filled (`Hello, Ada!`);\n  - the single-brace spelling it warns about is left as written.\n\n<details><summary>Readings at 2eac69f5 (base origin/main 815e882b)</summary>\n\n- Premise at 815e882b, through a throwaway probe test (deleted): `FileI18nAdapter.t()` and `createMemoryI18n().t()` returned `Hello, {name}!` for `'Hello, {name}!'` and `Hello, Ada!` for `'Hello, {{name}}!'`; the refusal carried \"interpolation is always simple `{variable}` substitution\".\n- Ablation through `scripts/ablation-replace.mjs` on the committed fix: the guidance put back to its old text, `@objectstack/spec` rebuilt, `ablation-dist-preflight.mjs` marker present in 2 built files, then `vitest run src/file-i18n-adapter.test.ts`: all 4 new pins FAIL. Restore: blob == HEAD, `git diff HEAD` empty; rebuilt, preflight `--absent` clean on 469 files and the tree; `Tests  51 passed (51)`.\n- `pnpm --filter @objectstack/spec build && check:generated` exit 0 (\"All 14 generated artifacts are up to date\"); `pnpm --filter @objectstack/spec test`: `Test Files  909 passed (909)`, `Tests  28799 passed | 1 todo (28800)`.\n- `pnpm --filter @objectstack/service-i18n typecheck` exit 0; `test`: `Test Files  4 passed (4)`, `Tests  77 passed (77)`; `eslint` on the two changed `.ts` exit 0.\n</details>\n\n## Acceptance notes\n- Derived local gate set at 2eac69f5: `dispatch-gates --ran` with recorded exit codes reconciles 116 derived, 113 run, 3 NOT MEASURED (exit 3), 0 unrun. Of the 113, 112 exit 0. The one red is `check:dts-closure` (exit 1), and it is about this container's build state, not the diff: I built several packages with `OS_SKIP_DTS=1` for speed, so `@objectstack/core` and 13 others hold no `.d.ts` here. The diff moves no package's build; CI builds with declarations and runs this gate.\n- Three gates first refused (exit 3) because those `OS_SKIP_DTS` builds had also replaced `@objectstack/spec`'s declarations, and `check:i18n-walk-parity` refused because the CLI was not built. Re-run after a full spec build and a CLI build, all exit 0: `check:dual-source-exports`, `check:entry-nameability`, `check:exported-any`, `check:i18n-walk-parity`, and `check:api-surface` / `check:docs` again for good measure. `check:doc-formula-expressions` and `check:doc-security-posture` exit 0 after building `@objectstack/lint`.\n- Left to CI (prerequisite not met here): `check-plugin-teardown-shape.mjs --self-test` (its fixture commit is out of this shallow clone), `check:skill-examples` (needs `@objectstack/client-react` declarations) and `check:dual-build-cjs-loads` (needs a full `pnpm build`).\n- Out of scope, noted for the seat to file: the server `t()` paths do not fill a spaced `{{ name }}` (measured: `FileI18nAdapter.t()` returns `Hello, {{ name }}!`), while the console's i18next trims the name and does. The same bundle key can render filled in the console and raw in server-rendered text.\n- Out of scope, not touched: two released entries in `packages/spec/CHANGELOG.md` carry the old `{variable}` sentence; CHANGELOG is release-owned.\n- Not changed: the validation-messages bullet in `translations.mdx` says `{variable}` placeholders in an authored rule message are not filled. That stays true of either spelling.\n\n## Verification\nRead first (by risk):\n1. `packages/spec/src/system/translation.zod.ts`: the `messageFormat` guidance string.\n2. `packages/services/service-i18n/src/file-i18n-adapter.test.ts`: the new describe at the end.\n\nTwo-minute check: `pnpm --filter @objectstack/service-i18n exec vitest run src/file-i18n-adapter.test.ts` shows 51 passing; put \"`{variable}` substitution'\" back into the guidance, rebuild `@objectstack/spec`, and the same command shows 4 failing.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibwkdBniBpoGeJ6E9WM)_\n"
+}

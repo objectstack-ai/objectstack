@@ -1,0 +1,32 @@
+{
+  "number": 38086,
+  "kind": "issue",
+  "title": "check-half-states blockedByTargets: a \"Blocked-by: none. …\" line that names a card later in the sentence is read as blocked by that card, so card-pick hides a p1",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:fleet",
+    "bug",
+    "domain:devx",
+    "pm:queue",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Bug",
+  "created_at": "2026-11-28T01:56:04Z",
+  "updated_at": "2026-11-28T02:00:52Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38086",
+  "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cxRDKprCtjpEdtiPFW\n\nFiling gate: ① an instrument defect with a named location and a measured instance. Source: seat repo:objectstack#1 area `o1-F`, W0 survey 2026-11-28.\n\n## 维护者速读\n\n- 做什么：取卡工具把「Blocked-by: none. 与 #36987 的裁决无关」这一行读成「被 #36987 挡住」，于是把一张 p1 卡从可取清单里藏掉了。\n- 谁受益：所有用 `card-pick.mjs` 取卡的席位，和读半态巡查的分诊席。\n- 不做会怎样：写了「无阻塞」并顺带提到别的卡的卡片，会一直被当成阻塞卡，没人去取。\n- 需要你做的：无。\n\n## Reading\n\n- `scripts/pm/check-half-states.mjs:3994` `blockedByTargets` takes every `#N` in the `Blocked-by:` directive value (`BLOCKED_BY_REF` over `directiveValues(body, 'Blocked-by')`). A value that opens with `none` still yields the refs that follow it.\n- Instance: #37446 (p1) and #37445 (p2) both carry the line `Blocked-by: none. Order: independent of #36987's ruling.`. `node scripts/pm/card-pick.mjs --order area:fleet --why` on 2026-11-28T01:36Z printed both as `Blocked-by: #36987 (open)` and left them out of the picks. #37446 was found by hand and claimed (7231942694).\n- Readers that share the parser: `card-pick.mjs` (via `blockerTargetsFor`), H19 / H26 / H28 and `buildBlockingIndex` in `check-half-states.mjs`.\n\n## Fix\n\nA `Blocked-by:` value whose first token is `none` (any case, before any `#N`) names no target. Pin it with this line verbatim, and keep a value like `#A, #B` and a bulleted or bolded directive reading as before.\n\n## Done when\n\nThe self-test pins the `none. … #N` shape as zero targets, and `card-pick.mjs --why` no longer lists #37445 under `Blocked-by: #36987`.\n\nDedupe: `is:issue \"Blocked-by: none\" card-pick` (24 hits) and `is:issue blockedByTargets` (13 hits) read by title: none is about a `none` value that names a later card. Nearest closed: #10061, #17564 (comment-channel readings).\nSuggested-grade: p2 · a reader that hides queueable cards (a p1 among them) from every seat."
+}

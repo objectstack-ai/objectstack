@@ -21,11 +21,11 @@
   "milestone": null,
   "type": "Task",
   "created_at": "2026-11-27T11:30:33Z",
-  "updated_at": "2026-11-27T12:17:57Z",
+  "updated_at": "2026-11-27T21:23:03Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 0,
+  "comments": 1,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37922",
   "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① shipped text out of step with what shipped (release page). Source: fleet. Out-of-scope finding of zone o3-package on PR #37916 (#37522), which closes with that PR, so the seat files it.\nGrading: area:ux · Documentation · p2 · domain:docs.\nReader: seat repo:objectstack#3, zone o3-ux (area:ux p2).\nDedupe: `releases/v19` open: only #37522 (step-19 count, being closed by PR #37916). `37437 staged`: #37521 (a README and comment, other files), #35827 (closed, the change itself). None covers the release page's breaking list.\n\nBusiness reason: an app team upgrading to 19 reads the v19 release page to learn what will break. The data grid's staged edit model (`cellSelection={false}`, pending changes held until the grid's Save) is retired in 19.0.0-next.0 (#35827, PR #37437), so a grid that relied on it now behaves differently. Without a line on the page, the team finds out from users.\n\n## What\n- The v19 release page's breaking-changes list has no bullet for #37437. Measured by zone o3-package against main: the page has 0 hits for `staged` and 0 for `37437`. The page's step-19 migration entry count already names `data-table-staged-edit-retired` (PR #37916).\n- Add one bullet in the page's own form: what was retired, what a grid does now, and what an author changes. Link #35827 and the migration entry.\n\n## Acceptance\n- The breaking list carries the bullet, and the docs gates pass."

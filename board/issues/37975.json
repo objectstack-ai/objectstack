@@ -22,11 +22,11 @@
   "milestone": null,
   "type": "Feature",
   "created_at": "2026-11-27T13:54:25Z",
-  "updated_at": "2026-11-27T19:53:12Z",
+  "updated_at": "2026-11-28T00:42:04Z",
   "closed_at": null,
   "closed_by": null,
   "merged_at": null,
-  "comments": 2,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/37975",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ③ maintainer-directed (topic child of #37000) · Source: maintainer (hotlong, cloud #5 project thread, 2026-11-27 13:41Z): 「但是我们作为元数据开发平台，不能只考虑制度库」 · Spec: objectstack#37000 comment 7220000671 · relayed by seat repo:objectstack#1 (mailbox #37561 comment 7220012379)\nGrading: area:ai · Feature · p3 (topic) · reach: a hosted organization whose source holds more than about 20k passages (ticket history, visit notes, emails); at 1,536-dim float32 one exact search reads ~150 MB at 20k passages and ~1.5 GB at 200k · evidence: read on main 0b539b6abb.\nDedupe: `is:issue knowledge vector index approximate` → 2 (open: #37000 parent, #12708 seat post) · `is:issue libsql_vector_idx` → 3 (open: #37000 parent only).\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：现在每次检索都逐条扫完整张段落表，段落多了（工单、拜访记录、邮件动辄几十万条）会很慢。\n- 做什么：单个知识源段落超过阈值（默认约 2 万条，可配）时，建 libSQL 的近似向量索引走快速检索，再按组织、元数据过滤并逐条复核权限；可见记录少的调用者仍走精确的索引路径。存储里有多个组织时绝不走这条路。\n- 谁受益：托管版上知识量大的客户，检索速度。\n- 需要你做的：无。\n\n## What\nPremise re-read on main 0b539b6abb: the store creates no DiskANN index because `vector_top_k` ranks before the organization filter (`packages/plugins/knowledge-turso/README.md:49`, `turso-adapter.ts:189`). On hosted, one organization per database (cloud ADR-0114), so that filter is moot there.\n\n- Per source, above a passage threshold (default 20k, an option), build a `libsql_vector_idx` and search via `vector_top_k(k × factor)`, then the metadata filter and the per-hit re-check.\n- Callers whose visible ids fit the F3 cap (#37957) keep the exact indexed path.\n- Never take the ANN path where the store holds more than one organization.\n\n## Acceptance\n- At 200k passages, p95 search latency is under a stated bound (measure it and put the number in the PR).\n- recall@10 against the exact scan is ≥ 0.95 on a sample.\n- A store holding more than one organization never takes the ANN path (pinned)."

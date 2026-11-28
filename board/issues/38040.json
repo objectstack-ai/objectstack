@@ -2,8 +2,8 @@
   "number": 38040,
   "kind": "issue",
   "title": "knowledge-pgvector: the live PostgreSQL mount case drops `adapter` and `requires`, so it exercises the deployment store and the item mount",
-  "state": "open",
-  "state_reason": null,
+  "state": "closed",
+  "state_reason": "completed",
   "draft": null,
   "author": {
     "login": "objectstack-fleet[bot]",
@@ -12,18 +12,24 @@
   },
   "labels": [
     "area:ai",
-    "pm:blocked",
+    "domain:server",
     "priority:p3"
   ],
-  "assignees": [],
+  "assignees": [
+    "os-elon-musk"
+  ],
   "milestone": null,
-  "type": null,
+  "type": "Task",
   "created_at": "2026-11-27T19:19:21Z",
-  "updated_at": "2026-11-27T19:19:21Z",
-  "closed_at": null,
-  "closed_by": null,
+  "updated_at": "2026-11-28T01:50:55Z",
+  "closed_at": "2026-11-28T00:45:56Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
   "merged_at": null,
-  "comments": 0,
+  "comments": 4,
   "locked": false,
   "html_url": "https://github.com/objectstack-ai/objectstack/issues/38040",
   "body": "repo:objectstack#1 · os-elon-musk · session_016WV4cwPhGV4g9p1BGQaZbP\n\nFiling gate: ① follow-up of PR #38026 (#37306; contract review N2 / N10 — PostgreSQL acceptance is not measured end to end) · Source: topic #37000\nGrading: area:ai · Test · p3 (suggested: two unit pins already compose to the line; this closes the end-to-end gap) · reach: every PostgreSQL deployment that writes a `knowledge_source` without `adapter` · evidence: read of `packages/plugins/knowledge-pgvector/src/__tests__/capability-mount.live-postgres.test.ts` on main 6e2a8f2bb5 and of PR #38026's Acceptance notes.\nDedupe: `is:issue live-postgres knowledge adapter` → 12 (open: #37306 — the parent change, #37974 — hybrid search; none on this test) · `is:issue capability-mount live postgres knowledge` → 3 (open: #37306 only).\nReader: area o1-C of seat repo:objectstack#1 claims it after triage's first touch.\n\n## 维护者速读\n- 问题：#38026 让知识源可以不写存储、也不必声明需要知识服务；但 CI 里唯一连真实 PostgreSQL 的用例仍写了 `adapter: 'pgvector'` 和 `requires: ['knowledge']`，所以这两件新行为在真实 PostgreSQL 上没有被端到端测到，只靠两个单元测试拼起来。\n- 做什么：在这个真实 PostgreSQL 用例里加一个不写 `adapter`、不写 `requires` 的知识源，确认它被挂载、写进 pgvector 并能检索到。\n- 谁受益：所有在 PostgreSQL 上用知识检索的部署。\n- 需要你做的：无。\n\n## What\n`capability-mount.live-postgres.test.ts` names `adapter: 'pgvector'` and `requires: ['knowledge']`, so it exercises neither the omitted adapter (the source binds to the deployment's marked store) nor the item mount (a `knowledge_source` item alone mounts the service). What pins #37306's PostgreSQL line today is two unit pins composed: `resolveCapabilityArgument('knowledge', postgres)` answers `{ deploymentAdapter: 'pgvector' }` (core), and a source with no adapter binds to the marked store (service-knowledge).\n\nWhat: add a live case (or a second stack in the same file) whose stack ships a `knowledge_source` with no `adapter` and lists no `knowledge` token, boots against the live PostgreSQL, and asserts the service is mounted, the source's passages land in the pgvector tables, and a search returns them. Keep the existing explicit case as the control.\n\n## Acceptance\n- With `OS_TEST_POSTGRES_URL` set, the new case boots, builds and searches through pgvector with neither `adapter` nor `requires` written.\n- Removing the item mount or the deployment-store mark turns it red (ablation named in the PR).\n- The existing explicit case still passes.\n\nBlocked-by: #37306"

@@ -1,0 +1,32 @@
+{
+  "number": 38046,
+  "kind": "issue",
+  "title": "docs/qa: platform-checklist scratch bodies (studio-authoring.json, records-forms.json) carry the action location words #36495 retires and will be refused by the save door",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "bug",
+    "domain:docs",
+    "pm:blocked",
+    "priority:p2"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": "Task",
+  "created_at": "2026-11-27T20:21:54Z",
+  "updated_at": "2026-11-27T21:14:42Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 1,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38046",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\nFiling gate: ① (b) out-of-scope finding, the contract review on PR #37929 (#36495), N7 in record 7227370865, relayed by L1-a in 7227400577. Source: fleet.\nBlocked-by: #36495\n\n## 维护者速读\n\n- 问题：#36495 把动作位置的旧词（`list_toolbar`、`list_item`、`record_header`、`record_more`）收窄成新词以后，平台测试清单里有两份测试项，送进保存接口的样例正文还在用旧词，跑清单时这几步会被拒，看起来像平台坏了。\n- 修法方向：把这些样例正文换成新词，并核对安装样例在 19 版下是否会被重放转换。\n- 优先级 p2：#36495 合并后，跑这两份清单就会出现假失败。\n\n## What happens (per the review at PR #37929's head 0ada6058; re-measure after it merges)\n\n- `docs/qa/platform-checklist/studio-authoring.json:5372` and `docs/qa/platform-checklist/records-forms.json:7273` send scratch bodies with the old words to the save door. At 19 the save door refuses those words.\n- `records-forms.json:77`, the install-local recipe, carries no protocol floor. Whether it replays through the 19 conversion is not verified.\n- The recorded builds `order_to_cash.json` and `travel_expense.json` declare `engines.protocol: ^19`, and the artifact door replays them through the major step, so they are not affected.\n\n## Acceptance\n\n- Every scratch body under `docs/qa/**` that reaches a door uses the new location words. The PR lists each one.\n- The install-local recipe at `records-forms.json:77` is measured: either it replays through the conversion, or it is rewritten.\n- `git grep` over `docs/qa/**` for the four retired words finds only prose that names them as retired."
+}

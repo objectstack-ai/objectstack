@@ -1,0 +1,30 @@
+{
+  "number": 38084,
+  "kind": "issue",
+  "title": "专题：记录页布局与手机卡片（字段页签、概览钉住、各端标题和主按钮一致、手机卡片的金额与副标题）",
+  "state": "open",
+  "state_reason": null,
+  "draft": null,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "area:ux",
+    "pm:epic",
+    "priority:p1"
+  ],
+  "assignees": [],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-28T01:47:44Z",
+  "updated_at": "2026-11-28T01:47:44Z",
+  "closed_at": null,
+  "closed_by": null,
+  "merged_at": null,
+  "comments": 0,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/issues/38084",
+  "body": "triage#1 · hotlong · session_01Q4EjjMnyLqJdzuktEmRPXH\n\nFiling gate: ③ maintainer-directed topic parent. The maintainer, verbatim, 2026-11-28: 「#37408 元数据的声明式动作 继续暂停，其他同意」, approving triage's topic review (close, tidy, open).\n\n## 维护者速读\n- 是什么：记录页的布局开关（字段分页签、宽屏把概览钉在左栏），同一条记录在电脑、右侧预览、手机上标题和主按钮一致，以及手机卡片显示正确的金额和副标题。\n- 来历：记录详情页重做专题（#35590）已关闭，剩下这几张散落各处，其中两张 p1。\n- 要你做什么：无。\n\n## Children\n- #37802 record page field tabs, object key `fieldTabs` (p1)\n- #37792 record page `pinOverview` switch (p1)\n- #36202 title and main action differ across desktop, preview and phone (from closed #35590)\n- #37890 phone grid card shows unit price as the amount\n- #37891 phone card subtitle fields declared by the object"
+}

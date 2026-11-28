@@ -1,0 +1,39 @@
+{
+  "number": 38055,
+  "kind": "pull_request",
+  "title": "fix: navigation.size auto reads and opens as the host default width in nine locales and two record drawers",
+  "state": "closed",
+  "state_reason": null,
+  "draft": false,
+  "author": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "labels": [
+    "documentation",
+    "protocol:data",
+    "protocol:ui",
+    "size/m",
+    "tests",
+    "tooling"
+  ],
+  "assignees": [
+    "os-tesla"
+  ],
+  "milestone": null,
+  "type": null,
+  "created_at": "2026-11-27T22:22:17Z",
+  "updated_at": "2026-11-27T23:46:05Z",
+  "closed_at": "2026-11-27T23:46:03Z",
+  "closed_by": {
+    "login": "objectstack-fleet[bot]",
+    "id": 332303061,
+    "type": "Bot"
+  },
+  "merged_at": "2026-11-27T23:46:03Z",
+  "comments": 9,
+  "locked": false,
+  "html_url": "https://github.com/objectstack-ai/objectstack/pull/38055",
+  "body": "repo:objectstack#3 · os-tesla · session_01L9qibyUSf2nKJWW6qBemSU\n\n<!-- claude-projects-attribution: {\"github_login\":\"os-tesla\"} -->\n_Requested by **Tesla** · [project thread](https://claude.ai/code/project/chan_01AXsQkLFKRdQCqQ3RTr6Jao?thread=cmsg_01AXsQkLFKRdQCqQ3RTr6Jao35vwZgq8YDbyD7NhqgGRxr)_\n\nFixes #36730\n\nClause-②: no\nMetadata-protocol: none\n\n## 维护者速读\n\n- 用户能看到什么变化：九种语言的 Studio 元数据表单里，导航「尺寸」的帮助文字不再说 auto 按字段数推导；数据页和界面列表页的记录侧边抽屉改为和对象列表一样以 460px 打开，并且可以拖宽拖窄、记住宽度。\n- 为什么做：上一轮只改了英文和简体中文，另外九种语言和两处抽屉还停在旧行为，这张卡收尾。\n- 出错会怎样：最坏是这两处抽屉宽度和之前不同，或帮助文字某种语言措辞不准，不影响数据，直接撤回即可。\n- 要你做什么：无。\n\n## What changes\n\n- **(a) Nine locale bundles.** `navigation.size.helpText` in the ar, de, es-ES, fr, ja-JP, ko, pt-BR, ru and zh-Hant `metadata-forms.generated.ts` bundles now translates the current English sentence (the same meaning as en and zh-CN): `'auto'` keeps the host's fixed default width, the same for every object whatever its field count (460px in the console), the sm..full buckets and their caps, a dragged width wins, and where it has no effect. The retired \"derived from field count + viewport; AI writes nothing\" sentence is gone from every leaf. Only the leaf string changed; no key was added or dropped.\n- **(b) Two record drawers.** The bare data page (`ObjectDataPage`) and the interface list page (`InterfaceListPage`) opened their record drawer at `NavigationOverlay`'s own 42rem and passed no `storageKey`, so the drawer could not be resized. Now:\n  - `/data` has no view and nothing authors a size there, so its drawer opens at `RECORD_PREVIEW_DEFAULT_WIDTH` (the side preview's 460) and keeps a dragged width under `RECORD_PREVIEW_WIDTH_KEY`, as the object list's drawer does.\n  - The interface list page passes `recordPaneWidth(viewDef.navigation, objectDef)` and `recordPreviewWidthKey(cfg.source, viewDef.navigation)` from its source view, so an authored `size` bucket or pixel `width` is honoured and keeps its own per-object key; otherwise it is the 460 default with the shared key.\n- **(c) Comments and TSDoc (no behaviour).**\n  - `RecordFlowSurface.size` (spec `record-surface.ts`) no longer claims to map onto `navigation.size` / `FormView.modalSize`; it says what reads it (the console's create / edit dialog turns `'full'` into its full-screen sheet) and that the drawer's width does not.\n  - The deprecated `navigation.width` TSDoc (spec `view.zod.ts`) no longer says \"kept only as a renderer fallback\": an authored `width` wins over `size` where a renderer reads both.\n  - plugin-view `recordSurface.ts` (`OverlaySize`, `deriveOverlaySize`, `overlayWidthFor`, the file header) and react `useNavigationOverlay.ts` (`OVERLAY_SIZE_WIDTHS`, `resolveOverlayWidth`) no longer call the field-count bucket the `'auto'` path, and `OverlaySize` is no longer paired with `FormView.modalSize`.\n  - `ui/e2e/toast-under-modal.spec.ts` says ObjectView passes `recordPaneWidth(...)`, not `overlayWidthFor(...)`.\n- Changeset: patch for `@objectstack/platform-objects`, `@objectstack/spec`, `@object-ui/app-shell`, `@object-ui/plugin-view`, `@object-ui/react`. The spec, plugin-view and react edits are comment-only but ship in published bytes (`src/**/*.zod.ts`, `.d.ts` TSDoc), so they take a patch, not `skip-changeset`.\n\n## Tests\n\n- New `InterfaceListPage.drawerWidth-36730.test.tsx` (3 cases) and a new top-level describe in `ObjectDataPage.openRule-35875.test.tsx` (2 cases), through the real page, `ListView` and `NavigationOverlay`, reading the drawer card's `--ov-w`:\n  - no size: 460, not 42rem (both pages);\n  - a width under the shared preview key opens there (both pages), and the data page's drawer draws the resize separator;\n  - interface list, source view `size: 'xl'`: opens at the xl bucket and the shared width does not replace it.\n- Ablation: with `ObjectDataPage.tsx` and `InterfaceListPage.tsx` restored to `origin/main` (b4c99b8d), all 5 new cases go red (`expected '42rem' to be 'min(92vw, 460px)'` and the like); restored to the fix, 5/5 green.\n- (a) re-check: each of the nine leaves read against en, not by grepping \"field count\" (which misses non-English leaves).\n\nRework at `b68e9553` (L2 S1 in 7229399221 and the nit): comments and changeset text only, 3 files, +10/−7, with no `.describe()` line changed against `origin/main`. Re-run there: spec build 0, `check:generated` 14/14 up to date, spec tsc 0, eslint on the two files 0, `check-empty-changeset` 0, `check-changeset-no-major` 0, `check:nul-bytes` 0. The runs below are at `b17aa295`, and no code line moved after them.\n\n<details><summary>Local runs at b17aa295</summary>\n\n- `pnpm --dir ui exec vitest run packages/plugin-view/src/ packages/react/src/hooks/ packages/app-shell/src/views/__tests__/recordPreviewWidth-36149.test.tsx packages/app-shell/src/views/InterfaceListPage packages/app-shell/src/views/ObjectDataPage` → Test Files 135 passed (135), Tests 1394 passed (1394)\n- `pnpm --filter @objectstack/platform-objects test` → Test Files 130 passed, Tests 2214 passed\n- `pnpm exec turbo run type-check --filter=@object-ui/app-shell --filter=@object-ui/plugin-view --filter=@object-ui/react` → exit 0\n- `pnpm --filter @objectstack/spec exec tsc --noEmit` → exit 0\n- `pnpm --filter @objectstack/spec check:generated` (after a spec build) → all 14 generated artifacts up to date\n- `pnpm check:i18n` (after its build closure) → `check-i18n-bundles: OK (10 package(s) — all bundles in sync, no undeclared authoring keys)`\n- eslint over the 9 touched source/test files → 0 errors\n- `pnpm --dir ui run check:new-line-citations` → 0 new citations\n- `dispatch-gates --commands` (96 families) → `--ran`: 94 run, 2 NOT MEASURED, 0 unrun. Not measured (prerequisite, exit 3): `check-plugin-teardown-shape --self-test` (needs an unshallow clone) and `check:dual-build-cjs-loads` (needs a full `pnpm build`); both are left to CI. `check:dts-closure` was red on the first run only because an earlier `OS_SKIP_DTS=1` build left no `.d.ts`; after real builds it reports 312/312 declaration files present.\n\n</details>\n\n## Acceptance notes\n\n- The `/data` drawer and the interface list drawer now show a drag handle; before this change they had none. That follows from sharing the side preview's key, which the claim asked for.\n- `deriveOverlaySize` (field count → bucket) is still exported from `@object-ui/plugin-view`; no console surface calls it for `'auto'` any more. Removing it is not in this card.\n\n## Verification\n\nOpen `/apps/APP/OBJECT/data`, hover a record name and click 「Open in side panel」: the drawer opens about 460px wide (not 672px) and its left edge can be dragged; the width you drag is the width the object list's side preview opens at next.\n\n---\n_Generated by [Claude Code](https://claude.ai/code/session_01L9qibzZa1L8r7yGLe8nsmm)_\n\n"
+}
