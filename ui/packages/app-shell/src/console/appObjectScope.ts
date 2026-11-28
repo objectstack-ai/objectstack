@@ -1003,7 +1003,9 @@ export function useAppObjectScopePrefetch(): void {
   // provider's eager app-list read: it never asks the list again.
   const routeSegment = segments[0] === 'apps' ? segments[1] : undefined;
   const ensureTypeRef = useRef(ensureType);
-  ensureTypeRef.current = ensureType;
+  useEffect(() => {
+    ensureTypeRef.current = ensureType;
+  });
   const listEnteredRef = useRef<string | null>(null);
   useEffect(
     () => () => {
