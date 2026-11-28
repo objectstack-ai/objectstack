@@ -188,6 +188,40 @@ jobs:
           fi
           echo "Built docs app: BUILD_ID=$(cat apps/docs/.next/BUILD_ID)"
 
+      # A reading, not a gate: what this deploy is about to upload, by part
+      # (prerendered pages, function code, OG images, llms bodies, static
+      # files), in this log and in the run summary. It runs BEFORE the upload
+      # so the reading exists for exactly the runs that need it most, the ones
+      # whose upload aborts. `.vercel/output` alone undercounts: the function
+      # code rides in each function's `filePathMap` from the repository, which
+      # the script adds; its header says how the file count reproduces the
+      # CLI's own "Downloading N deployment files" line.
+      #
+      # `continue-on-error` on purpose, and the only step here that has it: a
+      # broken measurement must never stop the docs from publishing (the header's
+      # failure direction is about the PUBLISH going quietly stale; this step
+      # publishes nothing). A failure still shows as a warning annotation.
+      # `timeout-minutes` because `continue-on-error` does not absorb a hang:
+      # without it only the job's clock would end the step, with no deploy. The
+      # script is synchronous local reads (seconds); 5 minutes is the ceiling.
+      - name: Measure what this deploy uploads
+        continue-on-error: true
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          if ! node apps/docs/scripts/measure-deploy-output.mjs > "$RUNNER_TEMP/deploy-output-reading.txt"; then
+            echo "::warning::measure-deploy-output.mjs failed; the deploy goes ahead without a size reading."
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/deploy-output-reading.txt"
+          {
+            echo "### Docs deploy output"
+            echo
+            echo '```text'
+            cat "$RUNNER_TEMP/deploy-output-reading.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy the prebuilt output to production
         id: deploy
         env:
