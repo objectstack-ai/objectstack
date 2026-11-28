@@ -379,6 +379,88 @@ async function readReferenceTitles(
     return titles;
 }
 
+/**
+ * [#35308] The names `referenceNameVisible` serves a REFUSED searcher, for the
+ * ids of a reference pointer {@link readReferenceTitles} left untitled, by
+ * id. Ruling 7077827375 (letter B, 2026-11-22): when the primary-title
+ * pointer declares `referenceNameVisible: true`, the search title of a hit
+ * whose target the searcher is refused shows the target's name, as the
+ * record's `$expand` already serves it, and nothing else of the target.
+ *
+ * The name is the ENGINE's answer, never a read of this package: the source
+ * rows holding those ids are read once more AS THE SEARCHER, `id` and the
+ * pointer only, with `expand` on the pointer, and the engine's own
+ * `serveReferenceNames` (objectql, `engine-reference-name-visible.ts`) answers
+ * each id the searcher is refused as `{ id, name, readRefused: true }`. Only
+ * those values title a hit; an id the expansion reads for the searcher has
+ * already had its chance in {@link readReferenceTitles} (its title column is
+ * the searcher's to read or not), so it keeps the answer it has. ⛔ No
+ * system-context read is made here, and the field's ruled limits come with the
+ * engine's answer unchanged: a name column field-level security keeps from the
+ * searcher, or one that declares a `maskingRule`, is the ADR-0079 floor
+ * `Record #<id>`, never the name.
+ *
+ * A search title is not the field's VALUE: the hit's `record` still carries
+ * the stored id (ADR-0104 D1, an unexpanded read answers the stored form), and
+ * the name never joins the match set, which the object's own searchable
+ * fields decide (ADR-0061 D2).
+ *
+ * The same gates as {@link readReferenceTitles} come first: a target whose
+ * declared exposure does not serve `get`, or that belongs to a disabled
+ * package, is not named. The second read's failures take that function's
+ * dispositions: a typed refusal or a never-provisioned table names nothing,
+ * every other failure propagates.
+ */
+async function readRefusedReferenceNames(
+    engine: RecordReadHost['engine'],
+    source: string,
+    rows: any[],
+    pointer: string,
+    target: string,
+    untitled: ReadonlySet<string>,
+    context: unknown,
+): Promise<Map<string, string>> {
+    const names = new Map<string, string>();
+    const targetObj = engine.registry.getObject(target);
+    if (!targetObj) return names;
+    if (!servesSearchTitleTarget(targetObj)) return names;
+    if (isObjectOfDisabledPackage(engine.registry, target)) return names;
+    const rowIds = new Set<string>();
+    for (const row of rows) {
+        if (row?.id == null) continue;
+        const v = row[pointer];
+        if ((Array.isArray(v) ? v : [v]).some((id) => id != null && typeof id !== 'object' && untitled.has(String(id)))) {
+            rowIds.add(String(row.id));
+        }
+    }
+    if (rowIds.size === 0) return names;
+    let expanded: any[];
+    try {
+        const opts: EngineQueryOptionsParsed = {
+            where: { id: { $in: [...rowIds] } },
+            fields: ['id', pointer],
+            expand: { [pointer]: { object: target, fields: ['id'] } },
+            limit: rowIds.size,
+        };
+        if (context !== undefined) opts.context = context as EngineQueryOptionsParsed['context'];
+        expanded = (await engine.find(source, opts)) ?? [];
+    } catch (error) {
+        if ((error as { code?: unknown } | null)?.code === READ_REFUSED) return names;
+        if (isMissingTableError(error, source)) return names;
+        throw error;
+    }
+    for (const row of expanded) {
+        const v = row?.[pointer];
+        for (const element of Array.isArray(v) ? v : [v]) {
+            if (element == null || typeof element !== 'object' || element.readRefused !== true) continue;
+            const id = element.id == null ? undefined : String(element.id);
+            const name = typeof element.name === 'string' ? element.name : undefined;
+            if (id !== undefined && untitled.has(id) && name !== undefined && name.trim()) names.set(id, name);
+        }
+    }
+    return names;
+}
+
 /** The field widget that declares a text column as a recipient id whose kind a sibling names. */
 const RECIPIENT_PICKER_WIDGET = 'recipient-picker';
 
@@ -645,6 +727,11 @@ export async function searchAll(
         const titleTarget = typeof titlePointer === 'string' && hasField(titlePointer)
             ? referenceTargetOf(fieldByName.get(titlePointer))
             : undefined;
+        // [#35308] The pointer's declared name exposure (`referenceNameVisible`,
+        // ruling 6574398310 B), read as the engine's `$expand` reads it: a
+        // refused searcher's title is the target's name the engine serves.
+        const namesRefusedTargets = titleTarget !== undefined
+            && (fieldByName.get(titlePointer as string) as { referenceNameVisible?: unknown } | undefined)?.referenceNameVisible === true;
         // A pointer that is a RECIPIENT id (`widget: 'recipient-picker'`, a
         // text column whose kind the row's `recipient_type` names, as on
         // `sys_record_share`) names a principal in the directory its kind
@@ -807,6 +894,20 @@ export async function searchAll(
                 }
                 if (ids.size > 0) {
                     const read = await readReferenceTitles(this.engine, titleTarget, [...ids], request.context, canReadObject);
+                    // [#35308] A pointer declaring `referenceNameVisible`
+                    // titles the ids the searcher was refused by the name the
+                    // engine serves such a reader on `$expand` (see
+                    // `readRefusedReferenceNames`); every other id keeps the
+                    // answer above.
+                    if (namesRefusedTargets) {
+                        const untitled = new Set([...ids].filter((id) => !read.has(id)));
+                        if (untitled.size > 0) {
+                            const named = await readRefusedReferenceNames(
+                                this.engine, obj.name, hitRows, titlePointer, titleTarget, untitled, request.context,
+                            );
+                            for (const [id, name] of named) read.set(id, name);
+                        }
+                    }
                     if (read.size > 0) referenceTitles = read;
                 }
             }
