@@ -4665,107 +4665,107 @@ export const deObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "Wissens-Synchronisierungsstatus",
+    pluralLabel: "Wissens-Synchronisierungsstatus",
+    description: "Eine Zeile pro Wissensquelle: ihr letzter Aufbau und ihre fehlgeschlagenen, noch nicht behobenen Datensatz-Synchronisierungen. Nur vom Wissensdienst geschrieben.",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "Quellenschlüssel",
+        help: "Der Schlüssel, unter dem der Index der Quelle in ihrem Speicher liegt. Eine Zeile pro Quelle."
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "Quelle",
+        help: "Die Quelle, wie Aufrufer sie nennen: NAMESPACE-NAME für die Quelle eines Pakets, sonst der bloße Name."
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "Paket",
+        help: "Das Paket, das die Quelle enthält. Leer für eine Quelle, die zu keinem Paket gehört."
       },
       adapter: {
         label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        help: "Der Speicher, in dem der Index der Quelle liegt. Leer, wenn die Quelle keinen nennt und keiner zugeordnet werden konnte."
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "Objekt",
+        help: "Das Objekt, dessen Datensätze die Quelle indiziert."
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "Aufbau-ID",
+        help: "Bezeichnet den letzten Aufbau. Ein Aufbau schreibt Fortschritt und Ende nur, solange dieser Wert ihn noch bezeichnet."
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "Gestartet von",
+        help: "Wer den letzten Aufbau gestartet hat: der Serverstart, ein Neuladen der Quelle, ein Neuaufbau durch einen Administrator oder der Abgleich.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "Serverstart",
+          reload: "Neuladen",
+          operator: "Administrator",
+          reconcile: "Abgleich"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "Aufbaustatus",
+        help: "Wie der letzte Aufbau endete. Bei jedem Status außer Fertig behält der Index seinen Inhalt, und der nächste Abgleich, Start oder Neuaufbau baut erneut auf. Leer bis zum ersten Aufbau.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "Läuft",
+          done: "Fertig",
+          failed: "Fehlgeschlagen",
+          lease_lost: "Lease verloren",
+          timed_out: "Zeitüberschreitung",
+          interrupted: "Unterbrochen"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "Aufbau gestartet am"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "Aufbau beendet am"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "Gelesene Zeilen",
+        help: "Zeilen, die der letzte Aufbau gelesen hat."
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "Geschriebene Dokumente",
+        help: "Dokumente, die der letzte Aufbau in den Index geschrieben hat (jedes an den Embedding-Anbieter gesendet)."
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "Unverändert",
+        help: "Dokumente, die der Index bereits unverändert enthielt und daher nicht erneut geschrieben wurden."
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "Entfernt",
+        help: "Dokumente, die entfernt wurden, weil ihre Zeile weg ist oder nicht mehr passt. Leer, wenn der Aufbau nichts entfernt hat."
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "Nicht indizierbar",
+        help: "Dokumente, die mit der Aufteilung der Quelle nicht indiziert werden können und aus dem Index entfernt wurden."
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "Aufbaumeldung",
+        help: "Der Satz der Plattform zum letzten Aufbau. Nie der eigene Text eines Embedding-Anbieters oder Speichers: Dieser steht im Serverprotokoll des Knotens, der den Aufbau ausgeführt hat."
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "Fehlgeschlagene Synchronisierungen",
+        help: "Datensatz-Synchronisierungen, die alle Versuche aufgebraucht haben und als Dead Letters in der Datensatz-Synchronisierungswarteschlange liegen, noch nicht behoben. Ein abgeschlossener Abgleich der Quelle löscht die, die vor seinem Beginn fehlschlugen."
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "Erster Fehler am",
+        help: "Wann der älteste oben gezählte Fehler auftrat."
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "Letzter Fehler am",
+        help: "Wann der neueste oben gezählte Fehler auftrat."
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "Letzter Fehler",
+        help: "Der Satz der Plattform zum neuesten Fehler: der Datensatz, die Versuche und die Art des Fehlers. Nie ein Feldwert eines Datensatzes und nie der eigene Text des Anbieters."
       },
       created_at: {
-        label: "Created At"
+        label: "Erstellt am"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Aktualisiert am"
       }
     }
   },

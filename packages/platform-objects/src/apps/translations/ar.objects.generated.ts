@@ -4665,107 +4665,107 @@ export const arObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "حالة مزامنة المعرفة",
+    pluralLabel: "حالات مزامنة المعرفة",
+    description: "صف واحد لكل مصدر معرفة: آخر بناء له، ومزامنات السجلات التي فشلت ولم تُصلَح بعد. تكتبه خدمة المعرفة فقط.",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "مفتاح المصدر",
+        help: "المفتاح الذي يُحفَظ به فهرس المصدر في مخزنه. صف واحد لكل مصدر."
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "المصدر",
+        help: "المصدر كما يسمّيه المستدعون: NAMESPACE-NAME لمصدر حزمة، والاسم المجرد في غير ذلك."
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "الحزمة",
+        help: "الحزمة التي تحتوي المصدر. فارغ لمصدر لا يتبع أي حزمة."
       },
       adapter: {
-        label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        label: "المحوّل",
+        help: "المخزن الذي يوجد فيه فهرس المصدر. فارغ عندما لا يسمّي المصدر مخزنًا ولم يمكن تعيين أي مخزن."
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "الكائن",
+        help: "الكائن الذي يفهرس المصدر سجلاته."
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "معرّف البناء",
+        help: "يحدّد آخر بناء. لا يكتب البناء تقدّمه ونهايته إلا ما دامت هذه القيمة تحدّده."
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "بدأه",
+        help: "من بدأ آخر بناء: إقلاع الخادم، أو إعادة تحميل المصدر، أو إعادة بناء من مسؤول، أو التسوية.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "الإقلاع",
+          reload: "إعادة التحميل",
+          operator: "المسؤول",
+          reconcile: "التسوية"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "حالة البناء",
+        help: "كيف انتهى آخر بناء. في أي حالة غير «مكتمل» يحتفظ الفهرس بما كان لديه، وتعيد التسوية أو الإقلاع أو إعادة البناء التالية البناء. فارغ حتى أول بناء.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "قيد التشغيل",
+          done: "مكتمل",
+          failed: "فشل",
+          lease_lost: "فُقد عقد الإيجار",
+          timed_out: "انتهت المهلة",
+          interrupted: "متوقف"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "بدء البناء في"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "انتهاء البناء في"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "الصفوف المقروءة",
+        help: "الصفوف التي قرأها آخر بناء."
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "المستندات المكتوبة",
+        help: "المستندات التي كتبها آخر بناء في الفهرس (أُرسل كل منها إلى مزوّد التضمين)."
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "دون تغيير",
+        help: "المستندات التي كان الفهرس يحتفظ بها دون تغيير، فلم تُكتب مرة أخرى."
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "المحذوفة",
+        help: "المستندات التي حُذفت لأن صفها اختفى أو لم يعد مطابقًا. فارغ عندما لم يحذف البناء شيئًا."
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "غير قابلة للفهرسة",
+        help: "المستندات التي لا يمكن فهرستها وفق تقسيم المصدر، وقد حُذفت من الفهرس."
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "رسالة البناء",
+        help: "جملة المنصة عن آخر بناء. ليست أبدًا النص الخاص بمزوّد التضمين أو بالمخزن: ذلك موجود في سجل خادم العقدة التي نفّذت البناء."
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "المزامنات الفاشلة",
+        help: "مزامنات السجلات التي استنفدت كل محاولاتها وتنتظر كرسائل ميتة في قائمة انتظار مزامنة السجلات، ولم تُصلَح بعد. تمسح تسوية المصدر المكتملة ما فشل منها قبل بدئها."
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "أول فشل في",
+        help: "متى حدث أقدم فشل من المعدودة أعلاه."
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "آخر فشل في",
+        help: "متى حدث أحدث فشل من المعدودة أعلاه."
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "آخر خطأ",
+        help: "جملة المنصة عن أحدث فشل: السجل وعدد المحاولات ونوع الخطأ. ليست أبدًا قيمة حقل من سجل، ولا النص الخاص بالمزوّد."
       },
       created_at: {
-        label: "Created At"
+        label: "تاريخ الإنشاء"
       },
       updated_at: {
-        label: "Updated At"
+        label: "تاريخ التحديث"
       }
     }
   },

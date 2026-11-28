@@ -4665,107 +4665,107 @@ export const ptBRObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "Estado de sincronização de conhecimento",
+    pluralLabel: "Estados de sincronização de conhecimento",
+    description: "Uma linha por fonte de conhecimento: seu último build e suas sincronizações de registros que falharam e ainda não foram reparadas. Gravada apenas pelo serviço de conhecimento.",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "Chave da fonte",
+        help: "A chave sob a qual o índice da fonte é mantido no seu armazenamento. Uma linha por fonte."
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "Fonte",
+        help: "A fonte como os chamadores a nomeiam: NAMESPACE-NAME para a fonte de um pacote; caso contrário, o nome simples."
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "Pacote",
+        help: "O pacote que contém a fonte. Vazio para uma fonte que não pertence a nenhum pacote."
       },
       adapter: {
-        label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        label: "Adaptador",
+        help: "O armazenamento onde fica o índice da fonte. Vazio quando a fonte não nomeia nenhum e nenhum pôde ser atribuído."
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "Objeto",
+        help: "O objeto cujos registros a fonte indexa."
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "ID do build",
+        help: "Identifica o último build. Um build só grava seu progresso e seu fim enquanto este valor ainda o identifica."
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "Iniciado por",
+        help: "Quem iniciou o último build: a inicialização do servidor, um recarregamento da fonte, um rebuild de um administrador ou a reconciliação.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "Inicialização",
+          reload: "Recarregamento",
+          operator: "Administrador",
+          reconcile: "Reconciliação"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "Status do build",
+        help: "Como o último build terminou. Em qualquer status exceto Concluído, o índice mantém o que tinha e a próxima reconciliação, inicialização ou rebuild constrói novamente. Vazio até o primeiro build.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "Em execução",
+          done: "Concluído",
+          failed: "Falhou",
+          lease_lost: "Concessão perdida",
+          timed_out: "Tempo esgotado",
+          interrupted: "Interrompido"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "Build iniciado em"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "Build concluído em"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "Linhas lidas",
+        help: "Linhas que o último build leu."
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "Documentos gravados",
+        help: "Documentos que o último build gravou no índice (cada um enviado ao provedor de embeddings)."
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "Inalterados",
+        help: "Documentos que o índice já tinha inalterados e, portanto, não foram gravados de novo."
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "Removidos",
+        help: "Documentos removidos porque a linha deles sumiu ou não corresponde mais. Vazio quando o build não removeu nada."
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "Não indexáveis",
+        help: "Documentos que não podem ser indexados com a divisão da fonte, removidos do índice."
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "Mensagem do build",
+        help: "A frase da plataforma sobre o último build. Nunca o texto próprio de um provedor de embeddings ou de um armazenamento: ele está no log do servidor do nó que executou o build."
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "Sincronizações com falha",
+        help: "Sincronizações de registros que esgotaram todas as tentativas e aguardam como mensagens mortas na fila de sincronização de registros, ainda não reparadas. Uma reconciliação da fonte que é concluída limpa as que falharam antes de ela começar."
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "Primeira falha em",
+        help: "Quando ocorreu a falha mais antiga contada acima."
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "Última falha em",
+        help: "Quando ocorreu a falha mais recente contada acima."
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "Último erro",
+        help: "A frase da plataforma sobre a falha mais recente: o registro, as tentativas e o tipo de erro. Nunca um valor de campo de um registro, nem o texto próprio do provedor."
       },
       created_at: {
-        label: "Created At"
+        label: "Criado em"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Atualizado em"
       }
     }
   },

@@ -4695,24 +4695,24 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       build_trigger: {
         label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        help: "Who started the last build: the server's boot, a source reload, an administrator's rebuild or the reconcile.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "Boot",
+          reload: "Reload",
+          operator: "Operator",
+          reconcile: "Reconcile"
         }
       },
       build_status: {
         label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        help: "How the last build ended. After any status but Done, the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "Running",
+          done: "Done",
+          failed: "Failed",
+          lease_lost: "Lease Lost",
+          timed_out: "Timed Out",
+          interrupted: "Interrupted"
         }
       },
       build_started_at: {

@@ -4665,107 +4665,107 @@ export const koObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "지식 동기화 상태",
+    pluralLabel: "지식 동기화 상태",
+    description: "지식 소스마다 한 행: 마지막 빌드와, 실패했으며 아직 복구되지 않은 레코드 동기화. 지식 서비스만 기록합니다.",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "소스 키",
+        help: "소스의 인덱스가 저장소에 보관되는 키. 소스마다 한 행입니다."
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "소스",
+        help: "호출자가 부르는 소스 이름: 패키지의 소스는 NAMESPACE-NAME, 그 밖에는 이름 그대로."
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "패키지",
+        help: "소스를 보유한 패키지. 어떤 패키지에도 속하지 않는 소스는 비어 있습니다."
       },
       adapter: {
-        label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        label: "어댑터",
+        help: "소스의 인덱스가 있는 저장소. 소스가 지정하지 않고 배치할 수도 없으면 비어 있습니다."
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "개체",
+        help: "소스가 레코드를 인덱싱하는 개체."
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "빌드 ID",
+        help: "마지막 빌드를 가리킵니다. 빌드는 이 값이 여전히 자신을 가리키는 동안에만 진행 상황과 종료를 기록합니다."
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "시작 주체",
+        help: "마지막 빌드를 시작한 주체: 서버 부팅, 소스 다시 로드, 관리자의 재빌드 또는 조정.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "부팅",
+          reload: "다시 로드",
+          operator: "관리자",
+          reconcile: "조정"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "빌드 상태",
+        help: "마지막 빌드가 끝난 방식. 완료 이외의 상태에서는 인덱스가 보유하던 내용을 유지하며, 다음 조정·부팅·재빌드가 다시 빌드합니다. 첫 빌드 전에는 비어 있습니다.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "실행 중",
+          done: "완료",
+          failed: "실패",
+          lease_lost: "임대 상실",
+          timed_out: "시간 초과",
+          interrupted: "중단됨"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "빌드 시작 시각"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "빌드 종료 시각"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "읽은 행",
+        help: "마지막 빌드가 읽은 행 수."
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "기록한 문서",
+        help: "마지막 빌드가 인덱스에 기록한 문서 수(각각 임베딩 제공자에게 전송됨)."
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "변경 없음",
+        help: "인덱스가 이미 변경 없이 보유하고 있어 다시 기록하지 않은 문서 수."
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "제거됨",
+        help: "행이 사라졌거나 더 이상 일치하지 않아 제거된 문서 수. 빌드가 아무것도 제거하지 않았으면 비어 있습니다."
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "인덱싱 불가",
+        help: "소스의 분할 방식으로는 인덱싱할 수 없어 인덱스에서 제거된 문서 수."
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "빌드 메시지",
+        help: "마지막 빌드에 대한 플랫폼의 설명 문장. 임베딩 제공자나 저장소 자체의 텍스트가 아닙니다: 그 내용은 빌드를 실행한 노드의 서버 로그에 있습니다."
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "실패한 동기화",
+        help: "모든 시도를 소진하고 레코드 동기화 큐에 데드 레터로 남아 아직 복구되지 않은 레코드 동기화. 소스의 조정이 완료되면 그 시작 전에 실패한 항목을 지웁니다."
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "첫 실패 시각",
+        help: "위 개수 중 가장 오래된 실패의 시각."
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "마지막 실패 시각",
+        help: "위 개수 중 가장 최근 실패의 시각."
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "마지막 오류",
+        help: "가장 최근 실패에 대한 플랫폼의 설명 문장: 레코드, 시도 횟수, 오류 종류. 레코드의 필드 값이나 제공자 자체의 텍스트는 절대 포함하지 않습니다."
       },
       created_at: {
-        label: "Created At"
+        label: "생성 시각"
       },
       updated_at: {
-        label: "Updated At"
+        label: "수정 시각"
       }
     }
   },

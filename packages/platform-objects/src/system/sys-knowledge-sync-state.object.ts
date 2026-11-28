@@ -125,33 +125,34 @@ export const SysKnowledgeSyncState = ObjectSchema.create({
       description: 'Names the last build. A build writes its progress and its end only while this still names it.',
     }),
 
-    build_trigger: Field.select(['boot', 'reload', 'operator', 'reconcile'], {
+    build_trigger: Field.select([
+      { label: 'Boot', value: 'boot' },
+      { label: 'Reload', value: 'reload' },
+      { label: 'Operator', value: 'operator' },
+      { label: 'Reconcile', value: 'reconcile' },
+    ], {
       label: 'Started By',
       required: false,
       readonly: true,
       group: 'Last Build',
-      description:
-        "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or " +
-        "changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+      description: "Who started the last build: the server's boot, a source reload, an administrator's rebuild or the reconcile.",
     }),
 
     build_status: Field.select([
-      'running',
-      { label: 'done', value: 'done', color: 'green' },
-      { label: 'failed', value: 'failed', color: 'red' },
-      'lease_lost',
-      'timed_out',
-      { label: 'interrupted', value: 'interrupted', color: 'red' },
+      { label: 'Running', value: 'running' },
+      { label: 'Done', value: 'done', color: 'green' },
+      { label: 'Failed', value: 'failed', color: 'red' },
+      { label: 'Lease Lost', value: 'lease_lost' },
+      { label: 'Timed Out', value: 'timed_out' },
+      { label: 'Interrupted', value: 'interrupted', color: 'red' },
     ], {
       label: 'Build Status',
       required: false,
       readonly: true,
       group: 'Last Build',
       description:
-        "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the " +
-        "build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no " +
-        "page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps " +
-        'what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.',
+        'How the last build ended. After any status but Done, the index keeps what it held and the next reconcile, ' +
+        'boot or rebuild builds again. Empty until the first build.',
     }),
 
     build_started_at: Field.datetime({ label: 'Build Started At', required: false, readonly: true, group: 'Last Build' }),

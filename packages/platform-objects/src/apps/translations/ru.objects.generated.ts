@@ -4665,107 +4665,107 @@ export const ruObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "Состояние синхронизации знаний",
+    pluralLabel: "Состояния синхронизации знаний",
+    description: "Одна строка на источник знаний: его последняя сборка и неудачные, ещё не исправленные синхронизации записей. Записывается только сервисом знаний.",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "Ключ источника",
+        help: "Ключ, под которым индекс источника хранится в его хранилище. Одна строка на источник."
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "Источник",
+        help: "Источник так, как его называют вызывающие: NAMESPACE-NAME для источника пакета, иначе просто имя."
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "Пакет",
+        help: "Пакет, которому принадлежит источник. Пусто для источника вне пакетов."
       },
       adapter: {
-        label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        label: "Адаптер",
+        help: "Хранилище, в котором находится индекс источника. Пусто, если источник его не указывает и назначить его не удалось."
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "Объект",
+        help: "Объект, записи которого индексирует источник."
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "ID сборки",
+        help: "Указывает последнюю сборку. Сборка записывает ход и завершение, только пока это значение ещё указывает на неё."
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "Кем запущена",
+        help: "Кто запустил последнюю сборку: запуск сервера, перезагрузка источника, пересборка администратором или сверка.",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "Запуск",
+          reload: "Перезагрузка",
+          operator: "Администратор",
+          reconcile: "Сверка"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "Статус сборки",
+        help: "Чем закончилась последняя сборка. При любом статусе, кроме «Готово», индекс сохраняет прежнее содержимое, а следующая сверка, запуск или пересборка соберёт его снова. Пусто до первой сборки.",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "Выполняется",
+          done: "Готово",
+          failed: "Ошибка",
+          lease_lost: "Аренда потеряна",
+          timed_out: "Время истекло",
+          interrupted: "Прервана"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "Сборка начата"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "Сборка завершена"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "Прочитано строк",
+        help: "Строк, прочитанных последней сборкой."
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "Записано документов",
+        help: "Документов, записанных последней сборкой в индекс (каждый отправлен поставщику эмбеддингов)."
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "Без изменений",
+        help: "Документов, которые индекс уже содержал без изменений и потому не записывал повторно."
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "Удалено",
+        help: "Документов, удалённых, потому что их строки больше нет или она больше не подходит. Пусто, если сборка ничего не удалила."
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "Не индексируются",
+        help: "Документов, которые нельзя проиндексировать при разбиении источника; удалены из индекса."
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "Сообщение сборки",
+        help: "Фраза платформы о последней сборке. Никогда не собственный текст поставщика эмбеддингов или хранилища: он в журнале сервера узла, выполнившего сборку."
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "Неудачные синхронизации",
+        help: "Синхронизации записей, исчерпавшие все попытки и ожидающие как недоставленные сообщения в очереди синхронизации записей, ещё не исправленные. Завершённая сверка источника очищает те, что завершились ошибкой до её начала."
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "Первая ошибка",
+        help: "Когда произошла самая ранняя из учтённых выше ошибок."
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "Последняя ошибка в",
+        help: "Когда произошла самая поздняя из учтённых выше ошибок."
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "Последняя ошибка",
+        help: "Фраза платформы о последней ошибке: запись, число попыток и вид ошибки. Никогда не значение поля записи и никогда не собственный текст поставщика."
       },
       created_at: {
-        label: "Created At"
+        label: "Создано"
       },
       updated_at: {
-        label: "Updated At"
+        label: "Обновлено"
       }
     }
   },

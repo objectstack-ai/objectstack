@@ -4665,107 +4665,107 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     }
   },
   sys_knowledge_sync_state: {
-    label: "Knowledge Sync State",
-    pluralLabel: "Knowledge Sync States",
-    description: "One row per knowledge source: its last build and its record syncs that failed and were not yet repaired. Written by the knowledge service only.",
+    label: "ナレッジ同期状態",
+    pluralLabel: "ナレッジ同期状態",
+    description: "ナレッジソースごとに 1 行:最後のビルドと、失敗してまだ修復されていないレコード同期。ナレッジサービスのみが書き込みます。",
     fields: {
       id: {
-        label: "Source Key",
-        help: "The key the source's index is held under in its store. One row per source."
+        label: "ソースキー",
+        help: "ソースのインデックスがストア内で保持されるキー。ソースごとに 1 行です。"
       },
       source: {
-        label: "Source",
-        help: "The source as callers name it: NAMESPACE-NAME for a package's source, the bare name otherwise."
+        label: "ソース",
+        help: "呼び出し側が使うソース名:パッケージのソースは NAMESPACE-NAME、それ以外は名前そのもの。"
       },
       package_id: {
-        label: "Package",
-        help: "The package that holds the source. Empty for a source no package holds."
+        label: "パッケージ",
+        help: "ソースを保持するパッケージ。どのパッケージにも属さないソースでは空です。"
       },
       adapter: {
-        label: "Adapter",
-        help: "The store the source's index lives in. Empty when the source names none and none could be placed."
+        label: "アダプター",
+        help: "ソースのインデックスがあるストア。ソースが指定せず、配置もできなかった場合は空です。"
       },
       object: {
-        label: "Object",
-        help: "The object whose records the source indexes."
+        label: "オブジェクト",
+        help: "ソースがレコードをインデックスするオブジェクト。"
       },
       build_id: {
-        label: "Build ID",
-        help: "Names the last build. A build writes its progress and its end only while this still names it."
+        label: "ビルド ID",
+        help: "最後のビルドを示します。ビルドは、この値がまだ自分を指している間だけ進捗と終了を書き込みます。"
       },
       build_trigger: {
-        label: "Started By",
-        help: "Who started the last build: 'boot', the first build of a source at startup; 'reload', a source added or changed while the server ran; 'operator', an administrator's rebuild; 'reconcile', the reconcile.",
+        label: "開始元",
+        help: "最後のビルドを開始したもの:サーバーの起動、ソースの再読み込み、管理者の再ビルド、または照合。",
         options: {
-          boot: "boot",
-          reload: "reload",
-          operator: "operator",
-          reconcile: "reconcile"
+          boot: "起動",
+          reload: "再読み込み",
+          operator: "管理者",
+          reconcile: "照合"
         }
       },
       build_status: {
-        label: "Build Status",
-        help: "How the last build ended: 'running' while it walks; 'done', every row was read and the index recorded the build; 'failed', it did not finish; 'lease_lost', another node may build the source now; 'timed_out', no page finished in time; 'interrupted', the node running it stopped. After any but 'done', the index keeps what it held and the next reconcile, boot or rebuild builds again. Empty until the first build.",
+        label: "ビルド状態",
+        help: "最後のビルドの終わり方。完了以外の状態では、インデックスは保持していた内容を残し、次の照合・起動・再ビルドで再度ビルドされます。最初のビルドまでは空です。",
         options: {
-          running: "running",
-          done: "done",
-          failed: "failed",
-          lease_lost: "lease_lost",
-          timed_out: "timed_out",
-          interrupted: "interrupted"
+          running: "実行中",
+          done: "完了",
+          failed: "失敗",
+          lease_lost: "リース喪失",
+          timed_out: "タイムアウト",
+          interrupted: "中断"
         }
       },
       build_started_at: {
-        label: "Build Started At"
+        label: "ビルド開始日時"
       },
       build_finished_at: {
-        label: "Build Finished At"
+        label: "ビルド終了日時"
       },
       build_discovered: {
-        label: "Rows Read",
-        help: "Rows the last build read."
+        label: "読み取った行",
+        help: "最後のビルドが読み取った行数。"
       },
       build_indexed: {
-        label: "Documents Written",
-        help: "Documents the last build wrote to the index (each one sent to the embedding provider)."
+        label: "書き込んだドキュメント",
+        help: "最後のビルドがインデックスに書き込んだドキュメント数(それぞれ埋め込みプロバイダーに送信)。"
       },
       build_skipped: {
-        label: "Unchanged",
-        help: "Documents the index already held unchanged, so not written again."
+        label: "変更なし",
+        help: "インデックスが変更なしで既に保持していたため、再度書き込まなかったドキュメント数。"
       },
       build_purged: {
-        label: "Purged",
-        help: "Documents removed because their row is gone or no longer matches. Empty when the build purged nothing."
+        label: "削除済み",
+        help: "行が消えた、または一致しなくなったため削除されたドキュメント数。ビルドが何も削除しなかった場合は空です。"
       },
       build_failed: {
-        label: "Cannot Be Indexed",
-        help: "Documents that cannot be indexed under the source's split, removed from the index."
+        label: "インデックス不可",
+        help: "ソースの分割ではインデックスできず、インデックスから削除されたドキュメント数。"
       },
       build_message: {
-        label: "Build Message",
-        help: "The platform's sentence for the last build. Never an embedding provider's or a store's own text: that is in the server log of the node that ran the build."
+        label: "ビルドメッセージ",
+        help: "最後のビルドに関するプラットフォームの説明文。埋め込みプロバイダーやストア自身のテキストではありません:それはビルドを実行したノードのサーバーログにあります。"
       },
       failure_count: {
-        label: "Failed Syncs",
-        help: "Record syncs that spent every attempt and wait as dead letters on the record-sync queue, not yet repaired. A reconcile of the source that completes clears those that failed before it began."
+        label: "失敗した同期",
+        help: "すべての試行を使い切り、レコード同期キューにデッドレターとして残っている未修復のレコード同期。ソースの照合が完了すると、その開始前に失敗したものがクリアされます。"
       },
       first_failed_at: {
-        label: "First Failed At",
-        help: "When the oldest failure counted above failed."
+        label: "初回失敗日時",
+        help: "上記の件数のうち最も古い失敗の日時。"
       },
       last_failed_at: {
-        label: "Last Failed At",
-        help: "When the newest failure counted above failed."
+        label: "最終失敗日時",
+        help: "上記の件数のうち最も新しい失敗の日時。"
       },
       last_error: {
-        label: "Last Error",
-        help: "The platform's sentence for the newest failure: the record, the attempts and the kind of error. Never a field value of a record, and never the provider's own text."
+        label: "最後のエラー",
+        help: "最新の失敗に関するプラットフォームの説明文:レコード、試行回数、エラーの種類。レコードのフィールド値やプロバイダー自身のテキストは含みません。"
       },
       created_at: {
-        label: "Created At"
+        label: "作成日時"
       },
       updated_at: {
-        label: "Updated At"
+        label: "更新日時"
       }
     }
   },
