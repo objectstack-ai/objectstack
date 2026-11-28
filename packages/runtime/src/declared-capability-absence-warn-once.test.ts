@@ -59,6 +59,8 @@ import { describe, it, expect, vi } from 'vitest';
 // `sendError` read the same `@objectstack/types` registry.
 import { createDispatcherPlugin } from './dispatcher-plugin.js';
 import { sendError } from '@objectstack/types';
+// [#37864] Paid at collection too: the dispatcher's reach loads `@objectstack/metadata` (check:test-source-alias).
+import '@objectstack/metadata';
 
 // [#21061] The analytics domain refuses an anonymous caller first (ADR-0056 D2),
 // so every analytics boot below also registers an `auth` slot in the shape
