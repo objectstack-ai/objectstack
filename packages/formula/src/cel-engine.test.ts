@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { celEngine, rewriteTemporalEquality, collectCelRootIdentifiers } from './cel-engine';
+import { buildEnv, celEngine, rewriteTemporalEquality, collectCelRootIdentifiers, timestampReturningFunctions } from './cel-engine';
 import { CEL_STDLIB_FUNCTIONS } from './validate';
 import { buildWorkCalendar } from './work-calendar';
 import type { Expression } from '@objectstack/spec';
@@ -848,5 +848,91 @@ describe('collectCelRootIdentifiers', () => {
     expect(bad.ok).toBe(false);
     const empty = collectCelRootIdentifiers('   ');
     expect(empty.ok).toBe(false);
+  });
+});
+
+// [#38135] A date field compared with a call that RETURNS a Timestamp other than
+// the four clock functions. The business case: a flow that runs on the day a loan
+// falls due tomorrow (`record.due_date == addDays(today(), 1)`). The field reaches
+// the run as its `YYYY-MM-DD` text; the #3183 equality rewrite paired it only with
+// `today` / `now` / `daysFromNow` / `daysAgo`, so the comparison answered a silent
+// `false` (and `!=` a silent `true`) on the very day it should match, and the flow
+// was skipped as "condition not met". `daysFromNow(1)` matched. Both rewrites now
+// ask one set read off the environment's declarations.
+describe('a date field compared with any Timestamp-returning call (#38135)', () => {
+  const now = new Date('2026-06-20T08:00:00Z');
+  const rec = (due: unknown) => ({ now, record: { due } });
+
+  it('the rewrite wraps the field opposite addDays / addMonths / date / datetime / timestamp', () => {
+    expect(rewriteTemporalEquality('record.due == addDays(today(), 1)')).toBe('date(record.due) == addDays(today(), 1)');
+    expect(rewriteTemporalEquality('addMonths(today(), 1) != previous.due')).toBe('addMonths(today(), 1) != date(previous.due)');
+    expect(rewriteTemporalEquality('due == date("2026-06-21")')).toBe('date(due) == date("2026-06-21")');
+    expect(rewriteTemporalEquality('record.due == datetime("2026-06-21T00:00:00Z")')).toBe('date(record.due) == datetime("2026-06-21T00:00:00Z")');
+    expect(rewriteTemporalEquality('record.due == timestamp("2026-06-21T00:00:00Z")')).toBe('date(record.due) == timestamp("2026-06-21T00:00:00Z")');
+    // A call that returns no Timestamp, and an already-coerced operand, are left alone.
+    for (const src of ['daysBetween(today(), record.due) == 0', 'record.n == round(record.m)', 'date(record.due) == addDays(today(), 1)']) {
+      expect(rewriteTemporalEquality(src), src).toBe(src);
+    }
+  });
+
+  it('matches on the day it names, as daysFromNow() does, and misses the day before', () => {
+    for (const [src, control] of [
+      ['record.due == addDays(today(), 1)', 'record.due == daysFromNow(1)'],
+      ['record.due != addDays(today(), 1)', 'record.due != daysFromNow(1)'],
+      ['record.due == date("2026-06-21")', 'record.due == daysFromNow(1)'],
+      ['record.due == timestamp("2026-06-21T00:00:00Z")', 'record.due == daysFromNow(1)'],
+    ]) {
+      for (const due of ['2026-06-21', '2026-06-20']) {
+        expect(celEngine.evaluate(cel(src), rec(due)), `${src} over ${due}`).toEqual(celEngine.evaluate(cel(control), rec(due)));
+      }
+    }
+    expect(celEngine.evaluate(cel('record.due == addDays(today(), 1)'), rec('2026-06-21'))).toEqual({ ok: true, value: true });
+    expect(celEngine.evaluate(cel('record.due != addDays(today(), 1)'), rec('2026-06-21'))).toEqual({ ok: true, value: false });
+  });
+
+  it('a string literal comparison beside it keeps its own answer', () => {
+    expect(celEngine.evaluate(cel('record.due == "2026-06-19" || record.due == addDays(today(), 1)'), rec('2026-06-21')))
+      .toEqual({ ok: true, value: true });
+    expect(celEngine.evaluate(cel('record.due == "2026-06-19" || record.due == addDays(today(), 1)'), rec('2026-06-18')))
+      .toEqual({ ok: true, value: false });
+  });
+
+  // Drift pin: the set is read off `getDefinitions()`, so this enumerates every
+  // global Timestamp signature the environment declares and needs a probe row for
+  // each NAME. A function added with a Timestamp return fails here until it has
+  // one, and every row must meet a date field's text under both rewrites.
+  it('every Timestamp-returning function the environment declares meets a date field\'s text under ==, != and ordering', () => {
+    const declared = [...new Set(buildEnv(() => now).getDefinitions().functions
+      .filter((f) => f.receiverType === null && f.returnType === 'google.protobuf.Timestamp')
+      .map((f) => f.name))].sort();
+    const probe: Record<string, string> = {
+      now: 'now()', today: 'today()', daysFromNow: 'daysFromNow(3)', daysAgo: 'daysAgo(3)',
+      addDays: 'addDays(today(), 3)', addMonths: 'addMonths(today(), 1)',
+      date: 'date("2026-06-23")', datetime: 'datetime("2026-06-23T10:00:00Z")',
+      timestamp: 'timestamp("2026-06-23T10:00:00Z")',
+      addWorkingDays: 'addWorkingDays(today(), 2)', addWorkingHours: 'addWorkingHours(now(), 4)',
+    };
+    expect(Object.keys(probe).sort(), 'a probe row per declared Timestamp-returning function').toEqual(declared);
+    expect([...timestampReturningFunctions()].sort(), 'the set both rewrites ask').toEqual(declared);
+    const weekday = '09:00-18:00';
+    const workCalendars = { default: buildWorkCalendar({
+      code: 'probe', timezone: 'UTC', maintained_from: '2025-01-01', maintained_through: '2027-12-31',
+      monday_periods: weekday, tuesday_periods: weekday, wednesday_periods: weekday,
+      thursday_periods: weekday, friday_periods: weekday,
+    }, []) };
+    const missed: string[] = [];
+    for (const name of declared) {
+      const call = probe[name];
+      // The field holds the call's own instant as text, the way a datetime field reaches the run.
+      const text = celEngine.evaluate(cel(`isoDatetime(${call})`), { now, workCalendars });
+      expect(text.ok, `isoDatetime(${call})`).toBe(true);
+      if (!text.ok) continue;
+      const ctx = { now, workCalendars, record: { at: text.value } };
+      for (const [op, expected] of [['==', true], ['!=', false], ['<', false], ['<=', true]] as const) {
+        const r = celEngine.evaluate(cel(`record.at ${op} ${call}`), ctx);
+        if (!(r.ok && r.value === expected)) missed.push(`record.at ${op} ${call}: ${JSON.stringify(r)}`);
+      }
+    }
+    expect(missed).toEqual([]);
   });
 });
