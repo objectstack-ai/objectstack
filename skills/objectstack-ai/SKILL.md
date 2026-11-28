@@ -258,7 +258,7 @@ object or field, when you may not search that object or query a field it reads.
 | `adapter` | Optional store id (`pgvector`, `turso`, `memory`). Omitted: the deployment's store (`pgvector` on PostgreSQL, `turso` otherwise), else the only one registered; several and none the deployment's is refused, naming them |
 | `source.kind` | `'object'`, the one kind |
 | `source.object` | The object whose records are indexed |
-| `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: it would also send fields added later |
+| `source.content` | Non-empty list of the fields whose text is indexed, in order. `'*'` is refused: it would also send fields added later. Never ids or system fields |
 | `source.metadataFields` | Fields kept for search-time filtering (`status`, `owner_id`, `tags`) |
 | `source.where` | ObjectQL `where`: keeps drafts and archived rows out |
 | `source.split` | How documents are cut into passages (below) |
@@ -309,18 +309,18 @@ export const supportKb: KnowledgeSource = KnowledgeSourceSchema.parse({
 **Sources over business objects**, not only a document library:
 
 - **Long free text only.** `content` lists prose: an article body, a ticket's
-  `description`, a note. Numbers, dates, statuses and short names stay out;
-  counts and filters go to the record tools. "Which customers reported login
-  loops?" is `search_knowledge`; "how many tickets are open per priority?" is
-  `aggregate_records`.
+  `description`, a note, with its title or subject line. Numbers, dates,
+  statuses and the names of people or accounts stay out; counts and filters
+  go to the record tools. "Which customers reported login loops?" is
+  `search_knowledge`; "how many tickets are open per priority?" is
+  `aggregate_records` (in-app `ask`: `aggregate_data`).
 - **One source per corpus**, and a skill's `instructions` say which to pass in
   `sourceIds`: `search_knowledge({ query, sourceIds: ['ticket_bodies'] })`
   searches the tickets and not `support_kb`. Omitted, every exposed source is
   scanned.
-- **Attachment text goes through a field.** No source reads a file, and a
-  `file` field in `content` adds no file text. Have the flow, hook or import
-  that extracts the text write it to a `textarea` field
-  (`contract.attachment_text`), and list that field.
+- **Attachment text goes through a field.** A `file` field in `content` adds
+  no file text. Have the flow, hook or import that extracts the text write it
+  to a `textarea` field (`contract.attachment_text`), and list that field.
 
 **Splitting (`split`).** The knowledge service cuts each document into passages
 for a store declaring `capabilities.chunks`; any other store receives whole
@@ -477,7 +477,7 @@ https://objectstack.ai/docs/protocol-upgrade:
 | Retired key | Removed in 17, tombstone gone in 18 — why, and what replaces it |
 |:--|:--|
 | `agent.tools` | The inline slot resolved names against the *full* registry with no surface check. Not a rename: the strict schema refuses the key as unknown; re-declare each tool in a `defineSkill` under the stack's `skills` (ADR-0064) |
-| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`) |
+| `agent.knowledge` | Declaring sources/indexes on an agent never scoped retrieval — `search_knowledge` takes `sourceIds` from the model's tool-call arguments. Restrict on the knowledge source (`aiExposed`, `source.where`); name the `sourceIds` to pass in `instructions` (§ Knowledge Sources) |
 
 ---
 

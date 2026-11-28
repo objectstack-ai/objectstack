@@ -162,7 +162,7 @@
       "assertions": {
         "must_contain": ["sourceIds", "content:", "textarea"],
         "must_contain_any": [["aggregate_records", "query_records", "aggregate_data"]],
-        "must_not_contain": ["kind: 'file'", "kind: \"file\"", "kind: 'http'", "contentFields:", "'contract_pdf']", "'amount']", "'priority']"]
+        "must_not_contain": ["kind: 'file',", "kind: \"file\",", "kind: 'http',", "kind: \"http\",", "contentFields:", "content: ['priority'", "content: ['status'", "content: ['amount'", "content: ['contract_pdf'", "'description', 'priority'", "'description', 'status'", "'description', 'amount'", "'description', 'contract_pdf'"]
       }
     }
   ]
