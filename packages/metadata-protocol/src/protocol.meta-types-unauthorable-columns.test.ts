@@ -58,6 +58,9 @@
  * uses, so the assertions are about what the endpoint SERVES and not about a
  * derivation picked for convenience.
  */
+// [#35879] The served-payload pins boot the protocol, whose diagnostics load the
+// lint root lazily: pay that load during collection, never inside a clocked case.
+import '@objectstack/lint';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 // [#5619] The producer's OWN write-verb dispatch decisions, so the fake engine
