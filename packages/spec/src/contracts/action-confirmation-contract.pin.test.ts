@@ -61,6 +61,7 @@ import {
   type ActionConfirmationRefusalReason,
   type ActionConfirmationRequiredDetails,
   type IActionConfirmationService,
+  type PendingActionRow,
 } from './ai-service';
 
 /** The refusal code the contract names. */
@@ -175,6 +176,15 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
   const CONTRACT_SOURCE = join(HERE, 'ai-service.ts');
 
   /** The capability constant's docblock, comment gutters folded into spaces. */
+  /** The pending-confirmation service's docblock, comment gutters folded into spaces. */
+  function serviceProse(): string {
+    const source = readFileSync(CONTRACT_SOURCE, 'utf8');
+    const at = source.indexOf('export interface IActionConfirmationService {');
+    expect(at, '`IActionConfirmationService` moved — re-anchor this pin').toBeGreaterThan(-1);
+    const open = source.lastIndexOf('/**', at);
+    return source.slice(open, at).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+  }
+
   function capabilityProse(): string {
     const source = readFileSync(CONTRACT_SOURCE, 'utf8');
     const at = source.indexOf('export const AI_ACTION_CONFIRMATION_CAPABILITY');
@@ -247,8 +257,8 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     };
     expect(pending.status).toBe('pending_confirmation');
     const wrongStatus: ActionConfirmationPending = {
-      // @ts-expect-error — the discriminant is one literal; the in-app chat's
-      // older `pending_approval` envelope is not this answer.
+      // @ts-expect-error — the discriminant is one literal; the in-app door's
+      // retired `pending_approval` answer is not this answer.
       status: 'pending_approval',
       pendingId: 'pc_1',
       message: 'm',
@@ -273,8 +283,36 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(runWithoutValues.run?.runId).toBe('run_7');
     const service: IActionConfirmationService = {
       submit: async (h) => ({ pendingId: h.run ? `pc_resume_${h.run.runId}` : `pc_${h.actionName}` }),
+      list: async () => [],
+      get: async () => null,
+      approve: async () => ({ status: 'executed' }),
+      reject: async () => undefined,
     };
     await expect(service.submit(handOff, {} as never)).resolves.toEqual({ pendingId: 'pc_archive_account' });
+    // How an MCP hand-off becomes the row `list` and `get` answer: the door's
+    // own tool, its input as JSON, and the empty string for an object-less
+    // action. The row's required members always have a value.
+    const objectLess: ActionConfirmationHandOff = { actionName: 'rebuild_index', params: {}, door: 'mcp' };
+    const row: PendingActionRow = {
+      id: 'pc_rebuild_index',
+      object_name: objectLess.objectName ?? '',
+      action_name: objectLess.actionName,
+      tool_name: objectLess.run ? 'resume_run' : 'run_action',
+      tool_input: JSON.stringify({ actionName: objectLess.actionName, params: objectLess.params }),
+      status: 'pending',
+      proposed_at: '2026-11-28T00:00:00Z',
+    };
+    expect([row.tool_name, row.object_name]).toEqual(['run_action', '']);
+    const mapping = serviceProse();
+    expect(mapping, 'the contract no longer says what an MCP item names as its tool').toMatch(
+      /on an MCP item the door's own tool, `run_action`, or `resume_run` when the hand-off carries a run/,
+    );
+    expect(mapping, 'the contract no longer says where the record and the run go').toMatch(
+      /So the record, the namespace and the run ride in `tool_input`, and the row has no column of its own for them/,
+    );
+    expect(mapping, 'the contract no longer says what an object-less action stores as its object').toMatch(
+      /and the empty string for an action that runs on no object/,
+    );
     await expect(service.submit(resumeHandOff, {} as never)).resolves.toEqual({ pendingId: 'pc_resume_run_7' });
   });
 
@@ -329,9 +367,10 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     );
   });
 
-  it('the rule binds EVERY AI door, the in-app assistant included, through its own channel', () => {
+  it('the rule binds EVERY AI door, the in-app assistant included, through the one channel', () => {
     // #33689 Q1, ruled B (record 6893484458, 「B 同一规则，两套流程暂留」): one
-    // rule for every AI door; the in-app queue stays its own channel.
+    // rule for every AI door. #33806, ruled A (record 7237978621): the in-app
+    // queue is merged into the pending-confirmation service.
     const prose = capabilityProse();
     expect(prose, 'rule 1 no longer covers every AI door').toMatch(
       /through EVERY AI door that starts one: the MCP `run_action` tool, the MCP `resume_run` tool for the candidate action it would run, and the in-app assistant's action tools/,
@@ -340,7 +379,13 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
     expect(prose, 'rule 1 reads as MCP-only again').not.toMatch(
       /through an AI door: the MCP `run_action` tool, and the MCP `resume_run` tool for the candidate action it would run\. Every caller/,
     );
-    expect(prose, 'the in-app door lost its section').toContain('## The in-app assistant door: the same rule, its own channel');
+    expect(prose, 'the in-app door lost its section').toContain('## The in-app assistant door: the same rule, the same channel');
+    expect(prose, 'the in-app door no longer hands off to the one service').toMatch(
+      /The in-app assistant asks through that service: the call is handed off \(\{@link IActionConfirmationService\.submit\}, with `door: 'assistant'`/,
+    );
+    expect(prose, 'the in-app door no longer answers the one pending literal').toMatch(
+      /the tool answers the model \{@link ActionConfirmationPending\} \(`pending_confirmation` and the item's `pendingId`\)/,
+    );
     expect(prose, 'the in-app door no longer withholds a declared-gated action when its channel is not wired').toMatch(
       /When that channel is not wired .* the door does not offer a declared-gated action as a tool at all/,
     );
@@ -363,17 +408,32 @@ describe('action-confirmation contract, as amended: a person confirms, elicited 
       /Neither the model's own confirmation nor the caller's `confirm` counts/,
     );
     expect(prose, 'the three points no longer bind every in-app queued item, whichever trigger queued it').toMatch(
-      /The three points bind EVERY item in the in-app queue, whichever trigger queued it: an action declaring `ai\.requiresConfirmation: true`, or one the destructive heuristic gates/,
+      /The three points bind EVERY item the in-app door hands off, whichever trigger gated it: an action declaring `ai\.requiresConfirmation: true`, or one the destructive heuristic gates/,
     );
-    expect(prose, 'the contract no longer says why the in-app queue has one decider rule').toMatch(
-      /A pending row does not record why it was queued, and the queue has one decider rule/,
+    expect(prose, 'the contract no longer says why the service has one decider rule').toMatch(
+      /A pending item does not record why it was gated, and the service has one decider rule/,
     );
     // Control: the MCP doors' reach is still the DECLARED flag alone; the
     // in-app queue's wider reach must not leak into rule 1.
     expect(prose, 'rule 1 lost its DECLARED-flag predicate').toMatch(
       /`ai\.requiresConfirmation: true` \(the DECLARED flag, never the listing heuristic;/,
     );
-    expect(prose, 'the contract claims the two seams were merged').toMatch(/stay two seams; the rule that binds them is one/);
+    expect(prose, 'rule 1 sends the in-app door down its own channel again').toMatch(
+      /Every door hands off to the same pending-confirmation service: rules 2 to 4 below are how the MCP doors ask, and the in-app door never elicits/,
+    );
+    // Control: the two-channel sentence of rule 1 is gone, not merely joined.
+    expect(prose, 'rule 1 still says the in-app door asks through its own channel').not.toMatch(/asks through its own channel/);
+    expect(prose, 'the bounds no longer name one service for every AI door').toMatch(
+      /Every AI door hands off to one pending-confirmation service/,
+    );
+    // Control: the two-seam reading is gone, not merely joined.
+    expect(prose, 'the contract claims two seams again').not.toMatch(/stay two seams/);
+    expect(prose, 'a stored pending_approval answer is no longer read by the one recogniser').toMatch(
+      /reads it through the SAME recogniser that reads \{@link ActionConfirmationPending\}, taking `pendingActionId` as the `pendingId`; ⛔ there is no second reader of the retired literal/,
+    );
+    expect(prose, 'the merge no longer states its FROM half').toMatch(
+      /A host whose in-app door still records on its own queue and answers `pending_approval` runs the FROM half of that breaking note/,
+    );
     expect(prose, 'the FROM half of the in-app door is no longer stated').toMatch(
       /The in-app door likewise runs ADR-0011's queue as documented until its implementing change ships: any holder of `ai:approve` may decide an item/,
     );

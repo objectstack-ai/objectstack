@@ -1,10 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The caller's execution context on the AI store contracts' three reads:
- * `IAIConversationService.get` / `list` and `IAIService.listPendingActions`
- * (ADR-0096 D5: an engine read with no principal is refused in strict mode, so
- * an implementation that receives no caller can only read as system).
+ * The caller's execution context on the AI store contracts' reads:
+ * `IAIConversationService.get` / `list`, where it is optional, and
+ * `IActionConfirmationService.list` / `get`, where it is required (ADR-0096 D5:
+ * an engine read with no principal is refused in strict mode, so an
+ * implementation that receives no caller can only read as system; the
+ * pending-confirmation service, which took over the in-app queue's
+ * `IAIService.listPendingActions`, is always read by a caller).
  *
  * No implementation of these contracts lives in this repository — the
  * implementer is `service-ai`, in the cloud repository — so both halves are
@@ -12,15 +15,16 @@
  *
  *  1. **Type level**, compiled by `check:test-typecheck` under
  *     `tsconfig.test.json`:
- *     - each method's trailing parameter is exactly
- *       `ExecutionContext | undefined`, the type and position the other store
+ *     - each conversation method's trailing parameter is exactly
+ *       `ExecutionContext | undefined`, and each pending-confirmation read's
+ *       is exactly `ExecutionContext`, the type and position the other store
  *       contracts use (`ISharingService`, `IApprovalService`,
  *       `IShareLinkService`, `IAnalyticsService`), and nothing follows it;
  *     - `ExecutionContext` is assignable to `BaseEngineOptions['context']`, so
  *       an implementation forwards it to its engine read with no conversion;
  *     - an implementation written against the shorter signatures still
- *       satisfies the contracts, and calls without the context still compile
- *       (the "omitted" cases below are written in that form).
+ *       satisfies the contracts, and conversation calls without the context
+ *       still compile (the "omitted" cases below are written in that form).
  *  2. **Runtime**, on a minimal in-test implementation over a recording engine
  *     port, written to the forwarding rule the TSDoc states: a supplied context
  *     reaches every engine read the method makes as `options.context`, by
@@ -37,7 +41,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ExecutionContext } from '../kernel/execution-context.zod';
 import { BaseEngineOptionsSchema, type BaseEngineOptions } from '../data/data-engine.zod';
-import type { AIConversation, IAIConversationService, IAIService, PendingActionRow } from './ai-service';
+import type { AIConversation, IAIConversationService, IActionConfirmationService, PendingActionRow } from './ai-service';
 import type { IDataEngine } from './data-engine';
 
 /** Type-level identity: true iff A and B are the same type. */
@@ -47,19 +51,22 @@ type Assert<T extends true> = T;
 
 type GetParams = Parameters<IAIConversationService['get']>;
 type ListParams = Parameters<IAIConversationService['list']>;
-type ListPendingParams = Parameters<NonNullable<IAIService['listPendingActions']>>;
+type ListPendingParams = Parameters<IActionConfirmationService['list']>;
+type GetPendingParams = Parameters<IActionConfirmationService['get']>;
 
 // Exported deliberately: an unread alias is TS6196, and a pin no program compiles is no pin.
 
-/** The trailing parameter is the caller's `ExecutionContext`, optional. */
+/** The trailing parameter is the caller's `ExecutionContext`: optional on the conversation reads, required on the pending-confirmation reads. */
 export type GetTakesTheCallerContext = Assert<Eq<GetParams[1], ExecutionContext | undefined>>;
 export type ListTakesTheCallerContext = Assert<Eq<ListParams[1], ExecutionContext | undefined>>;
-export type ListPendingActionsTakesTheCallerContext = Assert<Eq<ListPendingParams[1], ExecutionContext | undefined>>;
+export type ListPendingTakesTheCallerContext = Assert<Eq<ListPendingParams[1], ExecutionContext>>;
+export type GetPendingTakesTheCallerContext = Assert<Eq<GetPendingParams[1], ExecutionContext>>;
 
 /** It is the last parameter, and the method's own argument still comes first and stays optional where it was. */
 export type GetArity = Assert<Eq<GetParams['length'], 1 | 2>>;
 export type ListArity = Assert<Eq<ListParams['length'], 0 | 1 | 2>>;
-export type ListPendingActionsArity = Assert<Eq<ListPendingParams['length'], 0 | 1 | 2>>;
+export type ListPendingArity = Assert<Eq<ListPendingParams['length'], 2>>;
+export type GetPendingArity = Assert<Eq<GetPendingParams['length'], 2>>;
 
 /** Forwardable without conversion: the engine read's `options.context` accepts the contract's type. */
 export type ForwardsToTheEngineRead = Assert<
@@ -69,9 +76,7 @@ export type ForwardsToTheEngineRead = Assert<
 /** An implementation written against the shorter signatures still satisfies the contracts. */
 export const shorterGet: IAIConversationService['get'] = async (_conversationId: string) => null;
 export const shorterList: IAIConversationService['list'] = async (_options?: ListParams[0]) => [];
-export const shorterListPendingActions: NonNullable<IAIService['listPendingActions']> = async (
-  _filter?: ListPendingParams[0],
-) => [];
+export const shorterListPending: IActionConfirmationService['list'] = async (_filter: ListPendingParams[0]) => [];
 
 // ---------------------------------------------------------------------------
 // Runtime half: a minimal implementation written to the forwarding rule
@@ -130,16 +135,20 @@ function conversationStore(engine: Pick<IDataEngine, 'find' | 'findOne'>): Pick<
   };
 }
 
-function pendingActionInbox(
+function pendingConfirmationInbox(
   engine: Pick<IDataEngine, 'find' | 'findOne'>,
-): Required<Pick<IAIService, 'listPendingActions'>> {
+): Pick<IActionConfirmationService, 'list' | 'get'> {
   return {
-    async listPendingActions(filter, context) {
+    async list(filter, context) {
       const where: Record<string, unknown> = {};
       if (filter?.status) where.status = filter.status;
       if (filter?.conversationId) where.conversation_id = filter.conversationId;
-      const rows = await engine.find('ai_pending_actions', { where, limit: filter?.limit }, ...callerOptions(context));
+      const rows = await engine.find('ai_pending_actions', { where, limit: filter?.limit }, { context });
       return rows as unknown as PendingActionRow[];
+    },
+    async get(pendingId, context) {
+      const row = await engine.findOne('ai_pending_actions', { where: { id: pendingId } }, { context });
+      return (row as unknown as PendingActionRow | null) ?? null;
     },
   };
 }
@@ -173,14 +182,17 @@ describe('AI store contracts: the caller context reaches the engine read', () =>
     expect(BaseEngineOptionsSchema.safeParse(optionsOf(reads[0])).success).toBe(true);
   });
 
-  it('listPendingActions: a supplied context reaches the engine read', async () => {
+  it('pending-confirmation list and get: the caller context reaches each engine read', async () => {
     const { engine, reads } = recordingEngine([]);
-    await pendingActionInbox(engine).listPendingActions({ status: 'pending' }, MEMBER);
+    const inbox = pendingConfirmationInbox(engine);
+    await inbox.list({ status: 'pending' }, MEMBER);
+    await inbox.get('pc_1', MEMBER);
 
-    expect(reads).toHaveLength(1);
-    expect(reads[0].objectName).toBe('ai_pending_actions');
-    expect(optionsOf(reads[0])?.context).toBe(MEMBER);
-    expect(BaseEngineOptionsSchema.safeParse(optionsOf(reads[0])).success).toBe(true);
+    expect(reads.map((r) => r.objectName)).toEqual(['ai_pending_actions', 'ai_pending_actions']);
+    for (const read of reads) {
+      expect(optionsOf(read)?.context).toBe(MEMBER);
+      expect(BaseEngineOptionsSchema.safeParse(optionsOf(read)).success).toBe(true);
+    }
   });
 });
 
@@ -203,13 +215,11 @@ describe('AI store contracts: an omitted context keeps the shorter call', () => 
     for (const read of reads) expect(read.rest).toHaveLength(1);
   });
 
-  it('listPendingActions: the engine read carries no options argument', async () => {
-    const { engine, reads } = recordingEngine([]);
-    const inbox = pendingActionInbox(engine);
-    await inbox.listPendingActions({ status: 'pending' });
-    await inbox.listPendingActions();
-
-    expect(reads).toHaveLength(2);
-    for (const read of reads) expect(read.rest).toHaveLength(1);
+  it('pending-confirmation reads: a call without the caller context does not compile', () => {
+    const { engine } = recordingEngine([]);
+    const inbox = pendingConfirmationInbox(engine);
+    // @ts-expect-error — the pending-confirmation service is always read by a caller.
+    const omitted = () => inbox.list({ status: 'pending' });
+    expect(typeof omitted).toBe('function');
   });
 });

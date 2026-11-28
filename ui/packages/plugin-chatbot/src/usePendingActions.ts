@@ -46,8 +46,8 @@ import type {
  * (objectui#3160, objectstack#4115 ledger batch 6).
  *
  * `@objectstack/spec/contracts` declares both as the contract of
- * `IAIService.proposePendingAction` / `.listPendingActions`, which is exactly
- * what the REST route serialises; the copies that used to live here were a
+ * `IActionConfirmationService.list` / `.get`, which is exactly what the REST
+ * route serialises; the copies that used to live here were a
  * hand transcription of the same rows and had drifted in three ways, each of
  * which silently disabled a compile-time check:
  *

@@ -94,7 +94,7 @@ const result = AuthGateCodeSchema.parse(data);
 | **clientId** | `string` | optional | The OAuth client (`azp`, the client_id of a registered sys_oauth_application) that performed the operation. Set by the /mcp OAuth door only; absent when the in-product AI performed it. |
 | **agentId** | `string` | optional | The in-product AI agent that performed the operation for the signed-in person in userId: the agent the chat runs as (the same value as ToolExecutionContext.agentId). Set by the server-constructed in-product AI path only, and only after the server resolved it as the agent it actually ran; never a sys_user id or an OAuth client id. |
 | **conversationId** | `string` | optional | The AI conversation the operation was performed in (the same id as ToolExecutionContext.conversationId). Set beside agentId by the in-product AI path, and only after the server resolved it as a conversation the person in userId owns. |
-| **confirmationId** | `string` | optional | The confirmation the person gave before the operation ran: the id of the pending item their approval decided (the in-app pending action id, or the pending-confirmation service item id). Stamped only after the server resolved it as a pending item the person in userId decided for this operation; absent when the operation needed no confirmation. |
+| **confirmationId** | `string` | optional | The confirmation the person gave before the operation ran: the id of the pending-confirmation service item their approval decided, whichever AI door handed it off. Stamped only after the server resolved it as a pending item the person in userId decided for this operation; absent when the operation needed no confirmation. |
 
 ### Nested Shape: `ExecutionContext.permissionSetAddresses[number]`
 
