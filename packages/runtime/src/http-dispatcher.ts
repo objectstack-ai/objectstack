@@ -35,7 +35,7 @@ import { apiErrorResponse } from './error-envelope.js';
 import { resolveRuntimeVersion } from './runtime-version.js';
 import { readSeedReadiness, type SeedReadiness } from './seed-readiness.js';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps } from './domain-handler-registry.js';
+import { DomainHandlerRegistry, type DomainRoute, type DomainHandlerDeps, type ClassifiedServiceLookup } from './domain-handler-registry.js';
 // `import * as actionExec from './action-execution.js'` was dropped in #4936:
 // the dispatcher's own `callData` delegate was its last consumer here, and the
 // delegate died with the `handleApiEndpoint` branch. The domain modules import
@@ -425,26 +425,6 @@ function withSeedReading<T extends { status: string }>(
 }
 
 /**
- * [#16402] What {@link HttpDispatcher.classifyService} answers — the classified
- * service lookup's three non-fault outcomes.
- *
- * ⛔ Module-local and deliberately NOT exported, for the same reason
- * `PrimaryDatasourceReading` above is not: it is an internal reading, and
- * `DomainHandlerDeps.resolveServiceOrLoud` — which IS part of an exported type —
- * keeps answering the service or `undefined`, unchanged. Nothing published
- * gains a member.
- *
- * A caller that named no scope and asked for a `SCOPED` registration is NOT
- * here: that stays the unbranded rejection `packages/core` raises, so
- * `Scope ID required for scoped service '<name>'` keeps reaching the one caller
- * it is true about.
- */
-type ClassifiedServiceLookup =
-    | { readonly outcome: 'resolved'; readonly value: any }
-    | { readonly outcome: 'never-registered' }
-    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
-
-/**
  * [#32887] The environment a host's {@link KernelResolver} placed each request
  * in, kept beside the request and readable only through
  * {@link resolverPlacedEnvironmentOf}.
@@ -596,6 +576,11 @@ export class HttpDispatcher {
         // it does not reroute a name for every domain (#15900 option C).
         resolveServiceOrLoud: (context: HttpProtocolContext, name: string, environmentId?: string) =>
             this.resolveServiceOrLoud(this.requestKernel(context), name, environmentId),
+        // The same lookup with its two quiet misses told apart, for a door
+        // whose answer differs between them (the `knowledge_source` save
+        // doors). Opted into per call site, as the member above is.
+        classifyServiceOrLoud: (context: HttpProtocolContext, name: string, environmentId?: string) =>
+            this.classifyService(this.requestKernel(context), name, environmentId),
         getService: (context: HttpProtocolContext, name: string) =>
             this.getService(this.requestKernel(context), name as Parameters<HttpDispatcher['getService']>[1]),
         getObjectQL: (context, environmentId) =>
@@ -2874,10 +2859,13 @@ export class HttpDispatcher {
      * back. Reading that value as a fault would be this lookup overruling the
      * registry.
      *
-     * ⛔ The distinction stays HERE rather than on
-     * {@link DomainHandlerDeps.resolveServiceOrLoud}: that member is part of an
-     * EXPORTED type, and no door needs to act on the difference — both misses
-     * license the same answer. A caller that needs the fact asks this method.
+     * ⛔ The distinction stays off
+     * {@link DomainHandlerDeps.resolveServiceOrLoud}: at the doors that read
+     * that member both misses license the same answer. A door whose answer
+     * differs between them (the `knowledge_source` save doors: "this
+     * deployment runs no knowledge service" is false for a scope-relative
+     * miss) asks this method, through the optional
+     * {@link DomainHandlerDeps.classifyServiceOrLoud}.
      */
     private async classifyService(
         kernel: any,

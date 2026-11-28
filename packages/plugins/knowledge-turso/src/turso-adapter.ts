@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { createHash } from 'node:crypto';
-import type { Client, InArgs, InStatement, Transaction } from '@libsql/client';
+import type { Client, InArgs, InStatement, ResultSet, Transaction } from '@libsql/client';
 import type {
   AdapterContext,
   AdapterEmbeddingDescriptor,
@@ -124,9 +124,29 @@ export const VECTOR_INDEX_OVERFETCH = 40;
  * of 1,536 dimensions (clustered, topK 10, 40 candidates a hit), a pool of
  * at least topK gave a recall@10 of 0.95 with 10% of the passages in scope,
  * 0.91 at 5% and 0.88 at 3%; a pool of at least 4 × topK still left a query
- * at 0.7 with 10% in scope. At 8 × topK a scope of 15% or less runs exact.
+ * at 0.7 with 10% in scope. At 8 × topK alone a scope of 15% or less runs
+ * exact; {@link VECTOR_RETRY_POOL} is what answers those first.
  */
 const VECTOR_MIN_POOL = 8;
+
+/**
+ * How many times the first pass's candidates a second approximate pass
+ * reads, when the first leaves fewer than {@link VECTOR_MIN_POOL} × topK in
+ * scope: the same `WHERE` over the nearest `topK × vectorIndexOverfetch × 10`
+ * by their one-bit vector, kept only if it clears the same floor; otherwise
+ * the leg runs exact. It is tried only when the first pass's pool, scaled by
+ * this factor, reaches the floor, so a scope too narrow for it goes to the
+ * exact scan without a pass that could not answer; and never under a scope
+ * of record terms alone, whose exact scan the record index serves from the
+ * rows in scope. Measured at 200,000 passages of 1,536 dimensions
+ * (clustered, topK 10, 40 candidates a hit), 50 queries a share: under a
+ * parent (metadata) scope keeping 10%, 15% and 20% of the passages, the
+ * exact scan's p95 was 848, 907 and 908 ms and the search's with this pass
+ * 351, 328 and 337 ms, at the floor's recall; under a record scope the
+ * exact scan's was 128, 207 and 265 ms, and the search's with this pass
+ * 333, 313 and 407 ms.
+ */
+const VECTOR_RETRY_POOL = 10;
 
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
 const VECTOR_BACKFILL_BATCH = 2048;
@@ -286,7 +306,10 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   nearest by their one-bit vector, of which those in scope are ranked by
  *   their float32 vector; a leg the filter leaves with fewer than
  *   {@link VECTOR_MIN_POOL} × `topK` candidates in scope, or short of
- *   `topK` hits, is run again exactly.
+ *   `topK` hits, is run once more over {@link VECTOR_RETRY_POOL} times the
+ *   candidates when its pool says that can clear the floor and its scope is
+ *   not of record terms alone, and is run again exactly otherwise, or when
+ *   that pass falls short too.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -670,6 +693,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     // the metadata filter, each bound as values. ?1 is the query vector.
     const args: unknown[] = [vectorLiteral(vector)];
     const where: string[] = [];
+    // Whether the record index can serve the exact scan: a scope of record terms alone.
+    let recordScope = false;
     if (opts.organizationIds !== undefined) {
       args.push(JSON.stringify(opts.organizationIds));
       where.push(`organization_id IN (SELECT value FROM json_each(?${args.length}))`);
@@ -682,6 +707,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       // `metadata` term holds for a stored string or number equal to an id as
       // text, or a list with such an element; any other value holds for nothing.
       const scopeTerms: string[] = [];
+      let parentTerm = false;
       for (const term of opts.scope) {
         if (term.ids.length === 0) continue;
         args.push(JSON.stringify(term.ids));
@@ -690,6 +716,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           scopeTerms.push(`source_record_id IN ${ids}`);
           continue;
         }
+        parentTerm = true;
         args.push(term.field);
         scopeTerms.push(
           `EXISTS (SELECT 1 FROM json_each(metadata) AS m WHERE m.key = ?${args.length} AND (` +
@@ -699,6 +726,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         );
       }
       where.push(`(${scopeTerms.join(' OR ')})`);
+      recordScope = !parentTerm;
     }
     for (const [key, value] of Object.entries(opts.filter ?? {})) {
       args.push(key, JSON.stringify(value === undefined ? null : value));
@@ -766,14 +794,15 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       );
       legs.push('SELECT chunk_id, NULL AS vpos, pos AS kpos FROM kw');
     }
-    const statement = (approximate: boolean): InStatement => ({
-      sql: `WITH ${[...(vectorLeg ? vectorCtes(approximate) : []), ...ctes].join(',\n')}
+    // `candidates`: the approximate statement over that many one-bit candidates; absent, the exact one.
+    const statement = (candidates?: number): InStatement => ({
+      sql: `WITH ${[...(vectorLeg ? vectorCtes(candidates !== undefined) : []), ...ctes].join(',\n')}
               SELECT p.chunk_id, p.document_id, p.source_record_id, p.content, p.title, p.metadata, p.doc_hash,
-                     p.heading_path, u.vpos, u.kpos${approximate ? ', (SELECT count(*) FROM pool) AS pool' : ''}
+                     p.heading_path, u.vpos, u.kpos${candidates !== undefined ? ', (SELECT count(*) FROM pool) AS pool' : ''}
                 FROM (SELECT chunk_id, min(vpos) AS vpos, min(kpos) AS kpos FROM (${legs.join(' UNION ALL ')})
                        GROUP BY chunk_id) u
                 JOIN ${table} p ON p.chunk_id = u.chunk_id`,
-      args: (approximate ? [...args, topK * this.vectorIndexOverfetch] : args) as InArgs,
+      args: (candidates !== undefined ? [...args, candidates] : args) as InArgs,
     });
     const result = await this.queued(client, async () => {
       // The generation may have been switched while the query was embedded.
@@ -784,20 +813,34 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       if (vectorLeg && (await this.approximateSearchable(tableName, instance))) {
         // A failed approximate statement (its index gone under this process's
         // memory of it) forgets that memory and is answered by the exact scan.
-        const near = await client.execute(statement(true)).catch(() => {
-          this.vectorIndexKnown.delete(vectorIndexKey(tableName, instance));
-          return undefined;
-        });
-        if (near === undefined) return client.execute(statement(false));
+        const approximate = (candidates: number) =>
+          client.execute(statement(candidates)).catch(() => {
+            this.vectorIndexKnown.delete(vectorIndexKey(tableName, instance));
+            return undefined;
+          });
         // A vector leg the filter left with fewer than VECTOR_MIN_POOL × topK
-        // candidates in scope is run again as the exact scan: the float32
-        // re-rank of a thin pool misses neighbours the one-bit ranking put
-        // past the cut, and an answer of fewer than topK says the source
-        // holds no more, which the candidates cannot say.
-        const pool = Number(near.rows[0]?.pool ?? 0);
-        if (pool >= VECTOR_MIN_POOL * topK && near.rows.filter((r) => r.vpos !== null).length >= topK) return near;
+        // candidates in scope does not stand: the float32 re-rank of a thin
+        // pool misses neighbours the one-bit ranking put past the cut, and an
+        // answer of fewer than topK says the source holds no more, which the
+        // candidates cannot say.
+        const poolOf = (near: ResultSet) => Number(near.rows[0]?.pool ?? 0);
+        const stands = (near: ResultSet) =>
+          poolOf(near) >= VECTOR_MIN_POOL * topK && near.rows.filter((r) => r.vpos !== null).length >= topK;
+        const candidates = topK * this.vectorIndexOverfetch;
+        const near = await approximate(candidates);
+        if (near === undefined) return client.execute(statement());
+        if (stands(near)) return near;
+        // Such a leg tries VECTOR_RETRY_POOL times the candidates once, under
+        // the same floor, when the first pool says the wider one can reach it;
+        // otherwise, or short again, the exact scan answers. Not under a scope
+        // of record terms alone: the record index serves that exact scan from
+        // the rows in scope, which costs less than the wider pass.
+        if (!recordScope && poolOf(near) * VECTOR_RETRY_POOL >= VECTOR_MIN_POOL * topK) {
+          const wide = await approximate(candidates * VECTOR_RETRY_POOL);
+          if (wide !== undefined && stands(wide)) return wide;
+        }
       }
-      return client.execute(statement(false));
+      return client.execute(statement());
     });
     if (result === undefined) {
       // Switched while the query was embedded: searched again, a bounded number of times.
