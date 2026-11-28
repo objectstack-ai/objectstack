@@ -2290,6 +2290,7 @@ const en = {
         metric: 'Number',
         table: 'Table',
         showValues: 'Show values',
+        showEmptyGroups: 'Show groups with no records',
         targetLine: 'Target line',
         targetLabel: 'Target',
         secondLayerTableOnly: 'This chart draws the first grouping; the second is in the computed values.',

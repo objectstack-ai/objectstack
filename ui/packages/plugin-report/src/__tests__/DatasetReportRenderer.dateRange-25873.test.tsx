@@ -14,6 +14,7 @@ import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/re
 import '@testing-library/jest-dom';
 import { SchemaRendererProvider } from '@object-ui/react';
 import { I18nProvider } from '@object-ui/i18n';
+import { ComponentRegistry } from '@object-ui/core';
 import { DatasetReportRenderer } from '../DatasetReportRenderer';
 
 // Radix Select opens on pointer events the DOM environment does not implement;
@@ -292,5 +293,64 @@ describe('DatasetReportRenderer reads the date dimension as the report\'s reader
     await waitFor(() => expect(src.selections).toHaveLength(1));
     expect(urls).toEqual(['/api/v1/meta/dataset/opportunity_metrics']);
     expect(src.selections[0].timeDimensions).toEqual([{ dimension: 'bare_date', dateRange: 'last_90_days' }]);
+  });
+});
+
+/**
+ * objectstack#36722 — `chart.showEmptyGroups` and a date axis. The executor
+ * already answers every bucket of the report's period, the empty ones at 0
+ * (`fillEmptyTimeBuckets`, pinned in service-analytics
+ * `dataset-time-bucket-zero-fill.test.ts`), so the switch adds nothing there:
+ * with it on or off the report posts the same window and plots the same
+ * buckets. A date dimension declares no options, so the chart's fill never
+ * runs on it.
+ */
+describe('a date axis over the report period is the same with chart.showEmptyGroups on or off (objectstack#36722)', () => {
+  // The answer as the executor gives it for a three-month window with an
+  // empty middle month: the bucket is there, at 0.
+  const MONTHS = [
+    { close_date: '2026-09', amount: 4 },
+    { close_date: '2026-10', amount: 0 },
+    { close_date: '2026-11', amount: 7 },
+  ];
+
+  it('posts the same selection and plots the same buckets', async () => {
+    const runs: Array<{ selections: unknown[]; data: unknown }> = [];
+    for (const showEmptyGroups of [false, true]) {
+      let data: unknown;
+      ComponentRegistry.register('chart', (props: { schema: { data?: unknown } }) => {
+        data = props.schema.data;
+        return null;
+      });
+      const selections: unknown[] = [];
+      const src = {
+        selections,
+        queryDataset: vi.fn(async (_dataset: string, selection: unknown) => {
+          selections.push(selection);
+          return {
+            rows: MONTHS,
+            fields: [{ name: 'close_date', type: 'date' }, { name: 'amount', type: 'number', aggregate: 'sum' }],
+          };
+        }),
+      };
+      const { apiFetch } = makeApiFetch([{ name: 'close_date', type: 'date' }]);
+      const { unmount } = renderReport(
+        {
+          ...BASE,
+          rows: ['close_date'],
+          chart: { type: 'line', xAxis: 'close_date', yAxis: 'amount', ...(showEmptyGroups ? { showEmptyGroups } : {}) },
+          dateRange: { dimension: 'close_date', defaultRange: 'last_90_days' },
+        },
+        src as unknown as ReturnType<typeof makeSource>,
+        apiFetch,
+      );
+      await waitFor(() => expect(Array.isArray(data) && (data as unknown[]).length).toBe(3));
+      runs.push({ selections: [...selections], data });
+      unmount();
+    }
+    expect(runs[1].selections).toEqual(runs[0].selections);
+    expect(runs[0].selections.every((s) => JSON.stringify((s as { timeDimensions?: unknown }).timeDimensions) === JSON.stringify([{ dimension: 'close_date', dateRange: 'last_90_days' }]))).toBe(true);
+    expect(runs[1].data).toEqual(runs[0].data);
+    expect(runs[1].data).toEqual(MONTHS);
   });
 });

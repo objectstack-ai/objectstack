@@ -1924,6 +1924,7 @@ const zhHant = {
         metric: '數字',
         table: '表格',
         showValues: '顯示數值',
+        showEmptyGroups: '顯示數量為 0 的分組',
         targetLine: '目標線',
         targetLabel: '目標',
         secondLayerTableOnly: '這種圖只畫第一層分組，第二層在計算值裡。',

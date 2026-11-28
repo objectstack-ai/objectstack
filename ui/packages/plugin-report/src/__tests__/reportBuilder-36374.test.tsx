@@ -11,22 +11,26 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ComponentRegistry } from '@object-ui/core';
-import { ReportSchema } from '@objectstack/spec/ui';
+import { ChartTypeSchema, ReportSchema } from '@objectstack/spec/ui';
+import { enumOptions } from '@object-ui/test-support';
 import { ReportBuilder } from '../builder/ReportBuilder';
 import {
+  chartShowsEmptyGroups,
   fillDefaults,
   missingPiece,
   pickChartType,
   pickDataset,
   pickGrouping,
   pickMeasure,
+  setShowEmptyGroups,
   setShowValues,
   setTargetLine,
+  showsEmptyGroups,
   targetLine,
   type ReportBuilderMembers,
   type ReportDraft,
 } from '../builder/reportBuilderModel';
-import { DatasetReportRenderer } from '../DatasetReportRenderer';
+import { DatasetReportRenderer, planReportChart } from '../DatasetReportRenderer';
 
 const MEMBERS: ReportBuilderMembers = {
   measures: [
@@ -398,5 +402,109 @@ describe('the report filter under the data source (objectstack#36645)', () => {
     // Picking the data source already bound is no switch: the filter stays.
     const same = pickDataset({ ...EXISTING, runtimeFilter: { stage: { $eq: 'won' } } }, 'pipeline', MEMBERS);
     expect(same.runtimeFilter).toEqual({ stage: { $eq: 'won' } });
+  });
+});
+
+/**
+ * objectstack#36722 — "Show groups with no records" (`chart.showEmptyGroups`): a switch
+ * in the chart settings, offered on the chart types that draw a category per
+ * group, written into the report the host saves and read back when it opens.
+ */
+describe('the show-groups-with-no-records switch (objectstack#36722)', () => {
+  beforeEach(() => {
+    ComponentRegistry.register('chart', () => <div data-testid="chart-stub" />);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  const box = (value = '') => ({ value, onChange: () => {} });
+  const dataSource = { queryDataset: vi.fn(async () => ({ rows: [{ stage: 'Won', total_amount: 10 }], fields: [] })) };
+
+  /** The console host's shape: it saves the draft it holds when Save is pressed. */
+  function SaveHarness({ initial, saved }: { initial: ReportDraft; saved: ReportDraft[] }) {
+    const [report, setReport] = React.useState<ReportDraft>(initial);
+    return (
+      <ReportBuilder
+        report={report}
+        onChange={setReport}
+        name={box(String(report.label ?? ''))}
+        description={box()}
+        datasets={[{ name: 'pipeline', label: 'Pipeline' }]}
+        members={MEMBERS}
+        onSave={() => { saved.push(report); }}
+        onDiscard={() => setReport(initial)}
+        onClose={() => {}}
+        dirty={report !== initial}
+        dataSource={dataSource}
+      />
+    );
+  }
+
+  it('turned on, it is in the report Save hands over; reopened, the switch reads on; off removes the key', () => {
+    const saved: ReportDraft[] = [];
+    const { unmount } = render(<SaveHarness initial={EXISTING} saved={saved} />);
+    const toggle = screen.getByTestId('report-builder-show-empty-groups');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByTestId('report-builder-save'));
+    expect(saved).toHaveLength(1);
+    expect(saved[0].chart).toEqual({ ...(EXISTING.chart as object), showEmptyGroups: true });
+    expectSpecValid(saved[0]);
+    unmount();
+
+    render(<SaveHarness initial={saved[0]} saved={saved} />);
+    const reopened = screen.getByTestId('report-builder-show-empty-groups');
+    expect(reopened).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(reopened);
+    fireEvent.click(screen.getByTestId('report-builder-save'));
+    expect(saved[1].chart).toEqual(EXISTING.chart);
+    expect(saved[1].chart).not.toHaveProperty('showEmptyGroups');
+  });
+
+  it('offered on the bar, line and donut the builder draws; a number or a table drops the key', () => {
+    render(<SaveHarness initial={setShowEmptyGroups(EXISTING, true)} saved={[]} />);
+    for (const type of ['line', 'donut', 'bar']) {
+      fireEvent.click(screen.getByTestId(`report-builder-chart-${type}`));
+      expect(screen.getByTestId('report-builder-show-empty-groups')).toHaveAttribute('aria-checked', 'true');
+    }
+    fireEvent.click(screen.getByTestId('report-builder-chart-metric'));
+    expect(screen.queryByTestId('report-builder-show-empty-groups')).toBeNull();
+  });
+
+  it('the model: every chart edit keeps it where it draws, and drops it where it cannot', () => {
+    const on = setShowEmptyGroups(EXISTING, true);
+    expect(showsEmptyGroups(on)).toBe(true);
+    expect(showsEmptyGroups(pickGrouping(on, 'owner', '', MEMBERS))).toBe(true);
+    expect(showsEmptyGroups(pickMeasure(on, 'deal_count', MEMBERS))).toBe(true);
+    expect(showsEmptyGroups(pickChartType(on, 'line', MEMBERS))).toBe(true);
+    expect(pickChartType(on, 'metric', MEMBERS).chart).not.toHaveProperty('showEmptyGroups');
+    expect(pickChartType(on, 'table', MEMBERS)).not.toHaveProperty('chart');
+    expect(setShowEmptyGroups(on, false).chart).toEqual(EXISTING.chart);
+    // No chart to set it on: the report is returned as it is.
+    const noChart = { ...EXISTING, chart: undefined };
+    expect(setShowEmptyGroups(noChart, true)).toBe(noChart);
+  });
+
+  it('a stored type the builder does not offer (a funnel) keeps the switch across unrelated edits, and shows it', () => {
+    const funnel = setShowEmptyGroups({ ...EXISTING, chart: { type: 'funnel', xAxis: 'stage', yAxis: 'total_amount' } }, true);
+    expect(showsEmptyGroups(pickMeasure(funnel, 'deal_count', MEMBERS))).toBe(true);
+    expect(showsEmptyGroups(pickGrouping(funnel, 'owner', '', MEMBERS))).toBe(true);
+    expect(pickMeasure(funnel, 'deal_count', MEMBERS).chart).toMatchObject({ type: 'funnel' });
+    // A stored single-value type draws no category: an edit drops the key there.
+    const gauge = { ...EXISTING, chart: { type: 'gauge', xAxis: 'stage', yAxis: 'total_amount', showEmptyGroups: true } };
+    expect(pickMeasure(gauge, 'deal_count', MEMBERS).chart).not.toHaveProperty('showEmptyGroups');
+
+    render(<SaveHarness initial={funnel} saved={[]} />);
+    expect(screen.getByTestId('report-builder-show-empty-groups')).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('offered on exactly the types the renderer plots as a series (planReportChart), over the whole spec vocabulary', () => {
+    const types = enumOptions(ChartTypeSchema);
+    expect(types.length).toBeGreaterThan(0);
+    for (const t of types) {
+      expect([t, chartShowsEmptyGroups(t)]).toEqual([t, planReportChart(t).kind === 'series']);
+    }
   });
 });

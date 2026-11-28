@@ -1924,6 +1924,7 @@ const zh = {
         metric: '数字',
         table: '表格',
         showValues: '显示数值',
+        showEmptyGroups: '显示数量为 0 的分组',
         targetLine: '目标线',
         targetLabel: '目标',
         secondLayerTableOnly: '这种图只画第一层分组，第二层在计算值里。',

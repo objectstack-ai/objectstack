@@ -4469,6 +4469,7 @@ const ar = {
         metric: "رقم",
         table: "جدول",
         showValues: "إظهار القيم",
+        showEmptyGroups: "إظهار المجموعات التي لا تحتوي على سجلات",
         targetLine: "خط الهدف",
         targetLabel: "الهدف",
         secondLayerTableOnly: "يرسم هذا المخطط التجميع الأول؛ أما الثاني ففي القيم المحسوبة.",

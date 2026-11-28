@@ -46,6 +46,7 @@ import {
   REPORT_BUILDER_CHART_TYPES,
   boundDataset,
   chartSplits,
+  chartShowsEmptyGroups,
   chartTakesTargetLine,
   fillDefaults,
   missingPiece,
@@ -57,7 +58,9 @@ import {
   selectedGrouping,
   selectedMeasure,
   setShowValues,
+  setShowEmptyGroups,
   setTargetLine,
+  showsEmptyGroups,
   targetLine,
   type ReportBuilderDataset,
   type ReportBuilderMembers,
@@ -502,6 +505,19 @@ export function ReportBuilder({
                   checked={showValues}
                   onCheckedChange={(on) => onChange(setShowValues(report, on))}
                   data-testid="report-builder-show-values"
+                />
+              </div>
+            ) : null}
+            {chartShowsEmptyGroups(chartType) ? (
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="report-builder-show-empty-groups" className="text-sm font-normal">
+                  {tt('report.builder.chart.showEmptyGroups', 'Show groups with no records')}
+                </Label>
+                <Switch
+                  id="report-builder-show-empty-groups"
+                  checked={showsEmptyGroups(report)}
+                  onCheckedChange={(on) => onChange(setShowEmptyGroups(report, on))}
+                  data-testid="report-builder-show-empty-groups"
                 />
               </div>
             ) : null}

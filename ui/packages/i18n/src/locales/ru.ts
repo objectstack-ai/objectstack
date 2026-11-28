@@ -4304,6 +4304,7 @@ const ru = {
         metric: "Число",
         table: "Таблица",
         showValues: "Показывать значения",
+        showEmptyGroups: "Показывать группы без записей",
         targetLine: "Целевая линия",
         targetLabel: "Цель",
         secondLayerTableOnly: "Эта диаграмма показывает первую группировку; вторая — в вычисленных значениях.",

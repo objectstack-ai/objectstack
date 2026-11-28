@@ -263,6 +263,10 @@ defineReport({
 
 `series`, `colors`, `height`, `showDataLabels`, `annotations` and `interaction`
 are passed through to the chart as authored.
+`showEmptyGroups: true` adds the declared options of the `xAxis` field that the
+answer left out, valued `0` for a count or sum and left empty for avg/min/max
+(the analytics executor's own empty-group values). Nothing is added when the
+report's `order` reaches the chart, and an answer with no rows draws no chart.
 
 The chart runs its own `xAxis` × `yAxis` dataset query, so it binds the same way
 on every non-`joined` type. It draws above a `tabular` or `summary` table, and

@@ -4118,6 +4118,7 @@ const ko = {
         metric: "숫자",
         table: "표",
         showValues: "값 표시",
+        showEmptyGroups: "레코드가 없는 그룹 표시",
         targetLine: "목표선",
         targetLabel: "목표",
         secondLayerTableOnly: "이 차트는 첫 번째 그룹화만 그립니다. 두 번째는 계산 값에 있습니다.",

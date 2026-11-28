@@ -1345,6 +1345,7 @@
     "ui/ReportChart:series",
     "ui/ReportChart:seriesBy",
     "ui/ReportChart:showDataLabels",
+    "ui/ReportChart:showEmptyGroups",
     "ui/ReportChart:showLegend",
     "ui/ReportChart:subtitle",
     "ui/ReportChart:title",

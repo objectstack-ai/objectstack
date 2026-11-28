@@ -581,6 +581,29 @@ describe('ReportChartSchema', () => {
     expect(r.success).toBe(false);
     expect(r.error?.issues.map((i) => i.path.join('.'))).toContain('seriesBy');
   });
+
+  // objectstack#36722 — "show groups with no records". Optional with NO
+  // default: an existing report parses to exactly the bytes it parsed to
+  // before, so the switch is off by being absent.
+  it('`showEmptyGroups` is optional and off by default — absent stays absent', () => {
+    const parsed = ReportChartSchema.parse({ type: 'bar', xAxis: 'stage', yAxis: 'count' });
+    expect('showEmptyGroups' in parsed).toBe(false);
+    const on = ReportChartSchema.safeParse({ type: 'bar', xAxis: 'stage', yAxis: 'count', showEmptyGroups: true });
+    expect(on.success).toBe(true);
+    expect(on.data?.showEmptyGroups).toBe(true);
+    const report = ReportSchema.parse({
+      name: 'deals_by_stage', label: 'Deals by stage', type: 'summary',
+      dataset: 'deals', rows: ['stage'], values: ['count'],
+      chart: { type: 'bar', xAxis: 'stage', yAxis: 'count', showEmptyGroups: true },
+    });
+    expect(report.chart?.showEmptyGroups).toBe(true);
+  });
+
+  it('refuses a non-boolean `showEmptyGroups`', () => {
+    const r = ReportChartSchema.safeParse({ type: 'bar', xAxis: 'stage', yAxis: 'count', showEmptyGroups: 'yes' });
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.map((i) => i.path.join('.'))).toContain('showEmptyGroups');
+  });
 });
 
 /**

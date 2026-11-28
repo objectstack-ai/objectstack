@@ -75,6 +75,19 @@ const NEEDS_GROUPING: ReadonlySet<string> = new Set(['bar', 'line', 'donut']);
  * (`SINGLE_SERIES_CHART_TYPES`, `checkReportChartSeriesSplit`).
  */
 const SPLITS_SERIES: ReadonlySet<string> = new Set(['bar', 'line']);
+/**
+ * The chart types that draw a category per group, where "Show groups with no records"
+ * (`chart.showEmptyGroups`, objectstack#36722) adds the empty ones: every type
+ * the report renderer plots as a series (`planReportChart`'s `series` plan),
+ * not only the three the builder offers. A stored `funnel` or `pie` keeps an
+ * authored switch across an unrelated edit, and shows it. The single-value and
+ * tabular types draw no category, so the key is dropped there.
+ * `reportBuilder-36374.test.tsx` pins this set to `planReportChart`.
+ */
+const SHOWS_EMPTY_GROUPS: ReadonlySet<string> = new Set([
+  'bar', 'column', 'horizontal-bar', 'line', 'area', 'pie', 'donut',
+  'funnel', 'scatter', 'treemap', 'sankey', 'radar', 'combo',
+]);
 /** The chart types a target line is drawn on (`chart.annotations`, a y-axis line). */
 const TAKES_TARGET_LINE: ReadonlySet<string> = new Set(['bar', 'line']);
 /** Dimension types the period chip can window by. */
@@ -187,6 +200,7 @@ function reconcile(
     if (split && SPLITS_SERIES.has(chartType)) chart.seriesBy = split;
     else delete chart.seriesBy;
     if (!TAKES_TARGET_LINE.has(chartType)) delete chart.annotations;
+    if (!SHOWS_EMPTY_GROUPS.has(chartType)) delete chart.showEmptyGroups;
     out.chart = chart;
   }
 
@@ -309,6 +323,24 @@ export function setShowValues(report: ReportDraft, on: boolean): ReportDraft {
   return { ...report, chart: next };
 }
 
+/** Whether the chart shows the groups with no records (`chart.showEmptyGroups`). */
+export function showsEmptyGroups(report: ReportDraft): boolean {
+  return chartOf(report)?.showEmptyGroups === true;
+}
+
+/**
+ * Turn "Show groups with no records" on or off. Off removes the key, so a report that
+ * never turned it on saves exactly the bytes it saved before.
+ */
+export function setShowEmptyGroups(report: ReportDraft, on: boolean): ReportDraft {
+  const chart = chartOf(report);
+  if (!chart) return report;
+  const next = { ...chart };
+  if (on) next.showEmptyGroups = true;
+  else delete next.showEmptyGroups;
+  return { ...report, chart: next };
+}
+
 /** The target line's value, when the chart draws one. */
 export function targetLine(report: ReportDraft): number | undefined {
   const annotations = chartOf(report)?.annotations;
@@ -341,6 +373,11 @@ export function setTargetLine(report: ReportDraft, value: number | undefined, la
 /** Whether the chart in `report` takes a second-layer split. */
 export function chartSplits(chartType: string): boolean {
   return SPLITS_SERIES.has(chartType);
+}
+
+/** Whether the chart type offers "Show groups with no records": every type the renderer plots as a series. */
+export function chartShowsEmptyGroups(chartType: string): boolean {
+  return SHOWS_EMPTY_GROUPS.has(chartType);
 }
 
 /** Whether the chart in `report` takes a target line. */

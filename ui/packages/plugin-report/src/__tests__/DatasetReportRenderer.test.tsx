@@ -19,10 +19,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { I18nProvider } from '@object-ui/i18n';
+import { ComponentRegistry } from '@object-ui/core';
 import { DatasetReportRenderer, isDatasetReport } from '../DatasetReportRenderer';
 
 type MockRows = Array<Record<string, unknown>>;
-type MockField = { name: string; type?: string; label?: string; format?: string; currency?: string };
+type MockField = { name: string; type?: string; label?: string; format?: string; currency?: string; aggregate?: string };
 type MockResult = {
   rows: MockRows;
   fields?: MockField[];
@@ -1464,5 +1465,177 @@ describe('DatasetReportRenderer — drilling a relationship-path dimension (obje
     expect(onDrill).not.toHaveBeenCalled();
     expect(src.find).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+/**
+ * objectstack#36722 — `chart.showEmptyGroups`: the report chart adds the x-axis
+ * field's DECLARED options the dataset answer left out, valued by the
+ * executor's empty-group table (`emptyGroupValueFor`): `0` for count and sum,
+ * empty for avg. The answer below is server-resolved to the authored label
+ * (ADR-0021) and holds two of the four declared stages.
+ *
+ * DIRECTIONS, written before the ablation: with the call site's fill removed
+ * (the chart plots `state.rows` as before), every "adds" case goes RED and the
+ * three controls stay GREEN on both sides, on purpose.
+ */
+describe('DatasetReportRenderer — chart.showEmptyGroups (objectstack#36722)', () => {
+  const STAGES = [
+    { value: 'prospecting', label: 'Prospecting' },
+    { value: 'qualification', label: 'Qualification' },
+    { value: 'proposal', label: 'Proposal' },
+    { value: 'closed_won', label: 'Closed Won' },
+  ];
+  let chartSchema: { data?: Array<Record<string, unknown>> } | null = null;
+  let chartClick: ((ev: Record<string, unknown>) => void) | undefined;
+
+  beforeEach(() => {
+    chartSchema = null;
+    chartClick = undefined;
+    metaDocs.deal = {
+      name: 'deal',
+      fields: { stage: { type: 'select', options: STAGES }, region: { type: 'text' }, owner: { type: 'select', options: [{ value: 'amy', label: 'Amy' }, { value: 'bo', label: 'Bo' }] } },
+    };
+    ComponentRegistry.register('chart', (props: { schema: { data?: Array<Record<string, unknown>> }; onChartClick?: (ev: Record<string, unknown>) => void }) => {
+      chartSchema = props.schema;
+      chartClick = props.onChartClick;
+      return null;
+    });
+  });
+
+  const answer = (aggregate: string | undefined, extra: Partial<MockResult> = {}): MockResult => ({
+    rows: [
+      { stage: 'Closed Won', deals: 3 },
+      { stage: 'Qualification', deals: 5 },
+    ],
+    fields: [
+      { name: 'stage', type: 'string', label: 'Stage' },
+      { name: 'deals', type: 'number', label: 'Deals', ...(aggregate ? { aggregate } : {}) },
+    ],
+    object: 'deal',
+    dimensionFields: { stage: 'stage' },
+    drillRawRows: [{ stage: 'closed_won' }, { stage: 'qualification' }],
+    drillScopes: { deals: {} },
+    ...extra,
+  });
+  const report = (chart: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+    name: 'deals_by_stage',
+    type: 'summary',
+    dataset: 'deal_metrics',
+    rows: ['stage'],
+    values: ['deals'],
+    chart: { type: 'bar', xAxis: 'stage', yAxis: 'deals', ...chart },
+    ...extra,
+  });
+  /** The plotted categories once the option metadata has landed (the declared order moves them). */
+  const plotted = async (key = 'stage') => {
+    await waitFor(() => expect(chartSchema?.data?.[0]?.[key]).toBe('Qualification'));
+    return chartSchema!.data!;
+  };
+
+  it('adds the empty declared options in their declared place, at 0 for a count', async () => {
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: answer('count') })} />);
+    await waitFor(() => expect(chartSchema?.data?.map((r) => r.stage)).toEqual(['Prospecting', 'Qualification', 'Proposal', 'Closed Won']));
+    expect(chartSchema!.data).toEqual([
+      { stage: 'Prospecting', deals: 0 },
+      { stage: 'Qualification', deals: 5 },
+      { stage: 'Proposal', deals: 0 },
+      { stage: 'Closed Won', deals: 3 },
+    ]);
+  });
+
+  it('a group the server labelled in its own words is matched by the stored value its raw twin carries: no false zero', async () => {
+    // The server translated `closed_won` at the request locale as "Gewonnen";
+    // the client knows the option only as "Closed Won". `drillRawRows` states
+    // `closed_won`, so the real group is recognised and only the two empty
+    // stages are added.
+    const translated = answer('count', { rows: [{ stage: 'Gewonnen', deals: 3 }, { stage: 'Qualification', deals: 5 }] });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: translated })} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    expect(chartSchema!.data!.map((r) => r.stage).sort()).toEqual(['Gewonnen', 'Proposal', 'Prospecting', 'Qualification']);
+    expect(chartSchema!.data!.find((r) => r.stage === 'Closed Won')).toBeUndefined();
+    expect(chartSchema!.data!.find((r) => r.stage === 'Gewonnen')).toEqual({ stage: 'Gewonnen', deals: 3 });
+  });
+
+  it('a sum reads 0 too; an avg is left empty (nothing to average)', async () => {
+    const { unmount } = render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: answer('sum') })} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    expect(chartSchema!.data!.find((r) => r.stage === 'Proposal')).toEqual({ stage: 'Proposal', deals: 0 });
+    unmount();
+    chartSchema = null;
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: answer('avg') })} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    const proposal = chartSchema!.data!.find((r) => r.stage === 'Proposal')!;
+    expect(proposal).toEqual({ stage: 'Proposal' });
+    expect('deals' in proposal).toBe(false);
+  });
+
+  it('with a seriesBy split, an added stage reads 0 in every series', async () => {
+    const src = makeSource({
+      deal_metrics: answer('count', {
+        rows: [
+          { stage: 'Closed Won', owner: 'Amy', deals: 3 },
+          { stage: 'Qualification', owner: 'Bo', deals: 5 },
+        ],
+        dimensionFields: { stage: 'stage', owner: 'owner' },
+      }),
+    });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true, seriesBy: 'owner' })} dataSource={src} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    const prospecting = chartSchema!.data!.find((r) => r.stage === 'Prospecting')!;
+    expect(Object.values(prospecting).filter((v) => typeof v === 'number')).toEqual([0, 0]);
+  });
+
+  it('a mark on an added stage opens no list; a real one still drills', async () => {
+    const onDrill = vi.fn();
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={makeSource({ deal_metrics: answer('count') })} onDrill={onDrill} />);
+    await waitFor(() => expect(chartSchema?.data).toHaveLength(4));
+    await waitFor(() => expect(chartClick).toBeTypeOf('function'));
+    chartClick!({ category: 'Proposal', series: 'deals' });
+    expect(onDrill).not.toHaveBeenCalled();
+    chartClick!({ category: 'Qualification', series: 'deals' });
+    await waitFor(() => expect(onDrill).toHaveBeenCalledTimes(1));
+  });
+
+  it('CONTROL — switch off (absent): only the groups the answer holds', async () => {
+    render(<DatasetReportRenderer report={report({})} dataSource={makeSource({ deal_metrics: answer('count') })} />);
+    expect((await plotted()).map((r) => r.stage)).toEqual(['Qualification', 'Closed Won']);
+  });
+
+  it('CONTROL — an order reaching the chart (a measure): not filled, the server placed every row', async () => {
+    const src = makeSource({ deal_metrics: answer('count') });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true }, { order: [{ by: 'deals', direction: 'desc' }] })} dataSource={src} />);
+    await waitFor(() => expect(chartSchema?.data).toBeDefined());
+    // The option read lands, and still nothing is added.
+    await waitFor(() => expect(probedObjects()).toContain('deal'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(chartSchema!.data!.map((r) => r.stage)).toEqual(['Closed Won', 'Qualification']);
+    const chartCall = src.calls.find((c) => c.selection.dimensions?.length === 1);
+    expect(chartCall?.selection.order).toEqual({ deals: 'desc' });
+  });
+
+  it('CONTROL — a field with no declared options (text): nothing to fill', async () => {
+    const src = makeSource({
+      deal_metrics: answer('count', {
+        rows: [{ region: 'North', deals: 2 }],
+        fields: [{ name: 'region', type: 'string' }, { name: 'deals', type: 'number', aggregate: 'count' }],
+        dimensionFields: { region: 'region' },
+      }),
+    });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true, xAxis: 'region' }, { rows: ['region'] })} dataSource={src} />);
+    await waitFor(() => expect(probedObjects()).toContain('deal'));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(chartSchema!.data).toEqual([{ region: 'North', deals: 2 }]);
+  });
+
+  it('the switch is presentation only: the dataset selection posted is the same with it on or off', async () => {
+    const off = makeSource({ deal_metrics: answer('count') });
+    const { unmount } = render(<DatasetReportRenderer report={report({})} dataSource={off} />);
+    await waitFor(() => expect(off.calls.length).toBeGreaterThan(0));
+    unmount();
+    const on = makeSource({ deal_metrics: answer('count') });
+    render(<DatasetReportRenderer report={report({ showEmptyGroups: true })} dataSource={on} />);
+    await waitFor(() => expect(on.calls.length).toBe(off.calls.length));
+    expect(on.calls).toEqual(off.calls);
   });
 });

@@ -4121,6 +4121,7 @@ const ja = {
         metric: "数値",
         table: "表",
         showValues: "値を表示",
+        showEmptyGroups: "レコードのないグループを表示",
         targetLine: "目標線",
         targetLabel: "目標",
         secondLayerTableOnly: "このグラフは最初のグループ化のみを描画します。2 つ目は計算値にあります。",
