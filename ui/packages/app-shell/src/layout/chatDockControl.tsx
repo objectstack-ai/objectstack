@@ -5,7 +5,7 @@
  * objectstack#34608 (ui ADR-0057 as amended) — the handle on the console's one
  * chat container, the right-side drawer, for everything that opens it: the
  * top-bar robot (the only standing entry), the chat's own launcher and app
- * switcher, Home's "Build with AI", the app list's "Edit with AI".
+ * switcher, Home's "Build with AI".
  *
  * A layout that hosts the drawer (`ConsoleLayout`, `HomeLayout`) provides it.
  * Under no host — the Studio surface, or a host app that still mounts the

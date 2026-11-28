@@ -6337,8 +6337,6 @@ const en = {
     openAppNamed: 'Open {{name}}',
     editApp: 'Edit app',
     editAppNamed: 'Edit {{name}}',
-    editWithAi: 'Edit with AI',
-    editWithAiNamed: 'Edit {{name}} with AI',
     enableApp: 'Enable app',
     disableApp: 'Disable app',
     enableAppNamed: 'Enable {{name}}',

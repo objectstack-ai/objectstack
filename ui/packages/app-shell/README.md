@@ -619,7 +619,7 @@ surface — by the pure `chatConversationScope({ appId, product })` helper
 `build`), derived from the resolved agent via `chatProductOfAgent(name)`, never a
 per-surface choice. A package-scoped surface resolves `app:${packageId}:${product}`,
 so the Studio design copilot editing package `X` and the full-page focus view
-`/ai/build?package=X` (the "Edit with AI" entry) **resume the same thread**
+`/ai/build?package=X` **resume the same thread**
 instead of forking; a generic `/ai/:agent` visit with no package degrades to the
 product alone (`build` / `ask`). Enablement is the single access-filtered
 agent-catalog gate (`useAiSurfaceEnabled`, ADR-0068): a seat-less user's empty
