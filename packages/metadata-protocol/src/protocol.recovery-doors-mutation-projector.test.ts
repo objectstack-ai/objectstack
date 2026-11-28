@@ -64,6 +64,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
+// Paid at collection, not inside a case's clock (check:test-source-alias): the
+// save and delete doors reach it dynamically.
+import '@objectstack/lint';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import {
@@ -508,14 +511,17 @@ describe('every projecting door goes through runMutationProjector', () => {
     /** Every match of `pattern` in `protocol.ts` and every split module. */
     const sitesOf = (pattern: RegExp) => [source, ...splitSources].flatMap((text) => text.match(pattern) ?? []);
 
-    it('has exactly seven `this.runMutationProjector(` call sites — three original, four recovery-door sites', () => {
+    it('has exactly nine `this.runMutationProjector(` call sites — three original, four recovery-door sites, two move-in replays', () => {
         // saveMetaItem · runPublishSideEffects · deleteMetaItem (repository)
         //   + rollbackMetaItem
         //   + revertCommit restore limb + revertCommit soft-remove limb
         //   + deleteMetaItem (legacy raw-engine)
+        //   + moveIntoPackage's replay of a stopped move, twice: the target's
+        //     address as deleted, the package-less one as restored
+        //     (`protocol-package-move-in.ts` `replayRestored`) [#38150]
         // [#29985] `host.` in a moved body is the same call (ruling E's rewrite set).
         const callSites = sitesOf(/\b(?:this|host)\.runMutationProjector\(/g);
-        expect(callSites).toHaveLength(7);
+        expect(callSites).toHaveLength(9);
         // Non-vacuity: the declaration is not one of them.
         expect(source.match(/private async runMutationProjector\(/g) ?? []).toHaveLength(1);
     });

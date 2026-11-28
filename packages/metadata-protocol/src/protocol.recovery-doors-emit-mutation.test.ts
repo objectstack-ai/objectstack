@@ -671,17 +671,20 @@ describe('[#14179] every announcing door goes through the choke point', () => {
     /** Every match of `pattern` in `protocol.ts` and every split module. */
     const sitesOf = (pattern: RegExp) => [source, ...splitSources].flatMap((text) => text.match(pattern) ?? []);
 
-    it('has exactly seven `emitMetadataMutation` call sites — three original, three doors, four limbs', () => {
+    it('has exactly nine `emitMetadataMutation` call sites — three original, three doors, four limbs, two move-in replays', () => {
         // saveMetaItem · runPublishSideEffects · deleteMetaItem (repository)
         //   + rollbackMetaItem
         //   + revertCommit restore limb + revertCommit soft-remove limb
         //   + deleteMetaItem (legacy raw-engine)
+        //   + moveIntoPackage's replay of a stopped move, twice: the target's
+        //     address as deleted, the package-less one as restored
+        //     (`protocol-package-move-in.ts` `replayRestored`) [#38150]
         // A new door that reaches for the LOCAL-only fan-out instead would
         // leave this count untouched and lose the cluster half in silence, so
         // §5's second case counts that method's callers too.
         // [#29985] `host.` in a moved body is the same call (ruling E's rewrite set).
         const callSites = sitesOf(/\b(?:this|host)\.emitMetadataMutation\(/g);
-        expect(callSites).toHaveLength(7);
+        expect(callSites).toHaveLength(9);
         // Non-vacuity: the declaration is not one of them.
         expect(source.match(/private emitMetadataMutation\(/g) ?? []).toHaveLength(1);
     });

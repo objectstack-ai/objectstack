@@ -114,6 +114,7 @@ import type {
     RollbackToPackageCommitResponse,
     PackageExportManifest,
     ReassignOrphanedMetadataResponse,
+    MoveIntoPackageResponse,
     DuplicatePackageResponse,
     EnsureCustomizationPackageResponse,
 } from '@objectstack/spec/api';
@@ -448,6 +449,7 @@ export async function returnTypePrecisionPins12038(): Promise<void> {
     expectTypeOf(await client.packages.rollback('com.acme.crm', 'cmt_1')).toEqualTypeOf<RollbackToPackageCommitResponse>();
     expectTypeOf(await client.packages.export('com.acme.crm')).toEqualTypeOf<PackageExportManifest>();
     expectTypeOf(await client.packages.adoptOrphans('com.acme.crm')).toEqualTypeOf<ReassignOrphanedMetadataResponse>();
+    expectTypeOf(await client.packages.moveIn('com.acme.crm', { items: [{ type: 'flow', name: 'f' }] })).toEqualTypeOf<MoveIntoPackageResponse>();
     expectTypeOf(await client.packages.duplicate('com.acme.crm', 'com.acme.copy')).toEqualTypeOf<DuplicatePackageResponse>();
     expectTypeOf(await client.packages.ensureCustomization('com.acme.crm')).toEqualTypeOf<EnsureCustomizationPackageResponse>();
 

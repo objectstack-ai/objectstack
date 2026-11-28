@@ -1715,6 +1715,8 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // the ADR-0067 commit-history / rollback family.
                 mountPackagesRoute('post', '/:id/duplicate', (req) => `/${req.params.id}/duplicate`);
                 mountPackagesRoute('post', '/:id/adopt-orphans', (req) => `/${req.params.id}/adopt-orphans`);
+                // [ADR-0084 amendment 2026-11-26] Move a selection of loose items into the package.
+                mountPackagesRoute('post', '/:id/move-in', (req) => `/${req.params.id}/move-in`);
                 mountPackagesRoute('post', '/:id/discard-drafts', (req) => `/${req.params.id}/discard-drafts`);
                 mountPackagesRoute('get', '/:id/commits', (req) => `/${req.params.id}/commits`);
                 mountPackagesRoute('post', '/:id/commits/:commitId/revert', (req) => `/${req.params.id}/commits/${req.params.commitId}/revert`);

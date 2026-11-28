@@ -773,8 +773,9 @@ describe('operation message catalog — the domain modules\' 501 sentences (#378
     /^(auth_service_unavailable|i18n_service_unavailable|mcp_server_unavailable|meta_|packages_|automation_(connector|flow|resume|run|screen)|action_activation_|catalog_activation_|permission_set_clone_|security_audience_|share_links_)/.test(key),
   );
 
-  it('names the thirty-seven keys (thirty-one sentences, six activation nouns)', () => {
-    expect(KEYS).toHaveLength(37);
+  // [#38150] +1: `packages_move_in_unsupported`, the move-in door's 501.
+  it('names the thirty-eight keys (thirty-two sentences, six activation nouns)', () => {
+    expect(KEYS).toHaveLength(38);
   });
 
   it.each(KEYS)('%s: every locale translates it and keeps the English placeholders', (key) => {

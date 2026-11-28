@@ -525,6 +525,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     packages_commit_revert_unsupported: 'Commit revert not supported',
     packages_commit_rollback_unsupported: 'Commit rollback not supported',
     packages_orphan_adoption_unsupported: 'Orphan adoption not supported',
+    packages_move_in_unsupported: 'Moving loose items into a package is not supported',
     packages_duplication_unsupported: 'Package duplication not supported',
     packages_customization_ensure_unsupported: 'Customization package ensure not supported',
     automation_connector_credentials_unsupported:
@@ -649,6 +650,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     packages_commit_revert_unsupported: '不支持撤销提交。',
     packages_commit_rollback_unsupported: '不支持回滚到某次提交。',
     packages_orphan_adoption_unsupported: '不支持认领孤立的元数据。',
+    packages_move_in_unsupported: '不支持把散落项移入软件包。',
     packages_duplication_unsupported: '不支持复制软件包。',
     packages_customization_ensure_unsupported: '不支持确保定制包存在。',
     automation_connector_credentials_unsupported:
@@ -787,6 +789,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     packages_commit_revert_unsupported: 'コミットの取り消しはサポートされていません。',
     packages_commit_rollback_unsupported: 'コミットへのロールバックはサポートされていません。',
     packages_orphan_adoption_unsupported: '孤立したメタデータの引き取りはサポートされていません。',
+    packages_move_in_unsupported: '未所属のメタデータをパッケージへ移動する操作はサポートされていません。',
     packages_duplication_unsupported: 'パッケージの複製はサポートされていません。',
     packages_customization_ensure_unsupported: 'カスタマイズパッケージの確保はサポートされていません。',
     automation_connector_credentials_unsupported:
@@ -941,6 +944,7 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     packages_commit_revert_unsupported: 'No se admite revertir una confirmación.',
     packages_commit_rollback_unsupported: 'No se admite restaurar una confirmación anterior.',
     packages_orphan_adoption_unsupported: 'No se admite adoptar metadatos huérfanos.',
+    packages_move_in_unsupported: 'No se admite mover metadatos sueltos a un paquete.',
     packages_duplication_unsupported: 'No se admite duplicar paquetes.',
     packages_customization_ensure_unsupported: 'No se admite asegurar el paquete de personalización.',
     automation_connector_credentials_unsupported:
