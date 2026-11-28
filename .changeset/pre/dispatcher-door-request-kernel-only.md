@@ -2,6 +2,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(runtime): a dispatcher door is served only by the request's own kernel
 
 Clause-②: no

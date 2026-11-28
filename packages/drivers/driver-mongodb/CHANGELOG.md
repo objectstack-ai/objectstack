@@ -1,5 +1,49 @@
 # @objectstack/driver-mongodb
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- adcaae4: fix(driver-mongodb): a standalone server's refusal of a hooked write names the missing replica set, and the driver says so at boot
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  On a standalone MongoDB server, a write on an object that carries a metadata `before*` hook (or an `after*` hook whose `onError` is `abort`) runs in a transaction, and a standalone server runs none. The write was refused with the MongoDB client's own hint, "This MongoDB deployment does not support retryable writes. Please add retryWrites=false to your connection string.", and following that hint changed nothing.
+  
+  - **The refusal.** A command the server refuses because it ran inside the engine's transaction is now refused with `NOT_IMPLEMENTED` (501), saying that the server is a standalone `mongod`, why the write runs in a transaction, and the fix: run MongoDB as a replica set (a single-node one is enough). The client's error is kept as `cause`. Only the text changes: the same writes are refused as before, and a write on an object that opens no transaction is unaffected. Every other error passes through unchanged.
+  - **At boot.** `connect()` sends one `hello` and, on a standalone server, logs one warning that writes running in a transaction will be refused on this store, and how to fix it. A replica set member or a `mongos` logs nothing, and a probe that fails reports nothing.
+  
+  Nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

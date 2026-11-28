@@ -1,5 +1,174 @@
 # @objectstack/lint
 
+## 19.0.0-next.3
+
+### Minor Changes
+
+- d578952: fix(lint)!: publish-time checks for views, dashboards and the app shell that save and do not work
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered publish-refuses-views-and-dashboards-that-save-and-do-not-work -->
+  
+  **BREAKING** for a list view filter keyed on a `formula` field: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored metadata is not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  - `list-view-filter-field-virtual` (error): a list view's own `filter`, or a `userFilters.tabs[]` preset, keyed on a field computed on read (`formula`). The engine refuses every query filtered on such a field (`400 INVALID_FIELD`), so the view opens on that error every time. Refused at the runtime publish door on a `view` write and on an `object` write through the object's own `listViews`. A dotted key whose head is a formula stays `list-view-field-dotted`; the filter bar's field list (`userFilters.fields`) is not judged.
+  - `dashboard-without-widgets` (warning, every door): a dashboard with `widgets: []`, which opens on its header over an empty canvas. Advisory because the shape breaks no request and the platform's own create steps (Studio, the spec's create seed, `os generate dashboard`) write it and fill it afterwards.
+  - `list-view-kanban-group-field-uncategorical` (warning): a `kanban` board grouped by a field with no fixed set of lanes. A text, number or date field gets one lane per distinct value on the loaded cards and no lane for a value no card holds; a multi-valued field puts a card holding several values in one lane named by all of them. A `select` / `radio`, a boolean and a single-valued reference are silent. Runs on the runtime `view` and `object` doors.
+  - `app-navigation-empty` (warning): an app with no entry in `navigation` nor in any `areas[].navigation` (a separator or an empty group counts as nothing), and no navigation the stack contributes into it. It opens on the "no access" empty state for every member. Runs on the runtime `app` door.
+  - `object-unreachable-from-navigation` and `object-without-view` (warnings, `os validate` / `lint` / `build` only): an object no navigation entry opens (not judged: a `master_detail` child, an object another object names in `relatedLists`, an object a page names when navigation opens that page, an API-disabled object, and a stack with no app), and an object navigation opens as a list that declares no `listViews` entry and no bound `views` item, which then opens on the console's own "All records" tab. Fix: `listViews: { all: { type: 'grid', columns: [...] } }` on the object, or a `views` entry bound to it.
+  
+  ## FROM → TO
+  
+  - `filter: [{ field: 'is_overdue', operator: 'equals', value: true }]` where `is_overdue` is a `formula` → `filter: [{ field: 'due_date', operator: 'lt', value: '{today}' }]` (the stored field the formula reads), or a stored field written when its sources change.
+  
+  `@objectstack/lint` exports six rule id constants (`LIST_VIEW_FILTER_FIELD_VIRTUAL`, `LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL`, `DASHBOARD_WITHOUT_WIDGETS`, `APP_NAVIGATION_EMPTY`, `OBJECT_UNREACHABLE_FROM_NAVIGATION`, `OBJECT_WITHOUT_VIEW`) so `os explain` carries an entry for each; the two new rule functions are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-views-and-dashboards-that-save-and-do-not-work`.
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+- 3550665: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint)!: a knowledge source is checked for its object, its fields and the search gates that need no caller, in `os validate` and at publish
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md
+  
+  <!-- adr-0087: registered knowledge-source-publish-refuses-missing-references-and-gated-objects -->
+  
+  ADR-0161 K4, row 4.
+  
+  **BREAKING** for the publish of a knowledge source that carries one of the four errors below: it was accepted before and is refused now (422, the finding's rule id, path, message and fix), and `os validate` / `lint` / `compile` / `build` refuse the same source. The schema is unchanged, and stored sources are not rewritten or refused at boot.
+  
+  A new rule, `validateKnowledgeSource`, exported from `@objectstack/lint` with its five rule id constants. It runs on all three CLI commands and on the runtime publish gate for a `knowledge_source` write, with one set of rule ids and messages. Four errors: a source over a missing object has nothing to index, a missing field indexes no text for that member, and a gated object is never searched for a caller the service judges:
+  
+  - `knowledge-source-object-unknown`: `source.object` names an object that the stack, a package of its artifact, or (at the publish gate) the host does not define. Under the package closure the publish gate states, an object outside it is worded for the closure with the remedy to declare the dependency. On the CLI, while the manifest declares a dependency the artifact does not carry, the build cannot see that package's objects, so the finding is a warning that clears when the dependency defines the object (the publish gate judges it against the closure, which holds them); with no such dependency it is an error. A platform object a known package registers is not judged when the stack does not carry it; a platform-prefixed name no known package registers is a warning.
+  - `knowledge-source-field-unknown`: a `source.content` or `source.metadataFields` member names no field of the object, declared (the stack's own object extensions included) or addressable without a declaration (`id`, which the driver provisions, and the injected system columns `owner_id`, `created_at`, …).
+  - `knowledge-source-object-not-searchable`: the object's API exposure does not serve `search` (`canServeApiOperation(enable, 'search')`): `enable.apiEnabled: false`, an `enable.apiMethods` list that does not grant `list` (search derives from it; `search` itself is a retired list value the parse strips), or a list that grants `list` beside `enable.searchable: false`. With no `apiMethods` list, `searchable: false` does not refuse it.
+  - `knowledge-source-system-object-not-ai-readable`: a `sys_` object that does not declare `enable.aiReadable: true` (`isAiReadExposed`).
+  
+  One warning, which refuses nothing:
+  
+  - `knowledge-source-field-never-indexed`: a member names a credential-class field or a field declared `internal: true`; the index never carries either, even when named, so the member is skipped.
+  
+  The two gates are the knowledge service's own search-time gates that need no caller, asked through the same spec predicates. The disabled-package gate and the field-queryable gate need an environment or a caller and stay at save, judged for the author. `os explain` answers each of the five ids.
+  
+  ## FROM → TO
+  
+  - `source: { object: 'kb_artcle', … }` → `source: { object: 'kb_article', … }`, an object the stack defines. An object a dependency defines clears at publish once the package's manifest declares that dependency in `dependencies`; on the CLI it stays a warning while the artifact does not carry the dependency.
+  - `content: ['title', 'bdy']` → `content: ['title', 'body']`.
+  - a source over an object with `enable: { apiEnabled: false }` → serve the object (`apiEnabled: true` and, where it declares `apiMethods`, a list that includes `list`, with `searchable` not false), or index another object.
+  - a source over `sys_audit_note` → index a business object, or declare `enable.aiReadable: true` on the system object's own definition.
+  
+  `@objectstack/spec` adds only the upgrade-guide entry `knowledge-source-publish-refuses-missing-references-and-gated-objects`.
+- a7f7f3f: fix(lint)!: a knowledge source naming an absent platform object is refused at publish; `ai_context` accepts `id`; the save door's search refusal names `list`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310
+  
+  <!-- adr-0087: not-required (already-registered knowledge-source-publish-refuses-missing-references-and-gated-objects) the entry that registered this rule's publish refusal landed with the rule itself; this change extends its surface to an absent platform object name judged against the whole collection the host serves, says the platform-name warning is the command line's, and lists the entry only for a stack that declares knowledge sources. No id is added and no key is added, removed or re-shaped. -->
+  
+  ADR-0161 K4, row 4.
+  
+  **BREAKING** for the publish of a knowledge source whose `source.object` is a platform name the host does not serve: when the publish gate judges the source against the whole collection the host serves (a write that names no package), a platform-prefixed name no package registers there, and a known platform object (`sys_user`) the host does not serve, are now `knowledge-source-object-unknown` errors (422), as an unprefixed name already was. Before, the first was a warning and the second was not judged. FROM a source over such an object TO a source over an object the host serves: name the object by its full name, or install the package that registers it. On the command line nothing changes: a platform-prefixed name no known package registers stays a warning, and a known platform object the stack does not carry is not judged.
+  
+  - `ai_context`: a field named `id` (in `fields`, a related list's `fields`, `where` or `orderBy`) is no longer reported as `ai-context-field-unknown`. The driver provisions it, so it exists on every object; existence is now asked through the same column set the other existence rules use. A `body.field` of `id` is reported as not long text, never as unknown.
+  - `@objectstack/service-knowledge`: the save refusal for an object the API does not serve for search names the cause and fix in the words of `knowledge-source-object-not-searchable`: `enable.apiEnabled` false, an `enable.apiMethods` list that does not grant `list` (from which search derives), or `list` beside `enable.searchable: false`; the fix is to include `list` with `enable.searchable` not false. It no longer tells the author to grant `search`, a retired list value the parse strips.
+  - `@objectstack/spec`: the upgrade entry `knowledge-source-publish-refuses-missing-references-and-gated-objects` is listed by `os migrate meta` only for a stack that declares `knowledgeSources` (`--all` still lists it), and its surface states that the platform-name warning is the CLI's.
+
+### Patch Changes
+
+- 9548be2: feat(lint): warn when a select option `color` renders neutral on the option badge
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A new warning, `field/option-color-renders-neutral`. An option is coloured only by the colour its author declares, and the option badge paints exactly two spellings: one of the nine palette families (`gray`, `red`, `orange`, `yellow`, `green`, `blue`, `indigo`, `purple`, `pink`, lowercase) or a `#rgb` / `#rrggbb` hex. Any other declared colour (`teal`, `amber`, `Red`, `rgb(…)`, `#rrggbbaa`, a hex with no `#`) rendered neutral grey with no signal. It now draws a warning naming the option and a fix line: the lowercase family or the `#`-prefixed / alpha-free hex when the value points at one, otherwise the families and the hex form.
+  
+  It runs on `os validate`, `os build` and `os lint` over object fields, object-extension fields, picklists and picklist extensions, and at the metadata save door on `object` and `object_extension` writes, where it rides back as an advisory. Nothing is refused: `SelectOption.color` still accepts any string, and charts and gantt bars still paint a CSS colour name. `os lint --strict` fails on it, as on every warning. `os explain field/option-color-renders-neutral` gives the per-surface reading. Published from the root entry: `FIELD_OPTION_COLOR_RENDERS_NEUTRAL`, `OPTION_COLOR_FAMILIES`, `isBadgePaintableOptionColor`, `lintOptionColors` and the type `OptionColorPicklist`.
+- ee2ffca: fix(lint,rest)!: `os i18n extract` / `os i18n check` expect the `_relatedLists` keys `os validate` accepts under a `.custom` arrangement, and the object read translates a tab title the arrangement sets
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no schema key, accepted value, stored shape or export moves; the moved answers are the coverage gate's expected key set and the translation an object read serves, and the remedy is a translation the author adds or drops in a bundle, which no conversion can write -->
+  
+  **BREAKING** for a stack that runs `os i18n check --strict` (or `--threshold`) and carries a paired `.custom` package's `relatedLists` arrangement (ADR-0146 D10) that labels a record-page tab. The coverage gate now expects `objects.<object>._relatedLists.<list>.label` for each list the arrangement labels, with the arrangement's text, so a stack that passed in 19.0.0-next.1 without that translation now reports it missing. Add the translation, or drop the arrangement entry's `label`. Keys over a list the arrangement hides, names bare or re-states without a `label` are no longer expected, so a gate that demanded a key `os validate` refuses stops demanding it.
+  
+  **What changes in `@objectstack/lint`.**
+  
+  - `collectExpectedEntries`, which `os i18n extract` and `os i18n check` read, folds the owner's `relatedLists` with the stack's `objectExtensions` the way `translation-target-unknown` folds them: every placement first, then the arrangement, whose entries replace every entry they cover (`relatedListNameCovers`). It is one fold, `related-list-titles.ts`, read by both. `os i18n extract` scaffolds no key over a list the arrangement hides, names bare or re-states without a `label`, and scaffolds one, carrying the arrangement's text, over a list it labels. A label only a code extender's `place` entry gives is still not scaffolded: the rule accepts its key, but the registry may not apply the placement.
+  - The two `translation-target-unknown` hints for such a key name the list it addresses, `{ list: 'LIST', label }`, instead of "the owner's `label`". The stripped label may be a placement's, and where a bare child name covers a dotted list, the entry to write is the dotted list's own.
+  
+  **What changes in `@objectstack/rest`.** The `/meta/object` reads (by name and list) hand the translator the paired `.custom` package's own `objects.<object>._relatedLists` translations, read for the pair of the base the object's packaged base ships in. A tab title the arrangement sets or changes now reads the pair's translation, then keeps its own text. Before, it read nothing, because an object answers no `servedOverrideBaseOf` (ADR-0146 D10, unchanged). Only that subtree is handed on: every other string of an object keeps the ranking it had.
+  
+  **What changes in `@objectstack/spec`.** The wording of the `translation-related-list-key-under-arrangement-refused` ledger entry: the label the arrangement strips may be a placement's, and the remedy no longer says that a translated title needs the owner's label.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [6ee2a63]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [7d6692e]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/formula@19.0.0-next.3
+  - @objectstack/metadata-core@19.0.0-next.3
+  - @objectstack/sdui-parser@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Minor Changes

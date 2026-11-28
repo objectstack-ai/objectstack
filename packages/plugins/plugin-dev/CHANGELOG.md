@@ -1,5 +1,59 @@
 # @objectstack/plugin-dev
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [e2a0e90]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [93fa911]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [e81a44f]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [2d8b7fa]
+- Updated dependencies [f8dcd3e]
+- Updated dependencies [f72f335]
+- Updated dependencies [fd06b7a]
+- Updated dependencies [560b558]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/runtime@19.0.0-next.3
+  - @objectstack/objectql@19.0.0-next.3
+  - @objectstack/plugin-security@19.0.0-next.3
+  - @objectstack/rest@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/plugin-auth@19.0.0-next.3
+  - @objectstack/account@19.0.0-next.3
+  - @objectstack/setup@19.0.0-next.3
+  - @objectstack/driver-memory@19.0.0-next.3
+  - @objectstack/plugin-hono-server@19.0.0-next.3
+  - @objectstack/service-i18n@19.0.0-next.3
+  - @objectstack/service-realtime@19.0.0-next.3
+  - @objectstack/service-storage@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

@@ -1,5 +1,13 @@
 # @objectstack/metadata-fs
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [d59478f]
+- Updated dependencies [898b056]
+  - @objectstack/metadata-core@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

@@ -3,6 +3,8 @@
 '@objectstack/spec': patch
 ---
 
+**Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(lint)!: a knowledge source is checked for its object, its fields and the search gates that need no caller, in `os validate` and at publish
 
 Clause-②: yes (narrowing)

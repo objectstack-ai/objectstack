@@ -1,5 +1,56 @@
 # @object-ui/plugin-designer
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [23cefa0]
+- Updated dependencies [6123f2b]
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [e94a4a9]
+- Updated dependencies [079edad]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [77edd2a]
+- Updated dependencies [9957484]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [d528ebc]
+- Updated dependencies [ccdfe62]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [7b90456]
+- Updated dependencies [03f39cc]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [9603893]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @object-ui/i18n@19.0.0-next.3
+  - @objectstack/spec@19.0.0-next.3
+  - @object-ui/types@19.0.0-next.3
+  - @object-ui/core@19.0.0-next.3
+  - @object-ui/components@19.0.0-next.3
+  - @object-ui/layout@19.0.0-next.3
+  - @object-ui/plugin-grid@19.0.0-next.3
+  - @object-ui/react@19.0.0-next.3
+  - @object-ui/data-objectstack@19.0.0-next.3
+  - @object-ui/plugin-form@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

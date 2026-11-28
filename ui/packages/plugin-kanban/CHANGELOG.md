@@ -1,5 +1,49 @@
 # @object-ui/plugin-kanban
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 6ce1975: fix(kanban): a list view board laned by a lookup draws its "Uncategorized" lane when every record with an empty lookup sits past the first page
+  
+  Clause-②: yes (widening) — `@object-ui/plugin-kanban` `bucketCardsIntoColumns` (exported from the package entry) gains the optional sixth parameter `keepUncolumned`, default `false`
+  Metadata-protocol: none
+  
+  A list view hands its kanban one page of the view's query. On a board laned by a lookup field, the grouped lane read already counts every lane, the records with an empty lookup included, and the lanes whose records all sit past the page are drawn from it. The trailing "Uncategorized" lane was not: it was drawn only by the cards it held, so when every record with an empty lookup sat past the first page those records had no lane on the board at all. The board now draws that lane from the read's count, last, with its whole count and the "Cards not loaded" line. A source with no grouped door, or a read that is refused or cut, draws it from the page's cards as before. Boards laned by a text field or by declared options are unchanged. Nothing to migrate.
+- f294277: fix(kanban): a list view board laned by a lookup loads the rest of a lane's cards with "Load more"
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A list view hands its kanban one page of the view's query. On a board laned by a lookup field, the grouped lane read counts every lane, so a lane could read 30 while drawing the 13 cards of it on the page, and a lane whose records all sat past the page (the trailing "Uncategorized" lane included) read 10 with no card and no way to see them. Each lane that draws fewer cards than the read counts now has "Load more" at its foot. It reads the lane's next records under the view's filter, sort and search, starting right after the lane's cards on the page, and adds them to the lane. The list's page and the cards a lane loaded are read again together when the list refetches. A source with no grouped door, or a read that is refused or cut, offers no "Load more", as before. Boards laned by a text field or by declared options are unchanged. Nothing to migrate.
+- f19350b: fix(kanban): a windowed swimlane board counts each whole swimlane, and each whole column when it queries itself
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  A kanban drawn in swimlanes that holds only a window of its query (a page a list view hands it, or its own fetch that filled its `limit`) wrote each swimlane row's count from the cards it held, marked `+`, and a board that queried itself wrote its column counts the same way. Such a board now asks one grouped read on the lane field and the swimlane field together, each group's record count under the board's filter and search, and writes every swimlane row's whole count from it; a board that queries itself also writes every column's whole count from the same read. A board that holds every record of its query asks nothing more. A source with no grouped door, or a read that is refused or cut, keeps the counts marked `+`, as before. Nothing to migrate.
+- Updated dependencies [23cefa0]
+- Updated dependencies [6123f2b]
+- Updated dependencies [58b513a]
+- Updated dependencies [fe0473d]
+- Updated dependencies [079edad]
+- Updated dependencies [9609c13]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [9957484]
+- Updated dependencies [d528ebc]
+- Updated dependencies [ccdfe62]
+- Updated dependencies [7b90456]
+- Updated dependencies [03f39cc]
+- Updated dependencies [9603893]
+  - @object-ui/i18n@19.0.0-next.3
+  - @object-ui/types@19.0.0-next.3
+  - @object-ui/core@19.0.0-next.3
+  - @object-ui/components@19.0.0-next.3
+  - @object-ui/plugin-detail@19.0.0-next.3
+  - @object-ui/fields@19.0.0-next.3
+  - @object-ui/react@19.0.0-next.3
+  - @object-ui/permissions@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

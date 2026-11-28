@@ -1,5 +1,331 @@
 # @objectstack/spec
 
+## 19.0.0-next.3
+
+### Major Changes
+
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+
+### Minor Changes
+
+- fe0473d: feat(types)!: a static chart node's series refuses the renderer-internal `measureFormat` carrier by name
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered chart-series-measure-format-carrier-refused -->
+  
+  **BREAKING** accept-set narrowing on the static SDUI `chart` node: `ChartDataSeriesSchema` refuses `series[].measureFormat`, and the `ChartDataSeries` TS twin types it `?: never`.
+  
+  `measureFormat` (`{ format, currency, percentScale }`) is the chart renderer's internal carrier of a dataset measure's display facts. The report and dashboard chart producers fill it from the dataset answer so a value axis prints the measure's units; it is not meant to be authored. Until now the non-strict series schema refused only its sibling `aggregate` by name, so a hand-written `measureFormat` on a static chart node was kept and honoured, and could claim a currency or a percent scale the data does not have.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `{ type: 'chart', series: [{ name: 'amount', measureFormat: { format: '0,0.00', currency: 'CNY' } }] }` | delete `measureFormat`; to print the value axis in a unit, write the axis `format` on the chart: `yAxis: [{ field: 'amount', format: '$0,0' }]` |
+  
+  The one-line fix: delete `measureFormat` from every authored chart series. The parse now refuses it with one issue at `series.N.measureFormat` naming the key (a series that also writes `aggregate` is refused at both), and a typed `ChartDataSeries` literal that writes it fails `tsc`. Report and dashboard charts are unchanged: their producers keep filling the carrier past this schema. The D3 entry `chart-series-measure-format-carrier-refused` (`@objectstack/spec` migration registry) records the narrowing; there is no D2 conversion, because the carrier has no authored equivalent to rewrite into.
+- 9609c13: feat(spec)!: retire the `ask_ai` action type — the shell's 「问 AI」 entry is the one way into the assistant
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37857
+  
+  <!-- adr-0087: registered action-type-ask-ai-removed, ui-action-type-ask-ai-retired -->
+  
+  **BREAKING** enum value removal on `ActionType` (`@objectstack/spec/ui`), ADR-0160 D7 as its seventh amendment rules. `ask_ai` was published only on the 19 prerelease line (`19.0.0-next.0`) and in no stable release; it leaves before 19.0.0 with no compatibility shim. A button per page is a second entry to the assistant, and the shell's 「问 AI」 entry in the page header already opens on the record in view. The accepted cost: a list row has no ask-AI action of its own.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_page'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
+  | `{ type: 'action:button', properties: { actionType: 'ask_ai' } }` | nothing: delete the row |
+  
+  The one-line fix: delete each `ask_ai` action and every name that points at it (a page header's `actions`, a list view's `rowActions` / `bulkActions`, a related list's `actions`, a quick-actions list, a record alert's `actionName`, an app navigation entry). `os migrate meta --from 18` lists the edits; `--write` deletes an `ask_ai` action that nothing in the stack names and every inline row and container member that spells it, and leaves a named one, with its references, for you to delete by hand.
+  
+  - **`@objectstack/spec`**: every slot that takes an action type refuses `ask_ai` with one prescription: a declared or inline action's `type`, an `action:button` / `action:icon` row's `actionType`, an `action:group` / `action:menu` member's `type`, and a dashboard header action's `actionType`. The D2 conversion `action-type-ask-ai-removed` (retired from the load path) deletes, over sources, only what nothing names and, at rest (stored rows, built artifacts), every `ask_ai` action, row and member. The D3 entry `ui-action-type-ask-ai-retired` names what is done by hand. `applyConversionsToStoredItem` now answers `undefined` when the chain leaves no item of a row, which a stored `action` row of this type is; `ConversionContext` gains `atRest`. `ActionSchema`'s ask_ai refinements and the dashboard's record-less refusal leave with the type.
+  - **`@objectstack/metadata-protocol`**, **`@objectstack/metadata`**, **`@objectstack/core`**, **`@objectstack/service-datasource`**: a stored row the seam yields no item of is registered and served as nothing. The database loader still finds it by name, so `DELETE /api/v1/meta/action/<name>` removes it, and `migrateStoredMetadata` lists it `skipped` with that instruction instead of re-saving it.
+  - **`@objectstack/runtime`**: the action-execution branches for `ask_ai` are gone.
+  - **`@object-ui/core`**: `ActionRunner.setAssistantFocusHandler`, `ActionRunner.drawsAction`, `ActionRunner.bulkRefusal`, `isAskAiAction` and the `AssistantFocus` / `AssistantFocusHandler` types are removed; `ActionEngine` no longer filters undrawn actions or refuses a bulk run of one.
+  - **`@object-ui/react`**: `<ActionProvider onAskAi>` and `useDrawsAction()` are removed.
+  - **`@object-ui/components`**, **`@object-ui/plugin-grid`**, **`@object-ui/plugin-detail`**: the renderers drop their drawn-action gates.
+  - **`@object-ui/app-shell`**: `setChatFocus` and its `follow` option are removed; the conversation's record pin is set from the composer chip only. `useAskAiHandler`, `AiSurfaceState.focusServed` and the catalog `focus` lookup behind them leave with the type. This also closes #37827, the record page that dropped the shell's ask-AI handler: there is no handler left to drop.
+  
+  Correction to two prerelease notes already published in `19.0.0-next.0` (`.changeset/pre/37142-ask-ai-action-type.md` and the `setChatFocus` line of `.changeset/pre/36999-conversation-focus.md`): the `ask_ai` action type and the `setChatFocus` setter they announce do not ship in 19.0.0. The in-composer record pin from #36999 stays.
+- f9c6f92: feat(knowledge)!: refuse a knowledge_source save that names an adapter the running deployment does not mount
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` teaches a knowledge source's `adapter`; `content/docs/ai/knowledge-rag.mdx` and `content/docs/protocol/knowledge.mdx` name the save refusal
+  
+  <!-- adr-0087: registered knowledge-source-unmounted-adapter-refused-at-save -->
+  
+  **BREAKING** for an author or agent that saves a `knowledge_source` whose `adapter` names a store the running deployment does not mount (a retired store such as `ragflow`, or a typo): `PUT /api/v1/meta/knowledge_source/:name`, Studio, the MCP `save_metadata_draft` tool and a package duplicate now answer `400 VALIDATION_ERROR` where the save answered success, and nothing is written. The message names the source, the adapter and the mounted adapters. Fix: name one of the mounted adapters as the source's `adapter`, leave `adapter` out so the deployment's store holds it, or mount the named store and save again.
+  
+  Before, the save was stored, the boot named the source at `error`, and every index and search of it answered `503 SERVICE_UNAVAILABLE`. A source already stored is not touched: it keeps answering `503` until it is saved with a mounted adapter.
+  
+  Not moved: a source that leaves `adapter` out (it is placed on the deployment's store; several adapters and none the deployment's is still refused as before); a source naming a mounted adapter; the engine's own write, so a package install or a seed; a source registered in code (`KnowledgeServicePlugin({ sources })`, `registerSource`), which registers before its store starts; and `objectstack validate`, which runs with no deployment. For those three the boot's `error` line and the `503` at index and search stay the signal. Migration entry `knowledge-source-unmounted-adapter-refused-at-save` (`@objectstack/spec`) carries it for the upgrade guide.
+- 03f39cc: feat(spec): the `data-draft-review` part — the drafts one ask turn saved, with the door's verdict and the Studio review routes
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: added
+  
+  - New in `@objectstack/spec/ai`: `DRAFT_REVIEW_PART_TYPE` (`'data-draft-review'`), `DRAFT_REVIEW_MAX` (50) and `DraftReviewListSchema` (`{ drafts, omitted? }`), with `DraftReviewItemSchema`, `DraftReviewVerdictSchema`, `DraftReviewVerdictRefusalSchema` and `DraftReviewLinksSchema` and their types. One row is `{ type, name, package, label?, verdict, verdictWithheld?, verdictError?, verdictRead, review }`: `verdict` is the light authoring door's own `list_drafts` verdict (`{ publishable, refusals, advisories }`, the findings in `RuntimeAuthoringIssueSchema`'s shape) or `null` when none was read, `verdictWithheld` / `verdictError` carry the door's `{ code, message, status }`, `verdictRead` is `turn-end` or `save`, and `review` holds the `changes` and `item` Studio routes, each a Console path. The five new objects are closed: an unknown key on the list, a row, the verdict, a verdict refusal or the links is refused, never dropped. The findings in `refusals` and `advisories` keep the door's own `RuntimeAuthoringIssueSchema` shape, which drops a key it does not know. A review link is refused when a browser could read it as another host: it must start with one `/` and carry no backslash, whitespace or control character. `drafts` has one row per draft, unique by `package`, `type` and `name`: a draft saved more than once in the turn is one row, at its first save, with the verdict read last.
+  - A host whose admin skill saved drafts during an ask turn sends one such part before the stream's `finish`; the console's chat draws it as a review card under the answer. Nothing in this repository produces the part.
+
+### Patch Changes
+
+- 22e1089: feat(spec): `PLATFORM_TOOLS_BY_PACKAGE['service-ai-studio']` lists `list_flow_runs`
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  The cloud build agent gains a read-only `list_flow_runs` tool: it reads one flow's recent runs as the caller, so the agent can answer "did my automation work?" from a run's own outcome. The registry lists the name in its alphabetical place, so `PLATFORM_PROVIDED_TOOL_NAMES` carries it and `isPlatformProvidedToolName('list_flow_runs')` answers `true`. A skill whose `tools[]` names `list_flow_runs` now resolves under ADR-0109 reference integrity instead of being reported as a fictional tool (`ai-skill-tool-unresolved`). The chat panel's step label for the tool is in every built-in locale pack. No schema shape changes and no export is added or removed.
+- e606bab: fix(spec): the published JSON Schema names every refinement it drops, however deeply it is nested
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The generator's dropped-refinements census stopped walking a schema after 14 hops and still printed "all declared". A rule nested deeper was missing from the file's `x-dropped-refinements` annotation. The walk now has no depth limit; its identity-keyed visited set ends it. A walk that does not end now fails the build with the export and path named, instead of stopping early in silence.
+  
+  Three published files under `json-schema/api/` now list sites they missed before: `InstalledPackageAtEitherStage` (1 more), `GetInstalledPackageResponse` (5 more) and `ListInstalledPackagesResponse` (8 more). The set of documents any schema accepts is unchanged, because `x-` keywords are ignored by every validator. Nothing to migrate.
+- d578952: fix(lint)!: publish-time checks for views, dashboards and the app shell that save and do not work
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered publish-refuses-views-and-dashboards-that-save-and-do-not-work -->
+  
+  **BREAKING** for a list view filter keyed on a `formula` field: it was accepted before and is refused now, with the fix named in the finding. The schema is unchanged and stored metadata is not rewritten or refused at boot; the refusal comes at the next publish, and from `os validate` / `lint` / `compile` / `build`.
+  
+  - `list-view-filter-field-virtual` (error): a list view's own `filter`, or a `userFilters.tabs[]` preset, keyed on a field computed on read (`formula`). The engine refuses every query filtered on such a field (`400 INVALID_FIELD`), so the view opens on that error every time. Refused at the runtime publish door on a `view` write and on an `object` write through the object's own `listViews`. A dotted key whose head is a formula stays `list-view-field-dotted`; the filter bar's field list (`userFilters.fields`) is not judged.
+  - `dashboard-without-widgets` (warning, every door): a dashboard with `widgets: []`, which opens on its header over an empty canvas. Advisory because the shape breaks no request and the platform's own create steps (Studio, the spec's create seed, `os generate dashboard`) write it and fill it afterwards.
+  - `list-view-kanban-group-field-uncategorical` (warning): a `kanban` board grouped by a field with no fixed set of lanes. A text, number or date field gets one lane per distinct value on the loaded cards and no lane for a value no card holds; a multi-valued field puts a card holding several values in one lane named by all of them. A `select` / `radio`, a boolean and a single-valued reference are silent. Runs on the runtime `view` and `object` doors.
+  - `app-navigation-empty` (warning): an app with no entry in `navigation` nor in any `areas[].navigation` (a separator or an empty group counts as nothing), and no navigation the stack contributes into it. It opens on the "no access" empty state for every member. Runs on the runtime `app` door.
+  - `object-unreachable-from-navigation` and `object-without-view` (warnings, `os validate` / `lint` / `build` only): an object no navigation entry opens (not judged: a `master_detail` child, an object another object names in `relatedLists`, an object a page names when navigation opens that page, an API-disabled object, and a stack with no app), and an object navigation opens as a list that declares no `listViews` entry and no bound `views` item, which then opens on the console's own "All records" tab. Fix: `listViews: { all: { type: 'grid', columns: [...] } }` on the object, or a `views` entry bound to it.
+  
+  ## FROM → TO
+  
+  - `filter: [{ field: 'is_overdue', operator: 'equals', value: true }]` where `is_overdue` is a `formula` → `filter: [{ field: 'due_date', operator: 'lt', value: '{today}' }]` (the stored field the formula reads), or a stored field written when its sources change.
+  
+  `@objectstack/lint` exports six rule id constants (`LIST_VIEW_FILTER_FIELD_VIRTUAL`, `LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL`, `DASHBOARD_WITHOUT_WIDGETS`, `APP_NAVIGATION_EMPTY`, `OBJECT_UNREACHABLE_FROM_NAVIGATION`, `OBJECT_WITHOUT_VIEW`) so `os explain` carries an entry for each; the two new rule functions are not exported. `@objectstack/spec` adds only the upgrade-guide entry `publish-refuses-views-and-dashboards-that-save-and-do-not-work`.
+- c06dac7: docs(spec): the open self-hosted restriction profile lists the whole node vocabulary and does not state which plugins the runtime runs
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `RestrictionProfileSchema.allowedFlowNodeTypes` said an environment that runs the approvals plugin lists `approval` / `approval_revise` and one that does not leaves them out. The open profile a self-hosted runtime serves (`GET /api/v1/discovery/restriction-profile`) is a constant: it lists the whole vocabulary, the approval pair included, on every kernel, whether or not the approvals plugin is installed. The reader rule and the schema docs now say so: a profile that states plugin composition lists the pair only when the environment runs the plugin; the open self-hosted profile states no plugin composition, so `os validate --target <self-hosted url>` does not check that an approval flow has an executor there. The field's description in the published JSON Schema and the reference page carries the same sentence. No key, accepted value or served answer changes. Nothing to migrate.
+- 1f1cd21: fix(spec): the `enable.trash`, `versioning`, `audit`, `auditTrail`, `trackChanges` and `feedTracked` refusals point at the field-history model that runs, not at `trackHistory`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Four retired-key refusals and two field-key renames told an author to use per-field `trackHistory` for field history. On a field, `trackHistory` only opts a media or structured-JSON type into old → new values, and `false` turns nothing off; on the object, `enable.trackHistory` opens the history ledger, not the values. So an author following the refusal set a flag that did not do what it said.
+  
+  The `enable.trash` and `versioning` refusals now say that field history is on by default: a changed field's old → new values show on the record activity timeline, except a media or structured-JSON field, which opts in with `fieldHistory: true`; `enable.fieldHistory: false` turns them off for the object, and a field opts out with its own `fieldHistory: false`. A `lifecycle` policy stays the answer for retention. The field-key refusals for `audit` and `auditTrail` say to delete the key, because values already show by default, and name `fieldHistory: false` as the field's off switch (`fieldHistory: true` opts a media or structured-JSON field in).
+  
+  The field spellings `trackChanges` and `feedTracked`, which were refused with a rename to `trackHistory`, now get the same answer as `tracked`: values show by default, `fieldHistory: false` turns them off for the field (`true` opts a media or structured-JSON field in), and `enable.fieldHistory: false` turns them off for every field on the object.
+  
+  Wording only: every key that was refused is still refused, and nothing is newly refused. Nothing to migrate.
+- 10321fa: fix(spec): the Studio hook form offers `refusals` and `texts` only where a hook may declare them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `hookForm` offered the `refusals` and `texts` rows on every hook. `HookSchema` refuses both keys on an `expression` body, so an author writing an expression hook was offered two sections that could only make the save fail. Both rows now carry a `visibleWhen` that is the schema's own test: they are shown for a `js` body, and for a hook with no body and a non-empty `handler`, and hidden on an `expression` body. What a hook may declare does not change. Nothing to migrate.
+- 3550665: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  fix(lint)!: a knowledge source is checked for its object, its fields and the search gates that need no caller, in `os validate` and at publish
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up owed — skills/objectstack-ai/SKILL.md
+  
+  <!-- adr-0087: registered knowledge-source-publish-refuses-missing-references-and-gated-objects -->
+  
+  ADR-0161 K4, row 4.
+  
+  **BREAKING** for the publish of a knowledge source that carries one of the four errors below: it was accepted before and is refused now (422, the finding's rule id, path, message and fix), and `os validate` / `lint` / `compile` / `build` refuse the same source. The schema is unchanged, and stored sources are not rewritten or refused at boot.
+  
+  A new rule, `validateKnowledgeSource`, exported from `@objectstack/lint` with its five rule id constants. It runs on all three CLI commands and on the runtime publish gate for a `knowledge_source` write, with one set of rule ids and messages. Four errors: a source over a missing object has nothing to index, a missing field indexes no text for that member, and a gated object is never searched for a caller the service judges:
+  
+  - `knowledge-source-object-unknown`: `source.object` names an object that the stack, a package of its artifact, or (at the publish gate) the host does not define. Under the package closure the publish gate states, an object outside it is worded for the closure with the remedy to declare the dependency. On the CLI, while the manifest declares a dependency the artifact does not carry, the build cannot see that package's objects, so the finding is a warning that clears when the dependency defines the object (the publish gate judges it against the closure, which holds them); with no such dependency it is an error. A platform object a known package registers is not judged when the stack does not carry it; a platform-prefixed name no known package registers is a warning.
+  - `knowledge-source-field-unknown`: a `source.content` or `source.metadataFields` member names no field of the object, declared (the stack's own object extensions included) or addressable without a declaration (`id`, which the driver provisions, and the injected system columns `owner_id`, `created_at`, …).
+  - `knowledge-source-object-not-searchable`: the object's API exposure does not serve `search` (`canServeApiOperation(enable, 'search')`): `enable.apiEnabled: false`, an `enable.apiMethods` list that does not grant `list` (search derives from it; `search` itself is a retired list value the parse strips), or a list that grants `list` beside `enable.searchable: false`. With no `apiMethods` list, `searchable: false` does not refuse it.
+  - `knowledge-source-system-object-not-ai-readable`: a `sys_` object that does not declare `enable.aiReadable: true` (`isAiReadExposed`).
+  
+  One warning, which refuses nothing:
+  
+  - `knowledge-source-field-never-indexed`: a member names a credential-class field or a field declared `internal: true`; the index never carries either, even when named, so the member is skipped.
+  
+  The two gates are the knowledge service's own search-time gates that need no caller, asked through the same spec predicates. The disabled-package gate and the field-queryable gate need an environment or a caller and stay at save, judged for the author. `os explain` answers each of the five ids.
+  
+  ## FROM → TO
+  
+  - `source: { object: 'kb_artcle', … }` → `source: { object: 'kb_article', … }`, an object the stack defines. An object a dependency defines clears at publish once the package's manifest declares that dependency in `dependencies`; on the CLI it stays a warning while the artifact does not carry the dependency.
+  - `content: ['title', 'bdy']` → `content: ['title', 'body']`.
+  - a source over an object with `enable: { apiEnabled: false }` → serve the object (`apiEnabled: true` and, where it declares `apiMethods`, a list that includes `list`, with `searchable` not false), or index another object.
+  - a source over `sys_audit_note` → index a business object, or declare `enable.aiReadable: true` on the system object's own definition.
+  
+  `@objectstack/spec` adds only the upgrade-guide entry `knowledge-source-publish-refuses-missing-references-and-gated-objects`.
+- 33a0d4f: feat(spec): `ISecurityService.getAuthoredRowWriteFilter`, the optional filter-shaped twin of `checkAuthoredRowWrite`
+  
+  Clause-②: yes
+  Metadata-protocol: none
+  
+  The security service contract gains one optional member: `getAuthoredRowWriteFilter(object, operation, context)` answers the rows the caller's app-authored row-level policies admit for `update` or `delete`, with the platform ownership floor taken out, as a filter for a write that names no row. A row matches it exactly when `checkAuthoredRowWrite` admits that row. `undefined` widens nothing and is the answer on absence, abstention and failure; consumers feature-detect it. An implementation that predates it keeps satisfying the contract. Nothing to migrate.
+- ee2ffca: fix(lint,rest)!: `os i18n extract` / `os i18n check` expect the `_relatedLists` keys `os validate` accepts under a `.custom` arrangement, and the object read translates a tab title the arrangement sets
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no schema key, accepted value, stored shape or export moves; the moved answers are the coverage gate's expected key set and the translation an object read serves, and the remedy is a translation the author adds or drops in a bundle, which no conversion can write -->
+  
+  **BREAKING** for a stack that runs `os i18n check --strict` (or `--threshold`) and carries a paired `.custom` package's `relatedLists` arrangement (ADR-0146 D10) that labels a record-page tab. The coverage gate now expects `objects.<object>._relatedLists.<list>.label` for each list the arrangement labels, with the arrangement's text, so a stack that passed in 19.0.0-next.1 without that translation now reports it missing. Add the translation, or drop the arrangement entry's `label`. Keys over a list the arrangement hides, names bare or re-states without a `label` are no longer expected, so a gate that demanded a key `os validate` refuses stops demanding it.
+  
+  **What changes in `@objectstack/lint`.**
+  
+  - `collectExpectedEntries`, which `os i18n extract` and `os i18n check` read, folds the owner's `relatedLists` with the stack's `objectExtensions` the way `translation-target-unknown` folds them: every placement first, then the arrangement, whose entries replace every entry they cover (`relatedListNameCovers`). It is one fold, `related-list-titles.ts`, read by both. `os i18n extract` scaffolds no key over a list the arrangement hides, names bare or re-states without a `label`, and scaffolds one, carrying the arrangement's text, over a list it labels. A label only a code extender's `place` entry gives is still not scaffolded: the rule accepts its key, but the registry may not apply the placement.
+  - The two `translation-target-unknown` hints for such a key name the list it addresses, `{ list: 'LIST', label }`, instead of "the owner's `label`". The stripped label may be a placement's, and where a bare child name covers a dotted list, the entry to write is the dotted list's own.
+  
+  **What changes in `@objectstack/rest`.** The `/meta/object` reads (by name and list) hand the translator the paired `.custom` package's own `objects.<object>._relatedLists` translations, read for the pair of the base the object's packaged base ships in. A tab title the arrangement sets or changes now reads the pair's translation, then keeps its own text. Before, it read nothing, because an object answers no `servedOverrideBaseOf` (ADR-0146 D10, unchanged). Only that subtree is handed on: every other string of an object keeps the ranking it had.
+  
+  **What changes in `@objectstack/spec`.** The wording of the `translation-related-list-key-under-arrangement-refused` ledger entry: the label the arrangement strips may be a placement's, and the remedy no longer says that a translated title needs the owner's label.
+- 3ffa92d: docs(skills,spec): an agent's retired `model.provider` is described as refused, naming the one 18.x value that still parses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md` (Model Configuration) said that writing `provider` is a parse error. One value is not: the `provider: 'openai'` that a released 18.x toolchain wrote out into every agent `model` block it parsed is accepted and stripped (`acceptRetiredDefaultResidue`); every other value is refused at parse, and `tsc` refuses the key whatever its value. The skill now says the key is retired and refused, names that exception, and keeps the instruction: delete it. The `provider` jsdoc on `AIModelConfigSchema` in `packages/spec/src/ai/agent.zod.ts`, which used the same words, names the exception too. Comment only on the spec side: no schema, type or export changes.
+  
+  Three `objectstack-ai` eval cases are graded more fairly, with no change to what a correct answer must say:
+  
+  - Sampling settings (Anthropic, temperature 0.3, 2000 tokens): the forbidden written line is now a set of code spellings (single or double quotes, with or without a trailing comma, and the JSON form), not one. An inline prose warning such as `provider: 'anthropic'` in backticks still passes.
+  - Nightly approval script: the any-of group also accepts "refuses".
+  - `run_action` with `confirm: true`: "do not retry" moves into an any-of group with "Do not retry", "don't retry" and "Don't retry"; the grader matches case-sensitively, and correct answers used all four.
+- da08375: fix(runtime): the mounted-but-unimplemented `501` of `/ai`, `/automation`, `/notifications`, `/ui` and a custom flow endpoint answers in the request's language
+  
+  Clause-②: yes (widening) — `@objectstack/spec` `BUILTIN_OPERATION_MESSAGES` gains `capability_unavailable_install`, `capability_unavailable_unshipped`, `capability_unavailable_ui`, `capability_unavailable_ai` and `capability_unavailable_search` in every locale; `@objectstack/runtime` `HttpDispatcherResult.response` gains the optional, never-written `faultLogMessage`
+  Metadata-protocol: none
+  
+  When a dispatcher domain's route is mounted and nothing implements the capability behind it, it answers `501 NOT_IMPLEMENTED` with the remedy sentence discovery reports for the slot. That sentence was fixed English for every reader. It now follows the request's top `Accept-Language` tag, as the other domain `501`s already do, and carries `Vary: Accept-Language`, so a shared cache cannot hand one reader's language to the next. The same holds for a custom API endpoint whose flow target finds no automation service.
+  
+  - The English sentence, the status and `error.code` are unchanged byte for byte. A request with no `Accept-Language`, or with a language the catalog does not carry, reads exactly the English it read before.
+  - Discovery's `services.<slot>.message` stays English: it is read by SDKs, codegen and AI clients, and a host-level `/discovery` has no request to read a language from. A pin holds the `501`'s English equal to `serviceUnavailableMessage(slot)` for every slot, so the two still name the same remedy.
+  - The operator's fault log stays English: the one line a declared capability absence earns per route per process prints the English sentence whatever language the first request asked for.
+  - zh-CN now says 「定制包」 for the customization package in the three operation sentences that said 「定制软件包」, the term the console uses.
+  
+  Nothing to migrate.
+- 86ce7a3: fix(spec): the retired `messageFormat` key's refusal names the placeholder the server fills, `{{variable}}`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  An i18n configuration that still sets `messageFormat` is refused with a sentence telling the author that interpolation is simple `{variable}` substitution. Neither server `t()` path fills that spelling: the i18n service's file adapter and the kernel's in-memory fallback both replace `{{variable}}` only, and print a single-brace `{variable}` as written. The console's i18next bundles use double braces too. An author who followed the refusal shipped messages that showed `{name}` literally.
+  
+  The refusal, and the `TranslationConfigSchema` docblock, now say that a message read through `t()` is filled by `{{variable}}`, that a single-brace `{variable}` is left as written there, and that activity-milestone summaries keep their own `{field}` tokens. `messageFormat` is refused exactly as before; only the sentence changes. Nothing to migrate: a bundle that already uses `{{variable}}` is unaffected, and one written to the old advice should change `{name}` to `{{name}}`.
+- d59478f: feat(metadata-core)!: a knowledge source is saved only on a deployment that mounts the knowledge service
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered knowledge-source-save-refused-without-knowledge-service -->
+  
+  **BREAKING** for an author who saves a `knowledge_source` on a deployment that registers no knowledge service: the save was accepted before and is refused now. Nothing there loads, indexes or searches the source, and the service is mounted when the server starts, never while it runs, so the accepted item was kept and never served; only a boot log line said so, which a Studio, REST or MCP author does not see.
+  
+  - **`@objectstack/metadata-core`.** `authoredKnowledgeSourceRefusal` answers a refusal, `503 SERVICE_UNAVAILABLE`, when no knowledge service is registered and the writer is not the engine. The message names the item, the reason and the fix: add `requires: ['knowledge']` to the stack (or, on a host that composes its own kernel, `KnowledgeServicePlugin` and a knowledge store), restart, then save the source. Every door that asks it refuses the save with that answer and writes nothing: `PUT /meta/:type/:name` on both transports, the MCP `save_metadata_draft` tool, and a package duplicate that would copy a source.
+  - **`@objectstack/objectql`.** The boot line for `knowledge_source` items held with no knowledge service names the same fix: `requires: ['knowledge']` and a restart (or `KnowledgeServicePlugin` and a knowledge store on a host that composes its own kernel), where it named the plugin and an adapter.
+  - **`@objectstack/spec`.** The upgrade guide carries the `knowledge-source-save-refused-without-knowledge-service` entry.
+  - **`@objectstack/skills`.** The `objectstack-ai` skill's Knowledge Sources section says that on an app that ships no source, a run-time save is refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack declares `requires: ['knowledge']` and the server restarts. It used to say such items are never indexed. The eval case for an app that authors its sources at run time expects the same.
+  
+  Unchanged: the engine's own writes (a package install, a seed, a migration) are not refused; a registered knowledge service that is not the platform's (one with no `admitAuthoredSource`) answers for its own sources and the save goes on; stored items are not rewritten or refused at boot.
+  
+  ## FROM → TO
+  
+  - A deployment whose stack neither declares `requires: ['knowledge']` nor ships a `knowledgeSources` entry, where authors save knowledge sources → add `requires: ['knowledge']` to the stack, restart, then save the source.
+- a7f7f3f: fix(lint)!: a knowledge source naming an absent platform object is refused at publish; `ai_context` accepts `id`; the save door's search refusal names `list`
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37310
+  
+  <!-- adr-0087: not-required (already-registered knowledge-source-publish-refuses-missing-references-and-gated-objects) the entry that registered this rule's publish refusal landed with the rule itself; this change extends its surface to an absent platform object name judged against the whole collection the host serves, says the platform-name warning is the command line's, and lists the entry only for a stack that declares knowledge sources. No id is added and no key is added, removed or re-shaped. -->
+  
+  ADR-0161 K4, row 4.
+  
+  **BREAKING** for the publish of a knowledge source whose `source.object` is a platform name the host does not serve: when the publish gate judges the source against the whole collection the host serves (a write that names no package), a platform-prefixed name no package registers there, and a known platform object (`sys_user`) the host does not serve, are now `knowledge-source-object-unknown` errors (422), as an unprefixed name already was. Before, the first was a warning and the second was not judged. FROM a source over such an object TO a source over an object the host serves: name the object by its full name, or install the package that registers it. On the command line nothing changes: a platform-prefixed name no known package registers stays a warning, and a known platform object the stack does not carry is not judged.
+  
+  - `ai_context`: a field named `id` (in `fields`, a related list's `fields`, `where` or `orderBy`) is no longer reported as `ai-context-field-unknown`. The driver provisions it, so it exists on every object; existence is now asked through the same column set the other existence rules use. A `body.field` of `id` is reported as not long text, never as unknown.
+  - `@objectstack/service-knowledge`: the save refusal for an object the API does not serve for search names the cause and fix in the words of `knowledge-source-object-not-searchable`: `enable.apiEnabled` false, an `enable.apiMethods` list that does not grant `list` (from which search derives), or `list` beside `enable.searchable: false`; the fix is to include `list` with `enable.searchable` not false. It no longer tells the author to grant `search`, a retired list value the parse strips.
+  - `@objectstack/spec`: the upgrade entry `knowledge-source-publish-refuses-missing-references-and-gated-objects` is listed by `os migrate meta` only for a stack that declares `knowledgeSources` (`--all` still lists it), and its surface states that the platform-name warning is the CLI's.
+- 898b056: fix(runtime): a knowledge source save refused for a scoped-factory miss says so, and the package duplicate words its remedy for its caller
+  
+  Clause-②: yes (widening) — `@objectstack/metadata-core` adds `knowledgeServiceNotInScope`, `KnowledgeServiceNotInScope`, `KnowledgeSourceSaveDoor` and the optional `door` input on `authoredKnowledgeSourceRefusal`; `@objectstack/runtime`'s exported `DomainHandlerDeps` adds the optional `classifyServiceOrLoud`, which makes `ClassifiedServiceLookup` reachable
+  Metadata-protocol: none
+  
+  - **`@objectstack/metadata-core`.** `authoredKnowledgeSourceRefusal` takes an optional `door` (`'save'`, the default, or `'duplicate'`). With `'duplicate'` each refusal it composes tells the caller to duplicate the package again, and does not say "Nothing was written". A door's knowledge lookup can now answer `knowledgeServiceNotInScope(scopeId)` when a `knowledge` registration serves no instance in the request's environment, a host's scoped factory for example. That save is refused `503 SERVICE_UNAVAILABLE` with its own sentence, which names the environment and does not say the deployment runs no knowledge service or point to the stack's `requires`. The `/meta` save's sentences are unchanged.
+  - **`@objectstack/runtime`.** The dispatcher's `/meta` save, the MCP `save_metadata_draft` tool and the package duplicate now tell a scoped-factory miss apart from a deployment with no knowledge service, through the new optional `DomainHandlerDeps.classifyServiceOrLoud`. A deps without that member answers both misses as before. The duplicate door's refusal now says once that nothing was copied, and tells the caller to duplicate the package again. The platform's own `KnowledgeServicePlugin` registers a plain instance, so its path is unchanged.
+  - **`@objectstack/spec`.** The upgrade-guide entry `knowledge-source-save-refused-without-knowledge-service` now names only a deployment whose stack neither declares `requires: ['knowledge']` nor ships a `knowledgeSources` entry. A stack that ships a source already mounts the service.
+- 216524a: fix(spec): three upgrade-guide entries that first ship in protocol 19 are listed under 19, so `os migrate meta --from 18` shows them
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Three ADR-0087 semantic entries were filed under protocol major 18 after `PROTOCOL_VERSION` moved to 19: `define-form-studio-helper-renamed-define-metadata-form`, `form-type-define-form-and-packageless-list-at-form-name` and `publish-refuses-data-model-fields-that-save-and-do-not-work`. None of them shipped in an 18.x release; each first shipped in a 19.0.0 prerelease. The migration chain from 18 runs only the steps above 18, so an 18.x app upgraded with `os migrate meta --from 18` was never shown these three notes. They now sit in the protocol 19 step, with ids and text unchanged, and the 18 → 19 upgrade lists them. No schema, export or stored row changes. Nothing to migrate.
+- d994002: docs(spec): the system-module and security-context comments stop listing field `trackHistory` as part of the audit authoring surface
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  Two source comments in `packages/spec/src/system` described the live audit path as "always-on capture + object/field `trackHistory`". A field's `trackHistory` only opts a media or structured-JSON type into old → new values on the record activity timeline, and its `false` turns nothing off; capture is always on whatever either flag says. The comments now name the object's `enable.trackHistory` as what opens the ledger's view on the record page (and the `history` verb), and say that field-change values on the activity stream are `fieldHistory`'s. The generated security-context reference page follows.
+  
+  Comments only: no schema, no accepted key and no refusal changes. Nothing to migrate.
+- ba2d960: docs(spec): the `knowledge-source-id-to-name` conversion names the underscore-led id as the one source its rename rebuilds
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The conversion's summary said, for every knowledge source, that the value of `id` is kept as `name`, "so no index is rebuilt". That holds for every source but one class: a source whose `id` begins with an underscore. `name` refuses the underscore, so that source takes a new name, is built again under it, and its old index is dropped with `dropSource`, which the author runs; nothing drops it automatically. The summary (which reaches the upgrade guide and `os migrate meta --json`'s `specChanges`) and the conversion's comment now say so, in the words the `id` tombstone and the upgrade entry `knowledge-source-registration-governed` already use.
+  
+  What the conversion does is unchanged: it copies an underscore-led id as it is, so `os migrate meta --from 18` shows the edit, the upgrade entry that judges it beside it, and the refusal of that `name` with the instruction to rename it without the underscore. The conversion's fixture and new tests pin that case; a plain id still reads "no index is rebuilt".
+- fd06b7a: docs(spec): the `knowledge_source.id` tombstone and the `knowledge-source-registration-governed` upgrade entry name the underscore exception and the `dropSource` cleanup, and say the old index outlives a restart only on a store that persists
+  
+  Clause-②: no
+  Metadata-protocol: none
+
 ## 19.0.0-next.2
 
 ### Minor Changes

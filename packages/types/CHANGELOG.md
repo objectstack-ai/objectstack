@@ -1,5 +1,62 @@
 # @objectstack/types
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 98099ea: fix: an error answer whose body carries a `userMessage` sends `Vary: Accept-Language`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains the exports `LOCALIZED_ANSWER_VARY` and `answerVariesByLanguage`
+  Metadata-protocol: none
+  
+  A refusal's `userMessage` is written in the caller's language: the request's `Accept-Language` first, then the workspace default. The by-id read `GET /api/v1/data/:object/:id` answers a missing or unreadable record with `404 RECORD_NOT_FOUND` and such a sentence, and a `404` is cacheable by default. The answer did not say it depends on the request's language, so a cache could hand one caller's language to another.
+  
+  Every exit that renders a refusal body now adds `Accept-Language` to `Vary` when that body carries a `userMessage`, whatever the status:
+  
+  - **`@objectstack/rest`.** The `/data` read routes (`GET /data/:object` and `GET /data/:object/:id`).
+  - **`@objectstack/hono`.** `createHonoApp`'s two catch arms, for a declared throw.
+  - **`@objectstack/runtime`.** The dispatcher plugin's exit for a throw that leaves `dispatch()`.
+  
+  The token is appended, so a `Vary` another layer writes (`Origin`, `Accept-Encoding`) keeps its tokens. A refusal without a `userMessage` is unchanged. `@objectstack/types` exports the one predicate the three exits ask, `answerVariesByLanguage(body)`, which reads the flat body and the nested ADR-0112 body alike, and the header token `LOCALIZED_ANSWER_VARY`. Nothing to migrate.
+- da08375: fix(runtime): the mounted-but-unimplemented `501` of `/ai`, `/automation`, `/notifications`, `/ui` and a custom flow endpoint answers in the request's language
+  
+  Clause-②: yes (widening) — `@objectstack/spec` `BUILTIN_OPERATION_MESSAGES` gains `capability_unavailable_install`, `capability_unavailable_unshipped`, `capability_unavailable_ui`, `capability_unavailable_ai` and `capability_unavailable_search` in every locale; `@objectstack/runtime` `HttpDispatcherResult.response` gains the optional, never-written `faultLogMessage`
+  Metadata-protocol: none
+  
+  When a dispatcher domain's route is mounted and nothing implements the capability behind it, it answers `501 NOT_IMPLEMENTED` with the remedy sentence discovery reports for the slot. That sentence was fixed English for every reader. It now follows the request's top `Accept-Language` tag, as the other domain `501`s already do, and carries `Vary: Accept-Language`, so a shared cache cannot hand one reader's language to the next. The same holds for a custom API endpoint whose flow target finds no automation service.
+  
+  - The English sentence, the status and `error.code` are unchanged byte for byte. A request with no `Accept-Language`, or with a language the catalog does not carry, reads exactly the English it read before.
+  - Discovery's `services.<slot>.message` stays English: it is read by SDKs, codegen and AI clients, and a host-level `/discovery` has no request to read a language from. A pin holds the `501`'s English equal to `serviceUnavailableMessage(slot)` for every slot, so the two still name the same remedy.
+  - The operator's fault log stays English: the one line a declared capability absence earns per route per process prints the English sentence whatever language the first request asked for.
+  - zh-CN now says 「定制包」 for the customization package in the three operation sentences that said 「定制软件包」, the term the console uses.
+  
+  Nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

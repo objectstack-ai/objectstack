@@ -1,5 +1,85 @@
 # @objectstack/rest
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- ee2ffca: fix(lint,rest)!: `os i18n extract` / `os i18n check` expect the `_relatedLists` keys `os validate` accepts under a `.custom` arrangement, and the object read translates a tab title the arrangement sets
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: none
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no schema key, accepted value, stored shape or export moves; the moved answers are the coverage gate's expected key set and the translation an object read serves, and the remedy is a translation the author adds or drops in a bundle, which no conversion can write -->
+  
+  **BREAKING** for a stack that runs `os i18n check --strict` (or `--threshold`) and carries a paired `.custom` package's `relatedLists` arrangement (ADR-0146 D10) that labels a record-page tab. The coverage gate now expects `objects.<object>._relatedLists.<list>.label` for each list the arrangement labels, with the arrangement's text, so a stack that passed in 19.0.0-next.1 without that translation now reports it missing. Add the translation, or drop the arrangement entry's `label`. Keys over a list the arrangement hides, names bare or re-states without a `label` are no longer expected, so a gate that demanded a key `os validate` refuses stops demanding it.
+  
+  **What changes in `@objectstack/lint`.**
+  
+  - `collectExpectedEntries`, which `os i18n extract` and `os i18n check` read, folds the owner's `relatedLists` with the stack's `objectExtensions` the way `translation-target-unknown` folds them: every placement first, then the arrangement, whose entries replace every entry they cover (`relatedListNameCovers`). It is one fold, `related-list-titles.ts`, read by both. `os i18n extract` scaffolds no key over a list the arrangement hides, names bare or re-states without a `label`, and scaffolds one, carrying the arrangement's text, over a list it labels. A label only a code extender's `place` entry gives is still not scaffolded: the rule accepts its key, but the registry may not apply the placement.
+  - The two `translation-target-unknown` hints for such a key name the list it addresses, `{ list: 'LIST', label }`, instead of "the owner's `label`". The stripped label may be a placement's, and where a bare child name covers a dotted list, the entry to write is the dotted list's own.
+  
+  **What changes in `@objectstack/rest`.** The `/meta/object` reads (by name and list) hand the translator the paired `.custom` package's own `objects.<object>._relatedLists` translations, read for the pair of the base the object's packaged base ships in. A tab title the arrangement sets or changes now reads the pair's translation, then keeps its own text. Before, it read nothing, because an object answers no `servedOverrideBaseOf` (ADR-0146 D10, unchanged). Only that subtree is handed on: every other string of an object keeps the ranking it had.
+  
+  **What changes in `@objectstack/spec`.** The wording of the `translation-related-list-key-under-arrangement-refused` ledger entry: the label the arrangement strips may be a placement's, and the remedy no longer says that a translated title needs the owner's label.
+- e2a0e90: perf(metadata-protocol): a by-name `form` read and an anonymous form-door request read the `view` list once and each type's stored rows once
+  
+  Clause-②: yes (widening) — ObjectStackProtocolImplementation.readFormRequest
+  Metadata-protocol: none
+  
+  The effective `form` read resolves over both types (ADR-0159 D5): the generic `form` list, the projection of the `view` list, and the cross-type resolution over the stored rows of both types. Those readings asked for the same stored rows separately, and an anonymous form door made five protocol calls (the `view` list, the `form` list, the unreadable bodies and both per-package layers), each reading the rows again. With the overlay row cache off, a by-name `form` read read the `form` and `view` rows twice each, and a form-door GET read the `view` list twice, the `view` rows five times and the `form` rows three times.
+  
+  - **`@objectstack/metadata-protocol`.** The effective `form` read now reads through one request scope: each stored row set (per type and package binding) and each flattened list is read once per request, and nothing is kept past the request. A new server-only extension, `readFormRequest(read)`, runs `read` as one request's reading: the `getMetaItems`, `getMetaItemsPerPackage` and `getUnreadableFormBodies` calls inside it share that one scope, each answering what it answers on its own.
+  - **`@objectstack/rest`.** The form doors (`GET /forms/:slug`, `POST /forms/:slug/submit`) make their five reads inside `readFormRequest` when the protocol serves it, and as before otherwise.
+  
+  Every answer is unchanged: the same items, in the same order, from the same served-row order. Nothing to migrate.
+- 98099ea: fix: an error answer whose body carries a `userMessage` sends `Vary: Accept-Language`
+  
+  Clause-②: yes (widening) — `@objectstack/types` gains the exports `LOCALIZED_ANSWER_VARY` and `answerVariesByLanguage`
+  Metadata-protocol: none
+  
+  A refusal's `userMessage` is written in the caller's language: the request's `Accept-Language` first, then the workspace default. The by-id read `GET /api/v1/data/:object/:id` answers a missing or unreadable record with `404 RECORD_NOT_FOUND` and such a sentence, and a `404` is cacheable by default. The answer did not say it depends on the request's language, so a cache could hand one caller's language to another.
+  
+  Every exit that renders a refusal body now adds `Accept-Language` to `Vary` when that body carries a `userMessage`, whatever the status:
+  
+  - **`@objectstack/rest`.** The `/data` read routes (`GET /data/:object` and `GET /data/:object/:id`).
+  - **`@objectstack/hono`.** `createHonoApp`'s two catch arms, for a declared throw.
+  - **`@objectstack/runtime`.** The dispatcher plugin's exit for a throw that leaves `dispatch()`.
+  
+  The token is appended, so a `Vary` another layer writes (`Origin`, `Accept-Encoding`) keeps its tokens. A refusal without a `userMessage` is unchanged. `@objectstack/types` exports the one predicate the three exits ask, `answerVariesByLanguage(body)`, which reads the flat body and the nested ADR-0112 body alike, and the header token `LOCALIZED_ANSWER_VARY`. Nothing to migrate.
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [98099ea]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/platform-objects@19.0.0-next.3
+  - @objectstack/types@19.0.0-next.3
+  - @objectstack/metadata@19.0.0-next.3
+  - @objectstack/core@19.0.0-next.3
+  - @objectstack/metadata-core@19.0.0-next.3
+  - @objectstack/observability@19.0.0-next.3
+  - @objectstack/service-package@19.0.0-next.3
+
 ## 19.0.0-next.2
 
 ### Patch Changes

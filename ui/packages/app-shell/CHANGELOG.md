@@ -1,5 +1,221 @@
 # @object-ui/app-shell — Changelog
 
+## 18.6.0-next.3
+
+### Minor Changes
+
+- 58b513a: **Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+  
+  feat(spec)!: an action's `locations` say what it acts on, not the part of the page it sits in
+  
+  **BREAKING** (19.0.0): `ACTION_LOCATIONS` is `list`, `record`, `record_page`, `record_row`, `record_related`, `record_section`. The four words that named a part of a page are retired: `list_toolbar`, `list_item`, `record_header` and `record_more`. `record` is new: the action acts on one record, so it is drawn on the record page's header and in each list row's menu. Which actions are buttons and in what order stays the object's `actionLayout`.
+  
+  Clause-②: yes (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37895
+  
+  <!-- adr-0087: registered action-locations-acted-on -->
+  
+  A replacement with a registered conversion, so `yes (narrowing)` as on main's precedents (`.changeset/pre/37086-define-metadata-form-rename.md`, `.changeset/pre/37304-knowledge-source-governed-type.md`). Narrowed: the four retired words are refused wherever a location is read. Widened in the same change: the four newly accepted values `list`, `record`, `record_page` and `record_row` at the same positions; the new `@object-ui/types` export `actionFoldedIntoMenu`; and eight new `@object-ui/i18n` Studio keys for the location labels (en, zh), which replace the eight keys of the retired words.
+  
+  FROM → TO (each action is drawn in exactly the places it was drawn before):
+  
+  - `locations: ['list_toolbar']` → `locations: ['list']`.
+  - `locations: ['list_item']` → `locations: ['record_row']`.
+  - `locations: ['record_header']` or `['record_more']` → `locations: ['record_page']`.
+  - `record_header` or `record_more` beside `list_item` → `locations: ['record']`.
+  - `locations: ['record_more']` without `record_header` (the action lived only in the record header's ⋯ menu) → `locations: ['record_page'], component: 'action:menu'`. The fold is the action's `component`, the key that already sends an action into an action bar's overflow menu.
+  - A component's single `location` (`record:quick_actions`, `action:group`, `action:bar`): `list_toolbar` → `list`, `list_item` → `record_row`, `record_header` → `record_page`.
+  
+  An old word is refused at authoring with the word to write instead. `os migrate meta --from 18 --write` rewrites sources (ADR-0087 conversion `action-locations-acted-on`, retired from the load path from day one, as every protocol-19 entry). Stored items (`applyConversionsToStoredItem`, `os migrate meta --stored`) and built artifacts replay the same conversion. It leaves a TODO, and changes nothing, where no lossless rewrite exists: a `record_more`-only action also on `list_toolbar` that does not already carry `component: 'action:menu'` (the list toolbar folds `action:menu` too); an action at `record_header` with an authored `component: 'action:menu'` (the record page header folded it into its ⋯ menu while a `record:quick_actions` bar at `record_header` drew it as a button, and `record_page` has one state for both); a component whose `location` is `record_more`; and an `action:group` at `record_header` with a `record_more`-only member. A site left as stored keeps its old word, which a protocol-19 runtime matches to no surface: that action or block is drawn nowhere until it is rewritten by hand. The protocol-19 upgrade guide carries the same step as the semantic entry `action-locations-page-parts-retired`.
+  
+  Also in this change:
+  
+  - `@object-ui/types`: `actionRendersAt` reads `record` as covering `record_page` and `record_row`. The new `actionFoldedIntoMenu(action)` answers whether an action is folded into the ⋯ (`component: 'action:menu'`). `arrangedHeaderActions` pins and unpins through `component` and no longer writes locations.
+  - `@object-ui/components`: the record `page:header` routes every folded action to its ⋯ menu, and every other `record_page` action takes the inline budget, as `record_header` actions did.
+  - `@object-ui/plugin-detail`: `record:quick_actions` defaults to `record_page` and leaves folded actions out at that location, as it left out `record_more`-only ones. The related list reads `record` as a row action.
+  - `@object-ui/core`, `@objectstack/runtime`: the record-scoped checks (`isRecordScopedAction`, `requiresRecord`) accept `record`.
+  - `@objectstack/lint`: the record-page header, related-list and action-layout rules read the new words.
+  - Studio: the action inspector, the `record:quick_actions` location dropdown and the action preview offer `record` and draw the fold as "record_page · ⋯".
+  - `@objectstack/platform-objects`, the examples and every other package: declarations and prose rewritten to the new words. The packages listed as `patch` change comments, test fixtures or authoring copy, except three that ship rewritten words: `@objectstack/plugin-approvals` and `@objectstack/service-datasource` (their declared actions' `locations`) and `@object-ui/layout` (a location literal it passes at runtime).
+  
+  Not moved: #37895 (the `skills/**` teaching of the new words; Blocked-by this change).
+- 9609c13: feat(spec)!: retire the `ask_ai` action type — the shell's 「问 AI」 entry is the one way into the assistant
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: follow-up #37857
+  
+  <!-- adr-0087: registered action-type-ask-ai-removed, ui-action-type-ask-ai-retired -->
+  
+  **BREAKING** enum value removal on `ActionType` (`@objectstack/spec/ui`), ADR-0160 D7 as its seventh amendment rules. `ask_ai` was published only on the 19 prerelease line (`19.0.0-next.0`) and in no stable release; it leaves before 19.0.0 with no compatibility shim. A button per page is a second entry to the assistant, and the shell's 「问 AI」 entry in the page header already opens on the record in view. The accepted cost: a list row has no ask-AI action of its own.
+  
+  | FROM | TO |
+  |:--|:--|
+  | `{ name: 'ask_about_case', type: 'ask_ai', locations: ['record_page'] }` | nothing: delete the action and every reference to it; the shell's 「问 AI」 entry opens on the record |
+  | `{ type: 'action:button', properties: { actionType: 'ask_ai' } }` | nothing: delete the row |
+  
+  The one-line fix: delete each `ask_ai` action and every name that points at it (a page header's `actions`, a list view's `rowActions` / `bulkActions`, a related list's `actions`, a quick-actions list, a record alert's `actionName`, an app navigation entry). `os migrate meta --from 18` lists the edits; `--write` deletes an `ask_ai` action that nothing in the stack names and every inline row and container member that spells it, and leaves a named one, with its references, for you to delete by hand.
+  
+  - **`@objectstack/spec`**: every slot that takes an action type refuses `ask_ai` with one prescription: a declared or inline action's `type`, an `action:button` / `action:icon` row's `actionType`, an `action:group` / `action:menu` member's `type`, and a dashboard header action's `actionType`. The D2 conversion `action-type-ask-ai-removed` (retired from the load path) deletes, over sources, only what nothing names and, at rest (stored rows, built artifacts), every `ask_ai` action, row and member. The D3 entry `ui-action-type-ask-ai-retired` names what is done by hand. `applyConversionsToStoredItem` now answers `undefined` when the chain leaves no item of a row, which a stored `action` row of this type is; `ConversionContext` gains `atRest`. `ActionSchema`'s ask_ai refinements and the dashboard's record-less refusal leave with the type.
+  - **`@objectstack/metadata-protocol`**, **`@objectstack/metadata`**, **`@objectstack/core`**, **`@objectstack/service-datasource`**: a stored row the seam yields no item of is registered and served as nothing. The database loader still finds it by name, so `DELETE /api/v1/meta/action/<name>` removes it, and `migrateStoredMetadata` lists it `skipped` with that instruction instead of re-saving it.
+  - **`@objectstack/runtime`**: the action-execution branches for `ask_ai` are gone.
+  - **`@object-ui/core`**: `ActionRunner.setAssistantFocusHandler`, `ActionRunner.drawsAction`, `ActionRunner.bulkRefusal`, `isAskAiAction` and the `AssistantFocus` / `AssistantFocusHandler` types are removed; `ActionEngine` no longer filters undrawn actions or refuses a bulk run of one.
+  - **`@object-ui/react`**: `<ActionProvider onAskAi>` and `useDrawsAction()` are removed.
+  - **`@object-ui/components`**, **`@object-ui/plugin-grid`**, **`@object-ui/plugin-detail`**: the renderers drop their drawn-action gates.
+  - **`@object-ui/app-shell`**: `setChatFocus` and its `follow` option are removed; the conversation's record pin is set from the composer chip only. `useAskAiHandler`, `AiSurfaceState.focusServed` and the catalog `focus` lookup behind them leave with the type. This also closes #37827, the record page that dropped the shell's ask-AI handler: there is no handler left to drop.
+  
+  Correction to two prerelease notes already published in `19.0.0-next.0` (`.changeset/pre/37142-ask-ai-action-type.md` and the `setChatFocus` line of `.changeset/pre/36999-conversation-focus.md`): the `ask_ai` action type and the `setChatFocus` setter they announce do not ship in 19.0.0. The in-composer record pin from #36999 stays.
+
+### Patch Changes
+
+- 23cefa0: fix(app-shell): the tool preview says beside "Open in API Console" that a call needing the server model runs in a chat
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The tool preview's "Open in API Console" link presets the tool's direct run route. That run happens outside a chat turn, and on the hosted cloud it gets no server-side model, so a call that needs one is refused there with nothing on the preview saying why. The link now stays for every tool with a short note beside it (also the link's accessible description): it runs the tool directly, outside a chat, and on the hosted cloud a call that needs the server-side model is refused, so try it in a chat. The note names no tool: tool metadata carries no field saying which calls need the model, and for some tools that depends on the call's arguments. New studio string `engine.toolPreview.openApiConsoleNote` in `en` and `zh`; other languages fall back to `en`.
+- 581ae76: fix(app-shell): the metadata form's field picker reads an object's fields from the object document the server serves
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `field-selector` picker in the metadata forms asked for an object's fields at `/api/v1/objects/:name/fields`, a path no ObjectStack server mounts, so every load ended in the picker's failure state. It now reads the object document at `GET /api/v1/meta/object/:name` (draft-overlaid, as the other field pickers in the metadata forms read it) through the console's metadata client, which still sends the stored sign-in token. A name that matches no object now reads as "Object not found" rather than as a failed request. No server route is added and the widget's configuration (`dependsOn`, `reference`, `multiple`) is unchanged.
+- 32dc5d8: Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A declarative `operation: 'update'` action now tells the person about the validation warnings its write raised.
+  A `severity: 'warning'` rule lets the save through and answers `warnings`, and the edit form shows them; the
+  button that performs the same write answered only its success. The action's answer
+  (`POST /api/v1/actions/:object/:action`, and MCP `run_action`) now carries the write's `warnings`, in the data
+  door's own element shape, present only when the write raised one. The console's action runner raises the
+  success toast on its warning variant with the rule's words under the title, and keeps the Undo button; an action
+  whose success toast is turned off still shows the warning. `ToastHandler` options gain an optional `description`.
+- d528ebc: fix(app-shell): the AI inquiry page keeps a conversation it could not check, reads it once, explains an app without a package, and reads previews only for the conversations it lists
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - Opening the page with `?c=` asks the server whose conversation that is. A failed answer (a network error, a 5xx) used to read as "not this app's", so the page dropped `?c=` and opened its home state. Now only a definite answer does that (a 403 or 404, or another app's conversation). A failed check keeps `?c=` and shows "Couldn't open this conversation" with Try again and New conversation.
+  - When the conversation is this app's, the check's read now also fills the thread, so opening it reads the history once instead of twice. `useChatConversation` takes `activeRecord`: the host's read of `activeId`, used by the first resolve of that id.
+  - An app with no package (`_packageId`) has nowhere to keep the page's conversations. The page now says so instead of drawing a question box that could not start one.
+  - The empty conversation keys its suggestions by position, so an entry that declares the same question twice draws both with no React key warning.
+  - `useConversationList` takes `selectBackfillRows`: the rows the caller shows, the only ones whose missing previews are read from each conversation's detail route. The page's recent conversations pass the rows they list (at most five), so returning to the home state reads at most five details, not up to twenty.
+  - `@object-ui/i18n`: five `console.ai.askPage` keys for the two new states, in every locale.
+- ccdfe62: fix(components): in a right-to-left language the desktop sidebar sits beside the page instead of over its header
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In Arabic (the console sets `dir="rtl"` on the page) the desktop sidebar's gap moved to the right while its fixed panel stayed on the left, so the panel covered the end of every page, where a right-to-left page header keeps its buttons: the page's own actions, help, comments and Ask AI entry could not be reached. The sidebar primitive now places its panel, its divider and its edge rail with logical insets, so `side="left"` is the inline start of the document (the right edge in Arabic) and `side="right"` its end. The edits are declared as the `sidebarLogicalInsetPatches` shadcn local-patch family, with the offcanvas family's offsets written the same way, so a registry sync keeps them.
+  
+  `@object-ui/app-shell`: the console sidebar's own anchors follow it. The edge strip that floats a hidden sidebar, the floating card and its parked position, the resize edge and the expand button on pages with no header sit at the inline start, and the resize edge reads a drag and the arrow keys toward the page as widening in either direction. A floating menu folds when the pointer leaves it on either side.
+  
+  Left-to-right languages are unchanged: every logical inset computes to the physical one it replaces.
+- 7b90456: feat(app-shell): the ChatDock AI usage ring shows a paid plan's personal allowance and team pool, and the notice once turns draw on the team pool
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `GET /api/v1/ai/usage` may now carry an optional `tiers` on a paid plan: the caller's personal share, the team pool it overflows into, whether turns draw on the pool, and a notice in four languages. The usage hook reads it in exactly that shape; a `tiers` of any other shape is dropped on its own and the `{ pool, breakdown }` reading stands, so the ring still renders. When `tiers` is present, the popover shows one row per tier (its status, its used share as a percentage, its reset) in place of the pool's single figure, and the notice in the console language (Chinese scripts read `zh`; `ja` and `es` read their own; every other language reads `en`). A caller with no personal share sees the team pool alone. The ring, the popover's status and reset line and the call to action keep reading `pool`. Without `tiers` (Free, self-hosted, an older backend) nothing changes. Two new console strings, `console.ai.usage.tierPersonal` and `console.ai.usage.tierTeamPool`, ship in every locale pack.
+- 03f39cc: feat(plugin-chatbot): an ask answer that saved drafts shows a draft review card, with Studio review links
+  
+  Clause-②: yes (widening) — widened: `@object-ui/plugin-chatbot` exports `DraftReviewCard`, `DraftReviewCardProps` and `extractDraftReview`; `ChatbotEnhancedProps` gains the optional `onOpenReviewLink` and `reviewLinkHref`; `ChatbotEnhancedMessage` gains the optional `draftReview`.
+  Metadata-protocol: none
+  
+  When an assistant answer carries a `data-draft-review` part (`DraftReviewListSchema` in `@objectstack/spec/ai`), `ChatbotEnhanced` draws a card under it that lists the drafts the turn saved:
+  
+  - One row per draft: its label or name, its type, a verdict badge ("Will publish", "N problems", or "Verdict withheld" when no verdict was read) and a Review link to the draft's review in Studio. A verdict read by the save rather than at the turn's end says "checked when saved".
+  - The rows are grouped by package; each package has one "Review and publish" link to its Changes drawer in Studio. More drafts than the part lists show as "+N more".
+  - Nothing is published or discarded from the chat: the card has no such control, and a person publishes in Studio.
+  - A part the schema refuses draws no card; an answer without the part renders as before.
+  - The card is drawn on a live answer only. The part is not kept with the message, so a conversation reloaded from history shows no card.
+  
+  In the console (`@object-ui/app-shell`), `ChatPane` opens the links inside the app, so the conversation stays as it was, and gives them an href with the console's base path for a new tab. `@object-ui/i18n` carries the card's strings (`chatbot.draftReview.*`) in every locale pack.
+- f66cd5a: fix(app-shell): a parenthesised metadata form condition is evaluated as a group, so the field form offers its percent and currency rows only where the field type allows
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The Studio metadata form evaluator had no parenthesised grouping. A `visibleWhen` such as `data.type == 'percent' || (data.type == 'formula' && data.returnType == 'percent')` read its group as the path `(data.type`, failed to resolve it and showed the row on every draft. The field form's `percentDisplay` and `currencyConfig` rows were therefore offered on text, currency, number-returning formula and empty drafts. The evaluator now reads `(expr)` as CEL does, at any depth and under `!`. A condition it still cannot read (an unbalanced parenthesis, a function call) keeps failing open with its development warning, unchanged.
+- 9603893: fix(app-shell): a metadata form row hidden by `visibleWhen` stays drawn while its key holds a value
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  In the Studio metadata forms, a row whose `visibleWhen` turned false disappeared even when the draft still held a value for it. In the hook editor, an author who declared a refusal on a JavaScript body and then switched the body to an expression lost sight of the refusal, and the save was refused at a key the form no longer showed. Such a row now stays drawn. It says that its value does not apply to the current settings and may make the save fail, and it offers a "Clear value" button. Once cleared, the row hides as before. Nothing the author entered is dropped without that click, which is the rule the flow node inspector already follows. A row whose predicate is false and that holds no value is hidden exactly as before. What a metadata author can write does not change.
+- Updated dependencies [23cefa0]
+- Updated dependencies [6123f2b]
+- Updated dependencies [22e1089]
+- Updated dependencies [e606bab]
+- Updated dependencies [d578952]
+- Updated dependencies [6ee2a63]
+- Updated dependencies [c06dac7]
+- Updated dependencies [58b513a]
+- Updated dependencies [1f1cd21]
+- Updated dependencies [10321fa]
+- Updated dependencies [fe0473d]
+- Updated dependencies [3550665]
+- Updated dependencies [9548be2]
+- Updated dependencies [e94a4a9]
+- Updated dependencies [6ce1975]
+- Updated dependencies [f294277]
+- Updated dependencies [079edad]
+- Updated dependencies [33a0d4f]
+- Updated dependencies [ee2ffca]
+- Updated dependencies [bbe4258]
+- Updated dependencies [f19350b]
+- Updated dependencies [3ffa92d]
+- Updated dependencies [9609c13]
+- Updated dependencies [da08375]
+- Updated dependencies [32dc5d8]
+- Updated dependencies [77edd2a]
+- Updated dependencies [9957484]
+- Updated dependencies [86ce7a3]
+- Updated dependencies [d528ebc]
+- Updated dependencies [ccdfe62]
+- Updated dependencies [f9c6f92]
+- Updated dependencies [d59478f]
+- Updated dependencies [a7f7f3f]
+- Updated dependencies [7b90456]
+- Updated dependencies [03f39cc]
+- Updated dependencies [03f39cc]
+- Updated dependencies [898b056]
+- Updated dependencies [9603893]
+- Updated dependencies [7d6692e]
+- Updated dependencies [216524a]
+- Updated dependencies [d994002]
+- Updated dependencies [ba2d960]
+- Updated dependencies [fd06b7a]
+  - @object-ui/i18n@19.0.0-next.3
+  - @object-ui/plugin-chatbot@19.0.0-next.3
+  - @objectstack/spec@19.0.0-next.3
+  - @objectstack/lint@19.0.0-next.3
+  - @objectstack/formula@19.0.0-next.3
+  - @object-ui/types@19.0.0-next.3
+  - @object-ui/core@19.0.0-next.3
+  - @object-ui/components@19.0.0-next.3
+  - @object-ui/plugin-detail@19.0.0-next.3
+  - @object-ui/fields@19.0.0-next.3
+  - @object-ui/layout@19.0.0-next.3
+  - @object-ui/plugin-grid@19.0.0-next.3
+  - @object-ui/plugin-list@19.0.0-next.3
+  - @object-ui/react@19.0.0-next.3
+  - @object-ui/data-objectstack@19.0.0-next.3
+  - @object-ui/plugin-kanban@19.0.0-next.3
+  - @object-ui/collaboration@19.0.0-next.3
+  - @object-ui/plugin-calendar@19.0.0-next.3
+  - @object-ui/plugin-charts@19.0.0-next.3
+  - @object-ui/plugin-dashboard@19.0.0-next.3
+  - @object-ui/plugin-designer@19.0.0-next.3
+  - @object-ui/plugin-form@19.0.0-next.3
+  - @object-ui/plugin-report@19.0.0-next.3
+  - @object-ui/plugin-view@19.0.0-next.3
+  - @object-ui/auth@19.0.0-next.3
+  - @object-ui/mobile@19.0.0-next.3
+  - @object-ui/permissions@19.0.0-next.3
+  - @object-ui/plugin-editor@19.0.0-next.3
+
 ## 18.6.0-next.2
 
 ### Minor Changes

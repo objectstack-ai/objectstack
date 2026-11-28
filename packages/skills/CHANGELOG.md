@@ -1,5 +1,116 @@
 # @objectstack/skills
 
+## 19.0.0-next.3
+
+### Patch Changes
+
+- 206008a: docs(skills): four published skills follow merged code — audit sealing, the compare widget's date key, i18n wording, nested relation conditions
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/rules/lifecycle.md` § Sealing: each sealed hour becomes one checkpoint, or consecutive checkpoints of at most 10,000 rows, per organization chain; `chainField` (optional, default `tenant_id`) names the chain column and is fixed once checkpoints exist; `os audit verify` exits 1 on a changed row or a chain fault, `listed_twice` included. The graded eval case in `evals/objects-fields-relationships.json` says the same.
+  
+  `skills/objectstack-ui/rules/dashboards.md` § `compareTo`: a compare widget's window reaches the dataset query as a time dimension named after the date-range field, so the dataset declares a date dimension of that name (or one over a related-record date path), else `400 INVALID_FIELD`.
+  
+  `skills/objectstack-i18n/SKILL.md`: the stale aside about the schema docstring is gone (activity-milestone summaries keep their `{field}` tokens); the wiring sentence is a statement again ("You do not need to wire this plugin"); `getSourceLocale()` returns the declared locale only, else `undefined`; the i18n routes answer signed-in callers, and the locales answer carries the declared `fallbackChain`.
+  
+  `skills/objectstack-query/SKILL.md` and `rules/filters.md`: on a read verb a single-valued relation condition is one in-database subquery per relationship, up to three relationships, on drivers declaring `readableIdsLeaf` (MongoDB and OData refuse it); the 1000-id cap stays only where ids are still read. `filters.md` § Operator Reference lists one example per operator; the SQL equivalents live in `SKILL.md` **Filter Operators**.
+  
+  No token ceiling moved: every addition is paid by a deletion in the same file.
+- bbe3ced: docs(skills): `objectstack-data` states the bounds of a hook transaction, and the measured MongoDB and PostgreSQL rule
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-data/references/data-hooks.md`, the `api.transaction` row: `ctx.api.transaction` goes one level per body (a nested call is refused, "nested ctx.api.transaction is not supported"); inside an open unit it joins it, including a unit an action body opened with its own `ctx.api.transaction`, and the hooks of a write made inside that unit run in it and join it too; a write to another datasource is refused except an append-only ledger (`lifecycle.class` `audit` / `telemetry` / `event`), written outside the unit; on PostgreSQL and a MongoDB replica set a failed statement aborts the whole unit even when caught; a driver with no transactions runs the callback with none and no warning.
+  
+  The `before*` Transaction cell drops "MongoDB needs a replica set (read in code, not measured)" for the measured rule: a standalone MongoDB refuses every write of such a transaction (`501 NOT_IMPLEMENTED`) and a single-node replica set is enough; on PostgreSQL and a MongoDB replica set a failed `ctx.api` statement refuses the outer write even when caught, logged or retried (`25P02` / `251`), while SQLite lets it through. Two eval cases in `skills/objectstack-data/evals/hooks-security-seeds-datasources.json` expect the same.
+  
+  Nothing an author can write changes. The page stays at its token ceiling (10120): the added sentences are paid by cutting restating code comments and labels in the same file.
+- 9726bd8: docs(skills): `objectstack-ai` names the `os validate` rules for a `knowledge_source`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai` § Knowledge Sources (RAG) now lists what `os validate` and publish report for a knowledge source, by rule id, with the fix for each. `knowledge-source-object-unknown`: `source.object` is no object of the stack or its packages; on the CLI it is a warning while the manifest declares a dependency that `packages[]` does not carry. `knowledge-source-field-unknown`: a `content` or `metadataFields` member is no field of the object (`id` and the injected system columns resolve). `knowledge-source-object-not-searchable`: the API does not serve the object for `search`. `knowledge-source-system-object-not-ai-readable`: a `sys_` object without `enable.aiReadable: true`. `knowledge-source-field-never-indexed` is a warning for a credential-class or `internal: true` member, which the index never carries. An error refuses the publish. The section's example passes `os validate` with no knowledge-source finding.
+- 3ffa92d: docs(skills,spec): an agent's retired `model.provider` is described as refused, naming the one 18.x value that still parses
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ai/SKILL.md` (Model Configuration) said that writing `provider` is a parse error. One value is not: the `provider: 'openai'` that a released 18.x toolchain wrote out into every agent `model` block it parsed is accepted and stripped (`acceptRetiredDefaultResidue`); every other value is refused at parse, and `tsc` refuses the key whatever its value. The skill now says the key is retired and refused, names that exception, and keeps the instruction: delete it. The `provider` jsdoc on `AIModelConfigSchema` in `packages/spec/src/ai/agent.zod.ts`, which used the same words, names the exception too. Comment only on the spec side: no schema, type or export changes.
+  
+  Three `objectstack-ai` eval cases are graded more fairly, with no change to what a correct answer must say:
+  
+  - Sampling settings (Anthropic, temperature 0.3, 2000 tokens): the forbidden written line is now a set of code spellings (single or double quotes, with or without a trailing comma, and the JSON form), not one. An inline prose warning such as `provider: 'anthropic'` in backticks still passes.
+  - Nightly approval script: the any-of group also accepts "refuses".
+  - `run_action` with `confirm: true`: "do not retry" moves into an any-of group with "Do not retry", "don't retry" and "Don't retry"; the grader matches case-sensitively, and correct answers used all four.
+- a262197: docs(skills): the `objectstack-ui` action-type table no longer lists `ask_ai`
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  The `ask_ai` action type left `ActionType` (ADR-0160 D7), so `skills/objectstack-ui/SKILL.md` stops listing it: the `ask_ai` row leaves the *Action Types* table, and the line under the table reads "Every type but `script` requires `target`", which is what `TARGET_REQUIRED_TYPES` in the spec says. The entry to the in-app assistant is the shell's 「问 AI」 entry, which carries the current record automatically; no page declares an AI button of its own. The file's token ceiling follows the measurement down, 2262 to 2228.
+- cad3030: docs(skills): the published skills teach the action `locations` words of protocol 19
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-ui/rules/actions.md`: the location table lists `list` (acts on no record: the list page toolbar), `record` (acts on one record, on the record page and on each list row; the default), `record_page` (the record page only), `record_row` (each list row only), `record_related` and `record_section`. One line under it names what replaced `list_toolbar`, `list_item`, `record_header` and `record_more`. The `actionLayout` paragraph says the `record` arm takes `record` / `record_page` actions and the `list` arm takes `list` actions.
+  
+  The six examples that had dropped their `locations` key declare a placement again: `"locations": ["record"]` on the "Mark as done" JSON in `skills/objectstack-ui/SKILL.md`; `['record']` on `crm_reassign_lead`, `crm_convert_lead`, `crm_open_invoice_pdf` and `crm_add_invoice_line`; and `['record_page']` on `crm_print_a3`. This replaces the earlier note in this release, which said that an action copied from one of them needs its `locations` added.
+  
+  `skills/objectstack-ui/rules/record-page.md` and `skills/objectstack-formula/SKILL.md` each change one sentence to the new words, and five eval cases under `skills/objectstack-ui/evals/` expect them. Nothing an author can write changes: these are the words `@objectstack/spec` 19 already accepts.
+  
+  Token ceilings: `skills/objectstack-ui/rules/actions.md` 3844 to 3918, after one restating sentence was cut from it; `skills/objectstack-ui/SKILL.md` 2256 to 2262; `skills/objectstack-formula/SKILL.md` 6090 to 6088.
+- d59478f: feat(metadata-core)!: a knowledge source is saved only on a deployment that mounts the knowledge service
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  
+  <!-- adr-0087: registered knowledge-source-save-refused-without-knowledge-service -->
+  
+  **BREAKING** for an author who saves a `knowledge_source` on a deployment that registers no knowledge service: the save was accepted before and is refused now. Nothing there loads, indexes or searches the source, and the service is mounted when the server starts, never while it runs, so the accepted item was kept and never served; only a boot log line said so, which a Studio, REST or MCP author does not see.
+  
+  - **`@objectstack/metadata-core`.** `authoredKnowledgeSourceRefusal` answers a refusal, `503 SERVICE_UNAVAILABLE`, when no knowledge service is registered and the writer is not the engine. The message names the item, the reason and the fix: add `requires: ['knowledge']` to the stack (or, on a host that composes its own kernel, `KnowledgeServicePlugin` and a knowledge store), restart, then save the source. Every door that asks it refuses the save with that answer and writes nothing: `PUT /meta/:type/:name` on both transports, the MCP `save_metadata_draft` tool, and a package duplicate that would copy a source.
+  - **`@objectstack/objectql`.** The boot line for `knowledge_source` items held with no knowledge service names the same fix: `requires: ['knowledge']` and a restart (or `KnowledgeServicePlugin` and a knowledge store on a host that composes its own kernel), where it named the plugin and an adapter.
+  - **`@objectstack/spec`.** The upgrade guide carries the `knowledge-source-save-refused-without-knowledge-service` entry.
+  - **`@objectstack/skills`.** The `objectstack-ai` skill's Knowledge Sources section says that on an app that ships no source, a run-time save is refused (`503 SERVICE_UNAVAILABLE`, nothing written) until the stack declares `requires: ['knowledge']` and the server restarts. It used to say such items are never indexed. The eval case for an app that authors its sources at run time expects the same.
+  
+  Unchanged: the engine's own writes (a package install, a seed, a migration) are not refused; a registered knowledge service that is not the platform's (one with no `admitAuthoredSource`) answers for its own sources and the save goes on; stored items are not rewritten or refused at boot.
+  
+  ## FROM → TO
+  
+  - A deployment whose stack neither declares `requires: ['knowledge']` nor ships a `knowledgeSources` entry, where authors save knowledge sources → add `requires: ['knowledge']` to the stack, restart, then save the source.
+- 23fa361: docs(skills): `objectstack-i18n` teaches the bundle's `packages` group, and both related-list skills name the two ways a `.custom` arrangement's tab title is translated
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  `skills/objectstack-i18n/SKILL.md`, the top-level group list: `packages` holds a package's display `name` / `description`, keyed by its `manifest.id` with the dotted id as one key (`packages: { 'com.acme.crm': { name: '客户关系' } }`). A locale with no row shows `manifest.name`, and `os lint` warns `i18n/missing-package` (`os i18n check` lists the same gap by key) until that package's own bundle carries the row.
+  
+  `skills/objectstack-i18n/SKILL.md`, the `_relatedLists.{list}` row, and `skills/objectstack-data/rules/relationships.md`, the `relatedLists` bullet: where the paired `.custom` arrangement leaves a list with no key, the remedy is to drop the key or re-state the entry, shown, with a `label`. The owner's own `label` keeps the owner's translation; a `label` of the arrangement's own is translated at the same `objects.{parent}._relatedLists.{list}.label` key in the `.custom` package's bundle, which `os i18n check` expects.
+  
+  Nothing an author can write changes. Neither file grows: `objectstack-i18n/SKILL.md` moves down to its measurement (6333 to 6315), the additions paid by replacing the translation-reference paragraph's list of action keys judged against a declaration, each already conditioned in the `_actions` row, with one sentence pointing at that row, and by dropping the code-comment tails that repeat the sentence introducing the first example; `rules/relationships.md` moves down too (4181 to 4179), paid by four restating phrases in the same file.
+- b703678: docs(skills): the `registerHook` example names the real seam, and the refusal-list teaching names its places
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `skills/objectstack-data/references/data-hooks.md`, Registration Methods, method 2: the example's comment said "in your plugin's onEnable()", a method no kernel plugin has, so a hook written there never registers. It now says the example runs in the app's `onEnable` export (`objectstack.config.ts`), where `ctx.ql` is the engine, and that a kernel plugin, which has no `ctx.ql`, registers from `start(ctx)` with `ctx.getService('objectql').registerHook(…)`.
+  - Same file, Declared refusals: `/data` cuts `userMessage` at 500 characters (a single sentence's too), so a long reasons list loses its closing line there; `/data` and `/actions` answer `details.refusals` uncut, and MCP tools relay the lines as text. This replaces "the HTTP doors", since "door" on this page also means a hook registration path.
+  - `skills/objectstack-ui/rules/actions.md`, Refusing by code: the reasons-list sentence ended "(rules there)", which named no place; it now names "Declared refusals", the hook section that carries the rules.
+  
+  Both files stay at their token ceilings (10120 and 3918); the added words are paid by cutting restatements in the same file.
+- 01c238a: docs(skills): the refusal-list teaching names the server its `/data` facts were read on
+  
+  Clause-②: no
+  Metadata-protocol: none
+  
+  - `skills/objectstack-data/references/data-hooks.md`, Declared refusals: the bullet said "`/data`" cuts `userMessage` at 500 characters and answers `details.refusals` uncut. Both facts were read on `@objectstack/rest`'s `/data` routes only, and a host that serves `/data` another way can answer differently, so the sentence now names `@objectstack/rest`'s `/data` routes as its subject for both. The `/actions` claim is unchanged.
+  - Paid for in the same bullet by cutting restatements, with no fact dropped: "the throw's top-level `params`" is now "the throw's `params`", "else its holes are empty" is "else holes are empty", "loses its closing line there" drops "there", the second "`/data`" is "They", and "relay the lines as text" is "relay them as text". The file stays at its token ceiling (10120 of 10120).
+
 ## 19.0.0-next.2
 
 ### Patch Changes

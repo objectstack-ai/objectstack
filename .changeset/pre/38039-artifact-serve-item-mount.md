@@ -2,6 +2,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 19.0.0-next.2**, whose CHANGELOG missed this entry; listed here one prerelease late.
+
 fix(runtime): `os serve --artifact-fallback` mounts the knowledge service for a stack whose artifact ships a `knowledge_source`
 
 Clause-②: yes (widening)
