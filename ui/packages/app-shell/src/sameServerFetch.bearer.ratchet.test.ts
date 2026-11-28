@@ -316,6 +316,16 @@ function packageSourceRoots(): Map<string, string> {
   return roots;
 }
 
+/**
+ * A file the detector can count a call in holds one of these tokens: every
+ * transport it judges bare is the identifier `fetch` (bare, or after `window.`,
+ * `globalThis.`, `self.`, or bound to a local name), or `sharedGetJson`, matched
+ * on their written text. A file holding neither is skipped before it is parsed:
+ * the parse of ~40 MB of source is where the scan's time went
+ * (objectstack#38101), and about four files in five hold neither token.
+ */
+const MAY_HOLD_A_COUNTED_CALL = /\bfetch\b|sharedGetJson/;
+
 let scanned: Map<string, string[]> | undefined;
 
 /** The whole scan, once per run: two cases read it. */
@@ -325,8 +335,10 @@ function scan(): Map<string, string[]> {
   const files = [...[...packageSourceRoots().values()].flatMap(sourceFiles), ...sourceFiles(CONSOLE_SRC)];
   const inside = (root: string, file: string) => !path.relative(root, file).startsWith('..');
   for (const file of files) {
+    const text = readFileSync(file, 'utf8');
+    if (!MAY_HOLD_A_COUNTED_CALL.test(text)) continue;
     const builds = inside(APP_SHELL_SRC, file) || inside(CONSOLE_SRC, file);
-    const calls = bareCookieOnlyCalls(file, readFileSync(file, 'utf8'), builds);
+    const calls = bareCookieOnlyCalls(file, text, builds);
     if (calls.length) found.set(path.relative(UI_ROOT, file).split(path.sep).join('/'), calls);
   }
   scanned = found;
