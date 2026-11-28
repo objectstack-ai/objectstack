@@ -61,6 +61,17 @@ const personRejectedRow: PendingActionRow = {
   decided_by: 'user_2',
 };
 
+/**
+ * "No decider" in the two other spellings a server can send: a SQL column read
+ * back as `null`, and an empty string. Both lapsed rows read Expired too.
+ */
+const lapsedNullDecider = {
+  ...lapsedRow,
+  id: 'pa_lapsed_null',
+  decided_by: null,
+} as unknown as PendingActionRow;
+const lapsedEmptyDecider: PendingActionRow = { ...lapsedRow, id: 'pa_lapsed_empty', decided_by: '' };
+
 const pendingRow: PendingActionRow = { ...base, id: 'pa_pending', status: 'pending' };
 
 const json = (status: number, body: unknown) =>
@@ -107,6 +118,18 @@ describe('AiPendingActionsInbox — a lapsed pending action reads Expired (objec
     const detail = await screen.findByTestId('ai-inbox-expired-detail');
     expect(within(detail).getByText(ZH.expiredDetail)).toBeTruthy();
     expect(screen.queryByText(ZH.decidedBy)).toBeNull();
+  });
+
+  it('reads a lapsed row as Expired when its decider is null or an empty string', async () => {
+    const items = [lapsedNullDecider, lapsedEmptyDecider];
+    vi.stubGlobal('fetch', vi.fn(async () => json(200, { items, total: items.length })));
+    renderZh();
+    await waitFor(() => expect(screen.getByRole('table')).toBeTruthy());
+
+    for (const id of ['pa_lapsed_null', 'pa_lapsed_empty']) {
+      expect(within(rowOf(id)).getByText(ZH.expired)).toBeTruthy();
+      expect(within(rowOf(id)).queryByText(ZH.rejected)).toBeNull();
+    }
   });
 
   it('answers a 409 pending_action_lapsed with Expired, not the conflict error, and re-reads the item', async () => {
