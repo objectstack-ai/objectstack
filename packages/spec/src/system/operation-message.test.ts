@@ -66,6 +66,27 @@ describe('operation message catalog', () => {
       .toBe('不能删除:还有 1 条下级记录。');
   });
 
+  it('a deployment override written with spaces inside the braces is filled, as the Console fills it', () => {
+    const translate = (key: string) =>
+      key === 'errors.duplicate_record_field' ? '{{ field }} taken' : key;
+    expect(renderOperationMessage({ messageKey: 'duplicate_record_field', params: { field: 'Email' } }, { translate }))
+      .toBe('Email taken');
+  });
+
+  it.each([
+    ['no spaces', 'Hi {{name}}!', 'Hi Ada!'],
+    ['spaces inside the braces', 'Hi {{ name }}!', 'Hi Ada!'],
+    ['a tab and two spaces', 'Hi {{  name\t}}!', 'Hi Ada!'],
+    ['single braces (not a placeholder)', 'Hi {name}!', 'Hi {name}!'],
+    ['a spaced hole with no value', 'Hi {{ missing }}!', 'Hi {{ missing }}!'],
+  ])('a deployment override is filled the way the Console does: %s', (_form, template, console) => {
+    // Each expected value is what the Console's i18next answers for the same
+    // template and params; a hole with no value stays exactly as written.
+    const translate = (key: string) => (key === 'errors.duplicate_record_field' ? template : key);
+    expect(renderOperationMessage({ messageKey: 'duplicate_record_field', params: { name: 'Ada' } }, { translate }))
+      .toBe(console);
+  });
+
   it('an override key that misses (echoed back) falls through to the built-in', () => {
     const translate = (key: string) => key;
     expect(renderOperationMessage({ messageKey: 'delete_restricted', params: PARAMS }, { locale: 'zh-CN', translate }))
