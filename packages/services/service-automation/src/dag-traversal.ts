@@ -1302,7 +1302,8 @@ export function seedRunVariables(
             if (!variables.has(k)) variables.set(k, v);
         }
     }
-    variables.set('previous', context?.previous ?? null);
+    // `previous` is the run's own copy too, by the same rule as the record.
+    variables.set('previous', copyHeldValue(context?.previous ?? null));
     variables.set('$runId', runId);
     variables.set('$flowName', flowName);
     variables.set('$flowLabel', flow.label ?? flowName);
@@ -1404,10 +1405,10 @@ export async function executeWithoutRetry(
     // `flowRunId` is stamped here too (#3456). [#31696] And the slot, as
     // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
-    // Seeded AFTER the context resolves: the run takes its own copy of the
-    // trigger record, so the lookups the start node declares (`expand`, grafted
-    // while the context resolves) must already be on it.
-    const variables = this.seedRunVariables(flow, flowName, context, runId);
+    // Seeded AFTER the context resolves, from the resolved context: its record
+    // is the run's own copy, carrying the lookups the start node declares
+    // (`expand`, grafted while the context resolves).
+    const variables = this.seedRunVariables(flow, flowName, runContext, runId);
     stampFlowRunSlot(runContext, flowName, runPackage);
     // [ADR-0162 item 7] Each attempt is a run of its own, and its own root
     // when it has no parent, as `execute()` stamps it.

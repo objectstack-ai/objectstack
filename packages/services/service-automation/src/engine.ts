@@ -65,7 +65,7 @@ export const DEFAULT_BRANCH_LABEL = 'default';
 
 import { runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { flowContentChecksum } from './flow-identity.js';
-import { hasReservedVariableKeySegment } from './scope-key-segments.js';
+import { HeldValueCycleError, hasReservedVariableKeySegment } from './scope-key-segments.js';
 import { carriedRefusalOfResult, readCarriedRefusal, type CarriedRefusal } from './inner-refusal.js';
 import { summarizeRun } from './run-summary.js';
 import { withDroppedFields } from './run-dropped-fields.js';
@@ -8197,8 +8197,9 @@ export class AutomationEngine implements IAutomationService {
      * ONLY the declared relation keys, and only when the re-read actually returned
      * an object/array, so bare lookup ids and #1872 multi-lookup arrays on other
      * relations — and the formula fields the trigger already hydrated — stay
-     * untouched. Mutates `record` in place (the same object the run's variable map
-     * already references). Best-effort: any failure leaves `record` unexpanded
+     * untouched. Mutates `record` in place: the run context's own copy of the
+     * record ({@link resolveRunContext} takes it first, and the run's variables
+     * are seeded from it after), never the object the caller handed. Best-effort: any failure leaves `record` unexpanded
      * (the template then renders the scalar id) — expansion must never break the
      * flow it feeds.
      */
@@ -8230,6 +8231,61 @@ export class AutomationEngine implements IAutomationService {
         // [#33905] Nor does a disabled package's flow of a name it holds alone.
         if ('absent' in resolved) return { success: false, error: `Flow '${flowName}' not found` };
         return this.executeKey(resolved.key, context, startTime);
+    }
+
+    /**
+     * The answer {@link executeKey} gives a run that fails while its values
+     * are seeded, before its first node: a value it was handed contains itself
+     * ({@link HeldValueCycleError}), so the run cannot take its own copy. The
+     * failed-run shape of `execute()`'s failure exit — `status: 'failed'`
+     * (the run was dispatched and failed), `error`, `durationMs`, `summary`,
+     * `flowLabel` — with one `failed` history row, and no `errorMessage`
+     * (there are no run variables to render the author's text over). Never
+     * retried: the same value fails the same way on every attempt.
+     */
+    private failRunBeforeFirstNode(run: {
+        runId: string; flowName: string; flow: FlowParsed; startedAt: string; startTime: number;
+        context: AutomationContext | undefined; error: string;
+    }): AutomationResult {
+        const { runId, flowName, flow, startedAt, context, error } = run;
+        const durationMs = Date.now() - run.startTime;
+        const steps: StepLogEntry[] = [];
+        let logged: ExecutionLogEntry | undefined;
+        try {
+            logged = this.recordLog({
+                id: runId,
+                flowName,
+                flowVersion: flow.version,
+                status: 'failed',
+                startedAt,
+                completedAt: new Date().toISOString(),
+                durationMs,
+                waitMs: 0,
+                trigger: buildRunTrigger(context),
+                steps,
+                error,
+            }, context);
+        } catch (bookkeeping) {
+            // DURABILITY, so `error`, as at `execute()`'s failure exit: the
+            // caller is told the run failed, and the history row is lost.
+            this.logger.error(
+                `[Automation] run '${runId}' of flow '${flowName}' FAILED before its first node and its run-history ` +
+                    `bookkeeping threw, so its terminal 'failed' row never landed — nothing retries the write, and ` +
+                    `this run is invisible to the Runs surfaces. The caller was answered status 'failed' carrying ` +
+                    `the run's error, so nothing needs re-driving on account of this line. Fix the history failure ` +
+                    `in this record's meta.`,
+                undefined,
+                describeThrownForLog(bookkeeping),
+            );
+        }
+        return {
+            success: false,
+            error,
+            durationMs,
+            status: 'failed',
+            flowLabel: flow.label,
+            summary: logged?.summary ?? summarizeRun(steps),
+        };
     }
 
     /**
@@ -8319,11 +8375,23 @@ export class AutomationEngine implements IAutomationService {
         // and resolves the triggering user's real grants for `runAs:'user'` (#3356).
         // Also stamps `flowRunId` so this run's data writes are attributable to it
         // (#3456).
-        const runContext = await this.resolveRunContext(flow, context, runId);
-        // Seeded AFTER the context resolves: the run takes its own copy of the
-        // trigger record, so the lookups the start node declares (`expand`,
-        // grafted while the context resolves) must already be on it.
-        const variables = this.seedRunVariables(flow, flowName, context, runId);
+        let runContext: AutomationContext;
+        let variables: Map<string, unknown>;
+        try {
+            runContext = await this.resolveRunContext(flow, context, runId);
+            // Seeded AFTER the context resolves, from the resolved context: its
+            // record is the run's own copy, carrying the lookups the start node
+            // declares (`expand`, grafted while the context resolves).
+            variables = this.seedRunVariables(flow, flowName, runContext, runId);
+        } catch (err) {
+            // A value the run is handed that contains itself (the record,
+            // `previous`) has no copy for the run to take: the run fails
+            // before its first node, answered in the failed-run shape below
+            // and recorded as such, never a throw out of `execute()`. Any
+            // other throw is unchanged.
+            if (!(err instanceof HeldValueCycleError)) throw err;
+            return this.failRunBeforeFirstNode({ runId, flowName, flow, startedAt, startTime, context, error: err.message });
+        }
         stampFlowRunSlot(runContext, flowName, runPackage);
         // [ADR-0162 item 7] The run's root run: itself, or its parent's.
         stampRootRun(runContext, { runId, flowName, startedAt });
@@ -12140,7 +12208,7 @@ export class AutomationEngine implements IAutomationService {
      *     create leg (#3427). Binding it only when truthy left `previous` an
      *     unknown CEL variable on insert, so ANY reference to it (even
      *     `previous == null`) threw "Unknown variable: previous" and failed the
-     *     whole condition;
+     *     whole condition. Like the record, it is the run's OWN copy;
      *  4. `$runId`, so a pausing node (e.g. Approval) can map its external
      *     state back to this run for resume (ADR-0019), and `$flowName` /
      *     `$flowLabel`, so externalized state carries a human-readable origin.

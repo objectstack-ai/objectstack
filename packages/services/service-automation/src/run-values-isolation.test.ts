@@ -202,9 +202,49 @@ describe('the trigger record is the run\'s own copy', () => {
         expect(run.output).toMatchObject({ seen: 'touched', seen_trigger: 'touched' });
         expect(trigger).toEqual({ mode: 'a', nested: { n: 1 } });
     });
+
+    it('a start node that declares expand: the run reads the expanded relation, and the caller\'s record object is unchanged', async () => {
+        const engine = makeEngine();
+        engine.setRecordExpander(async (_object, id) => ({ id, account: { id: 'a1', name: 'Acme' } }));
+        const flow = chain('iso_expand', [
+            assign({ seen: cel('record.account.name') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]);
+        flow.runAs = 'system';
+        flow.nodes[0].config = { expand: ['account'] };
+        engine.registerFlow('iso_expand', flow);
+        const trigger = { id: 'd1', account: 'a1' };
+        const run = await engine.execute('iso_expand', { object: 'deal', record: trigger } as any);
+        expect(run.success, JSON.stringify(run)).toBe(true);
+        expect((run.output as any).seen).toBe('Acme');
+        expect(trigger).toEqual({ id: 'd1', account: 'a1' });
+    });
+
+    it('a node that changes previous in place leaves the caller\'s previous object as handed', async () => {
+        const engine = makeEngine();
+        engine.registerFlow('iso_previous', chain('iso_previous', [
+            { type: 'touch', config: { target: 'previous' } },
+            assign({ seen: cel('previous.mode') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]));
+        const previous = { mode: 'p', nested: { n: 1 } };
+        const run = await engine.execute('iso_previous', { record: { mode: 'a' }, previous } as any);
+        expect(run.success, JSON.stringify(run)).toBe(true);
+        expect((run.output as any).seen).toBe('touched');
+        expect(previous).toEqual({ mode: 'p', nested: { n: 1 } });
+    });
 });
 
 describe('a value that contains itself', () => {
+    it('handed to execute as the record: the run is answered failed, naming the refusal, and execute does not reject', async () => {
+        const engine = makeEngine();
+        engine.registerFlow('iso_ring_record', chain('iso_ring_record', [
+            assign({ seen: cel('record.label') }),
+        ], [{ name: 'seen', type: 'text', isOutput: true }]));
+        const ring: Record<string, unknown> = { label: 'ring' };
+        ring.self = ring;
+        const run = await engine.execute('iso_ring_record', { record: ring } as any);
+        expect(run).toMatchObject({ success: false, status: 'failed', error: new HeldValueCycleError().message });
+    });
+
     it('is refused by the copy with a named error', () => {
         const ring: Record<string, unknown> = { label: 'ring' };
         ring.self = ring;

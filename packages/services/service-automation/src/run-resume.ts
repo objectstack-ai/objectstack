@@ -139,6 +139,13 @@ export async function resolveRunContext(this: Pick<RunResumeHost, 'seedRunGrants
         flowName: flow.name,
         ...(runId ? { flowRunId: runId } : {}),
     };
+    // The run's own copy of the record it was handed (`copyHeldValue`), taken
+    // before anything below writes onto it: the lookups the start node
+    // declares (`expandDeclaredLookups`, at the end) are grafted onto this
+    // copy, and the run's variables are seeded from it, so nothing the run
+    // does reaches the caller's object. A record that contains itself throws
+    // `HeldValueCycleError` here, which `execute()` answers as a failed run.
+    if (context?.record) runContext.record = copyHeldValue(context.record) as Record<string, unknown>;
 
     // #3356 (follow-up to #1888) — a `runAs:'user'` run must enforce its data
     // ops as the TRIGGERING user's real authorization. Most trigger surfaces
