@@ -178,8 +178,55 @@ import { stripComments } from './js-comment-mask.mjs';
 
 export const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 
-/** The monorepo's docs tree, which holds the ObjectUI pages (objectstack#27145). */
-const MONOREPO_DOCS = path.resolve(REPO_ROOT, '..', 'content', 'docs');
+/*
+ * The monorepo root is this tree's parent (`deriveCandidates`'s `monorepoRoot`
+ * default), whose markdown a ui test may read from outside this tree: the docs
+ * pages under `content/docs` (objectstack#27145), a root ADR, the root
+ * `CONTRIBUTING.md`. Such a read is labelled `../<path>`, relative to this root
+ * like every other entry (objectstack#38134).
+ */
+
+/** The root workflow whose `ui:` paths filter starts the ui jobs. */
+export const ROOT_CI = path.join('.github', 'workflows', 'ci.yml');
+
+/**
+ * The `ui:` globs of the root `ci.yml`'s paths filter, read as text the way the
+ * filter itself is a YAML string (the same reading as the test helper
+ * `uiFilterGlobs`). Throws on an empty list: an empty reading would admit no
+ * out-of-tree document and say nothing.
+ */
+export function uiFilterGlobsOf(ci) {
+  const lines = String(ci).split('\n');
+  const at = lines.findIndex((line) => /^ +ui:[ \t]*$/.test(line));
+  if (at === -1) throw new Error(`${ROOT_CI}: the paths filter declares no \`ui:\` list`);
+  const indent = lines[at].search(/\S/);
+  const globs = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (line.search(/\S/) <= indent) break;
+    const m = line.match(/^\s+-\s+'([^']+)'\s*$/);
+    if (!m) throw new Error(`${ROOT_CI}: cannot read the \`ui:\` filter entry ${JSON.stringify(line)}`);
+    globs.push(m[1]);
+  }
+  if (globs.length === 0) throw new Error(`${ROOT_CI}: the \`ui:\` paths filter lists no globs`);
+  return globs;
+}
+
+/** A paths-filter glob against a monorepo path: `**` crosses separators, `*` does not. */
+export function filterGlobMatches(glob, file) {
+  return new RegExp(
+    `^${glob
+      .split('**')
+      .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
+      .join('.*')}$`,
+  ).test(file);
+}
+
+/** The `ui:` globs of `<monorepoRoot>/.github/workflows/ci.yml`, or null when that file is absent. */
+function uiGlobsAt(monorepoRoot) {
+  const file = path.join(monorepoRoot, ROOT_CI);
+  return existsSync(file) ? uiFilterGlobsOf(readFileSync(file, 'utf8')) : null;
+}
 
 /**
  * Where `deriveCandidates()` looks for tests.
@@ -206,7 +253,9 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', '.git', '.turbo', 'coverage',
  *              `'README.md'` against the test's directory AND every ancestor of
  *              it, so a package-local read also lands on the root README. Which
  *              one is real is a question about the code, and the answer belongs
- *              where the next reader will find it.
+ *              where the next reader will find it. The monorepo root is one more
+ *              base (objectstack#38134), so a bare `'README.md'` lands on
+ *              `../README.md` too, and is rejected here when it is not the read.
  * `walker`  -- present when the scanner saw a directory walk in the file.
  *              `'markdown-tree'` means the walk IS the markdown read and the
  *              tree is in `reads`; `'not-markdown'` means the walk collects
@@ -245,6 +294,12 @@ export const ADJUDICATED = new Map([
   [
     'packages/app-shell/src/views/metadata-admin/previews/readme-flow-canvas-draft.test.ts',
     { reads: ['packages/app-shell/README.md'] },
+  ],
+  // Holds ADR-0084's type-to-group table equal to the Studio menu code, reading
+  // the ADR from the monorepo's root `docs/adr/` (objectstack#37935, #38134).
+  [
+    'packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts',
+    { reads: ['../docs/adr/0084-application-builder-information-architecture.md'] },
   ],
   [
     'packages/auth/src/__tests__/reserved-auth-features.test.ts',
@@ -319,18 +374,23 @@ export const ADJUDICATED = new Map([
   ],
   // The three guides it reads moved with the published bundle into the objectstack
   // monorepo's `skills/` catalog at the cutover (decision C, objectstack#25803), outside
-  // this tree, so this ledger can no longer name them; their trigger is the monorepo's.
+  // this tree, and are named `../skills/objectui/…` like every out-of-tree read
+  // (objectstack#38134).
   [
     'packages/components/src/__tests__/skill-guide-data-table-binding.test.tsx',
     {
-      reads: [],
+      reads: [
+        '../skills/objectui/guides/data-integration.md',
+        '../skills/objectui/guides/schema-expressions.md',
+        '../skills/objectui/rules/protocol.md',
+      ],
       walker: 'not-markdown: concatenates plugin package `.tsx` sources',
     },
   ],
   [
     'packages/components/src/__tests__/skill-guide-provider-envelope.test.tsx',
     {
-      reads: ['skills/objectui/**'],
+      reads: ['../skills/objectui/**'],
       walker: 'markdown-tree: walks the published skill package and asserts over every `.md` in it',
     },
   ],
@@ -399,6 +459,12 @@ export const ADJUDICATED = new Map([
   [
     'packages/layout/src/__tests__/readme-sidebar-nav-example.test.ts',
     { reads: ['packages/layout/README.md'] },
+  ],
+  // Pins the permission-config example of the published skill guide, read from
+  // the monorepo's `skills/` catalog (objectstack#38134).
+  [
+    'packages/permissions/src/__tests__/skill-guide-permission-config.test.tsx',
+    { reads: ['../skills/objectui/guides/auth-permissions.md'] },
   ],
   [
     'packages/plugin-calendar/src/readme-calendar-view-schema.test.ts',
@@ -495,6 +561,12 @@ export const ADJUDICATED = new Map([
   [
     'packages/types/src/__tests__/held-public-block-arms-10872.test.ts',
     { reads: ['../content/docs/frontend/quick-start.mdx'] },
+  ],
+  // objectui#11405: scans the `list` fences of two published skill guides, read
+  // from the monorepo's `skills/` catalog (objectstack#38134).
+  [
+    'packages/types/src/__tests__/list-bind-only-11405.test.ts',
+    { reads: ['../skills/objectui/guides/data-integration.md', '../skills/objectui/guides/schema-expressions.md'] },
   ],
   // objectui#6152 round 9 -- the corpus census of `object-calendar` containers.
   // It walks the authored trees, reads every markdown document in them that
@@ -662,6 +734,15 @@ export const ADJUDICATED = new Map([
       notRead: ['packages/core/README.md'],
     },
   ],
+  // Runs the gate over its real scan surface (`listDocuments(repoRoot)`): the
+  // ObjectUI docs pages, every package README and the published skill bundle.
+  // Its other document literals are fixture pages handed to `run()`.
+  [
+    'scripts/__tests__/check-doc-json-fences.test.ts',
+    {
+      reads: ['../content/docs/frontend/**', '../skills/objectui/**', 'packages/**'],
+    },
+  ],
   // `./*` rather than the eight root documents it used to list, and the
   // distinction is the whole of objectui#9142. This test does not read a list
   // of root documents -- it runs `git ls-files -- '*.md'`, keeps the paths with
@@ -673,7 +754,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-doc-links.test.ts',
     {
-      reads: ['./*', 'apps/**', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
+      reads: ['./*', 'apps/**', '../content/docs/frontend/**', '../skills/objectui/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
     },
   ],
   [
@@ -722,13 +803,21 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/check-shell-escape-residue.test.ts',
     {
-      reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', '../content/docs/frontend/**', 'skills/objectui/**'],
+      reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', '../content/docs/frontend/**', '../skills/objectui/**'],
+    },
+  ],
+  // Judges every page of the published skill bundle through `listGuides(repoRoot)`,
+  // in the monorepo's `skills/` catalog; its other literals are fixture pages.
+  [
+    'scripts/__tests__/check-skill-examples.test.ts',
+    {
+      reads: ['../skills/objectui/**'],
     },
   ],
   [
     'scripts/__tests__/check-skills-paths.test.ts',
     {
-      reads: ['.claude/skills/**', 'skills/objectui/**'],
+      reads: ['.claude/skills/**', '../skills/objectui/**'],
     },
   ],
   [
@@ -749,7 +838,7 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/doc-version-claims.test.ts',
     {
-      reads: ['../content/docs/frontend/**', 'docs/rfcs/**', 'packages/**', 'skills/objectui/**'],
+      reads: ['../content/docs/frontend/**', 'docs/rfcs/**', 'packages/**', '../skills/objectui/**'],
       walker: 'markdown-tree',
     },
   ],
@@ -760,13 +849,13 @@ export const ADJUDICATED = new Map([
   [
     'scripts/__tests__/dollar-dialect-alias-census.test.ts',
     {
-      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', 'skills/objectui/**'],
+      reads: ['./*', '.changeset/**', '.claude/skills/**', 'apps/**', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**', 'patches/README.md', '../skills/objectui/**'],
     },
   ],
   [
     'scripts/__tests__/layered-read-declared-path-4016.test.ts',
     {
-      reads: ['skills/objectui/**'],
+      reads: ['../skills/objectui/**'],
       walker: 'not-markdown: package `src/` directories',
     },
   ],
@@ -789,16 +878,16 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/markdown-test-inputs.test.ts',
     {
       reads: [],
-      notRead: ['AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
+      notRead: ['../docs/adr/0084-application-builder-information-architecture.md', 'AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
     },
   ],
   // objectstack#26080 folded `QUICK_REFERENCE.md` into the repository root's
-  // `CONTRIBUTING.md`; this test reads that file's UI section, which is outside
-  // this tree, so it reads no markdown document this ledger can name.
+  // `CONTRIBUTING.md`; this test reads that file's UI section, outside this tree,
+  // named `../CONTRIBUTING.md` (objectstack#38134).
   [
     'scripts/__tests__/quick-reference-commands-4149.test.ts',
     {
-      reads: [],
+      reads: ['../CONTRIBUTING.md'],
       walker: 'not-markdown: directory listings that test whether a documented path exists',
     },
   ],
@@ -996,7 +1085,7 @@ function pathFragments(source) {
  * candidate is one line in `ADJUDICATED` while the cost of a missed one is the
  * defect this file exists to close.
  */
-export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS } = {}) {
+export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS, monorepoRoot = path.dirname(root), uiGlobs = uiGlobsAt(monorepoRoot) } = {}) {
   const files = [];
   for (const top of roots) collectTests(path.join(root, top), files);
 
@@ -1005,8 +1094,8 @@ export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS } = {}) 
     const source = stripComments(readFileSync(file, 'utf8'));
     const bases = [];
     for (let dir = path.dirname(file); dir.startsWith(root); dir = path.dirname(dir)) bases.push(dir);
-    // …and the monorepo root, for a test that names a docs page from there.
-    bases.push(path.dirname(root));
+    // …and the monorepo root, for a test that names a root document from there.
+    bases.push(monorepoRoot);
 
     const documents = new Set();
     for (const fragment of pathFragments(source)) {
@@ -1015,11 +1104,24 @@ export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS } = {}) 
       if (/^\.mdx?$/.test(fragment)) continue; // the bare extension
       for (const base of bases) {
         const resolved = path.resolve(base, fragment);
-        // The one tree outside this root a test may read: the monorepo's docs,
-        // where the ObjectUI pages live since objectstack#27145. It is labelled
-        // `../content/docs/…`, relative to this root like every other entry.
-        if (!resolved.startsWith(`${root}${path.sep}`) && !resolved.startsWith(`${MONOREPO_DOCS}${path.sep}`)) continue;
+        // A markdown document outside this tree is a candidate too
+        // (objectstack#38134): admitting only `content/docs` dropped the root
+        // `docs/adr` read of `studioMenuPlacement.test.ts` from the ledger
+        // without a word. An out-of-tree read is labelled `../<path>`. It is
+        // admitted only when the root `ci.yml`'s `ui:` filter covers it, so a
+        // change to it starts the job that runs this ledger's test: a root
+        // README or CHANGELOG a test merely names would otherwise tie the
+        // ledger to a file whose edit starts no ui job, and red the NEXT ui PR.
+        // A read the filter does not cover is the fifth subject of
+        // scripts/check-ci-filter-parity.mjs, which asks that question of every
+        // ui test. `uiGlobs: null` (no ci.yml above a scratch root) admits all.
+        // A path above the monorepo root is no document of this repository.
+        if (!resolved.startsWith(`${monorepoRoot}${path.sep}`)) continue;
         if (resolved.includes(`${path.sep}node_modules${path.sep}`)) continue;
+        if (!resolved.startsWith(`${root}${path.sep}`) && uiGlobs) {
+          const monorepoPath = path.relative(monorepoRoot, resolved).split(path.sep).join('/');
+          if (!uiGlobs.some((glob) => filterGlobMatches(glob, monorepoPath))) continue;
+        }
         if (existsSync(resolved) && statSync(resolved).isFile()) {
           documents.add(path.relative(root, resolved));
         }

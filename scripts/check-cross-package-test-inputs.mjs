@@ -744,7 +744,7 @@ export function importSpecifiers(src) {
  */
 const KNOWN_MODULE_EXTENSION = /\.(?:[cm]?[jt]sx?|json|node)$/;
 
-function resolveImportTarget(name) {
+export function resolveImportTarget(name, root = REPO_ROOT) {
   const candidates = [name];
   if (/\.js$/.test(name)) candidates.push(name.replace(/\.js$/, '.ts'), name.replace(/\.js$/, '.tsx'));
   else if (/\.mjs$/.test(name)) candidates.push(name.replace(/\.mjs$/, '.mts'));
@@ -752,7 +752,7 @@ function resolveImportTarget(name) {
   else if (!KNOWN_MODULE_EXTENSION.test(name)) candidates.push(`${name}.ts`, `${name}.tsx`, `${name}.mts`);
   for (const c of candidates) {
     try {
-      if (statSync(join(REPO_ROOT, c)).isFile()) return c;
+      if (statSync(join(root, c)).isFile()) return c;
     } catch {
       // Not this candidate — try the next.
     }

@@ -63,6 +63,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -150,6 +152,97 @@ describe('the derived class', () => {
     // beside a declared document is still not an input.
     expect(markdownTestInputsAmong(['../content/docs/frontend/a-page-added-today.json'])).toHaveLength(0);
     expect(markdownTestInputsAmong(['apps/site/src/app/page.tsx'])).toHaveLength(0);
+  });
+});
+
+/* ── objectstack#38134: a markdown read outside this tree is a candidate ──── */
+
+describe('objectstack#38134 — every markdown read outside ui/ reaches the ledger', () => {
+  /** The root ADR a ui test reads, and the test. */
+  const ROOT_ADR = '../docs/adr/0084-application-builder-information-architecture.md';
+  const ADR_READER = 'packages/app-shell/src/views/studio-design/studioMenuPlacement.test.ts';
+
+  it('the scanner offers the root `docs/adr` read, and the ledger declares it', () => {
+    const candidates = deriveCandidates();
+    expect(candidates.get(ADR_READER)?.documents).toContain(ROOT_ADR);
+    expect(ADJUDICATED.get(ADR_READER)?.reads).toContain(ROOT_ADR);
+    expect(markdownTestInputsAmong([ROOT_ADR]).flatMap((hit) => hit.readers)).toContain(ADR_READER);
+  });
+
+  it('a scratch monorepo: a ui test reading a root document outside `content/docs` is a candidate', () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), 'markdown-test-inputs-38134-'));
+    try {
+      // The monorepo is `repo/`; `outside.md` sits ABOVE its root.
+      const write = (rel: string, text: string) => {
+        mkdirSync(path.dirname(path.join(scratch, rel)), { recursive: true });
+        writeFileSync(path.join(scratch, rel), text);
+      };
+      const uiRoot = path.join(scratch, 'repo', 'ui');
+      write('repo/docs/notes/root-doc.md', '# root\n');
+      write('repo/content/docs/page.mdx', '# page\n');
+      write('outside.md', '# not this repository\n');
+      write(
+        'repo/ui/packages/p/src/reads-root.test.ts',
+        "const HERE = '.';\nreadFileSync(resolve(HERE, '../../../../docs/notes/root-doc.md'));\n" +
+          "readFileSync(resolve(HERE, '../../../../content/docs/page.mdx'));\n",
+      );
+      const candidates = deriveCandidates({ root: uiRoot, roots: ['packages'] });
+      // The control: `content/docs`, the one tree admitted before this card.
+      expect(candidates.get('packages/p/src/reads-root.test.ts')?.documents).toEqual([
+        '../content/docs/page.mdx',
+        '../docs/notes/root-doc.md',
+      ]);
+      // ...and a path above the monorepo root is no document of this repository.
+      write('repo/ui/packages/p/src/escapes.test.ts', "readFileSync(resolve(HERE, '../../../../../outside.md'));\n");
+      expect(deriveCandidates({ root: uiRoot, roots: ['packages'] }).has('packages/p/src/escapes.test.ts')).toBe(false);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('narrowed (S3): an out-of-tree document the root `ui:` filter does not cover is no candidate', () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), 'markdown-test-inputs-38134-s3-'));
+    try {
+      const write = (rel: string, text: string) => {
+        mkdirSync(path.dirname(path.join(scratch, rel)), { recursive: true });
+        writeFileSync(path.join(scratch, rel), text);
+      };
+      const uiRoot = path.join(scratch, 'repo', 'ui');
+      write('repo/docs/notes/root-doc.md', '# root\n');
+      write('repo/ROADMAP.md', '# roadmap\n');
+      write(
+        'repo/.github/workflows/ci.yml',
+        "jobs:\n  filter:\n    steps:\n      - with:\n          filters: |\n            ui:\n              - 'ui/**'\n" +
+          "              # a comment line is skipped\n              - 'docs/notes/**'\n            ui_consumers:\n              - 'packages/spec/**'\n",
+      );
+      write(
+        'repo/ui/packages/p/src/reads-root.test.ts',
+        "readFileSync(resolve(HERE, '../../../../docs/notes/root-doc.md'));\nconst name = 'ROADMAP.md';\n",
+      );
+      const candidates = deriveCandidates({ root: uiRoot, roots: ['packages'] });
+      // The covered read is admitted; the bare root `ROADMAP.md` (the monorepo
+      // root is a base) is not, since editing it starts no ui job.
+      expect(candidates.get('packages/p/src/reads-root.test.ts')?.documents).toEqual(['../docs/notes/root-doc.md']);
+      // The control: with no filter to consult, the same name IS a candidate.
+      expect(deriveCandidates({ root: uiRoot, roots: ['packages'], uiGlobs: null }).get('packages/p/src/reads-root.test.ts')?.documents).toEqual([
+        '../ROADMAP.md',
+        '../docs/notes/root-doc.md',
+      ]);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('every out-of-tree entry the ledger names is a path whose change starts the ui jobs', () => {
+    const globs = uiFilterGlobs(rootCi());
+    const outOfTree = [...ADJUDICATED.values()]
+      .flatMap((verdict) => [...(verdict.reads ?? []), ...(verdict.notRead ?? [])])
+      .filter((entry) => entry.startsWith('../'));
+    expect(outOfTree.length).toBeGreaterThan(0);
+    const unscheduled = [...new Set(outOfTree)]
+      .map((entry) => entry.slice('../'.length))
+      .filter((file) => !globs.some((glob) => globMatches(glob, file) || globMatches(glob, file.replace(/\*\*$/, 'x'))));
+    expect(unscheduled, 'a ledger entry outside ui/ that no `ui:` row covers ties this test to a diff that never runs it').toEqual([]);
   });
 });
 
