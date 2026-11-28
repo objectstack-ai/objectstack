@@ -192,11 +192,14 @@ describe('a refused PLAIN index does not skip the object’s remaining boot step
 
       await expect(driver.initObjects([after(false)])).resolves.toBeUndefined();
 
-      // Reported once, at error, naming the object and the index it refused.
+      // Reported once at error, naming the object and the index it refused…
       const lines = logs.filter((l) => l.msg.includes(`'${REFUSED}'`));
-      expect(lines).toHaveLength(1);
-      expect(lines[0]!.level).toBe('error');
-      expect(lines[0]!.msg).toContain(`"${T}"`);
+      const errors = lines.filter((l) => l.level === 'error');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.msg).toContain(`"${T}"`);
+      expect(errors[0]!.msg).toContain('cannot create index');
+      // …and once more by the drift report, which only runs after the indexes.
+      expect(lines.filter((l) => l.level === 'warn' && l.msg.startsWith('[schema-drift]'))).toHaveLength(1);
 
       // Still refused: nothing was built under that name.
       const indexes = await existingIndexNames(driver, T);
@@ -301,9 +304,10 @@ function declareUpgradeSuite(cell: DialectCell): void {
         // The refused plain index: still refused, and never substituted.
         expect(indexes.has(LIVE_REFUSED)).toBe(false);
         expect(cols.filter((r) => isHashShadowColumn(r.COLUMN_NAME))).toEqual([]);
+        // Reported once at error by the sync, then by the drift report.
         const lines = logs.filter((l) => l.msg.includes(`'${LIVE_REFUSED}'`));
-        expect(lines).toHaveLength(1);
-        expect(lines[0]!.level).toBe('error');
+        expect(lines.filter((l) => l.level === 'error')).toHaveLength(1);
+        expect(lines.filter((l) => l.level === 'warn' && l.msg.startsWith('[schema-drift]'))).toHaveLength(1);
         // The last boot step ran: the legacy TIMESTAMP was widened.
         expect(typeOf('seen_at')).toBe('datetime(3)');
       } else {
