@@ -843,6 +843,13 @@ Recover by setting `OS_AUTH_DIRECT_SIGN_IN_LOCAL_PATH=hidden`, and
 `OS_AUTH_EMAIL_PASSWORD_ENABLED=true` too when email and password sign-in is
 off, then restarting.
 
+On a cloud-managed runtime whose deployment declares email and password off,
+the email and password switch is judged before these checks, under `off` or
+not: a save that turns it on is refused `400 SETTINGS_VALIDATION`, a value
+stored on earlier is not applied, and email and password does not count as a
+way in for a Google change in the same save
+([Self-hosting](/docs/deployment/self-hosting)).
+
 **What a visit does.** The Console sign-in page reads `features.directSignIn`
 from `GET /api/v1/auth/config`. That is `true` only while a provider can be
 started, and only when this server mounted the door: a setting turned on
