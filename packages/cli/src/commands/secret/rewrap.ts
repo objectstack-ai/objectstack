@@ -350,9 +350,18 @@ export default class SecretRewrap extends Command {
         return;
       }
 
+      // A run that did not get its confirmation opens and writes nothing and
+      // exits 1, naming the flag that gives it — the `os migrate` family's
+      // rule, which `os db orphans` / `os secret orphans` follow too. An
+      // operator who answers `n` at the prompt declined on purpose: exit 0.
       if (flags.apply && plan.attempts > 0 && !flags.yes) {
         if (json) {
           await emitJson({ error: 'confirmation_required', hint: 'pass --yes' }, 1, { compact: true });
+          return;
+        }
+        if (!process.stdin.isTTY) {
+          printWarning(`Confirmation required. Re-run with --yes to re-wrap. No row was opened or written.${journalNote}`);
+          this.exit(1);
           return;
         }
         const ok = await confirm(
