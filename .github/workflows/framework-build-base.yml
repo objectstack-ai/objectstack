@@ -8,13 +8,13 @@ name: Framework Build Base Image
 # instead of installing and building the whole framework on every cold cache.
 # It is NOT the runtime image; that one is docker-publish.yml.
 #
-# On demand only, never per commit:
-#   - workflow_dispatch, from main, with `sha` = a full commit on main;
-#   - repository_dispatch, event type `framework-build-base`, with
-#     client_payload {"sha": "<40 hex>"}: the hook a downstream pin move can call;
-#   - pull_request touching this file or docker/framework-build-base/: the dry
-#     run of a change to the image definition. It builds the PR's base commit
-#     with the PR's Dockerfile and pushes nothing; its job has no packages grant.
+# Triggers (why per push, and what that costs: the note above `on:`):
+#   - push to main: the push's HEAD commit (github.sha) is packaged, one image
+#     per push; a commit inside a multi-commit queue push gets none by itself;
+#   - workflow_dispatch from main (`sha` = a full commit on main), and
+#     repository_dispatch `framework-build-base` with client_payload {"sha"}:
+#     inner commits, backfill and replace. A pull_request touching this file or
+#     docker/framework-build-base/ is a dry run that pushes nothing.
 #
 # A tag is written once. A request for a commit whose tag already exists reports
 # the existing digest and builds nothing, so a downstream can ask on every pin
@@ -43,7 +43,27 @@ name: Framework Build Base Image
 
 # dispatch-gates: no-check-families -- the steps are an image build and push, registry reads and digest-tag writes, and an in-image check script (docker/framework-build-base/check-image.sh, which needs the built image), not named local checks
 
+# Why every push to main, measured on 2026-11-28 (objectstack main, the week
+# 2026-11-21..27). The merge queue lands up to 5 squash commits in one push:
+# that week, 984 commits arrived in 692 pushes, about 99 a day, so about 30% of
+# main's commits are inside a push and are packaged only on request (dispatch).
+# A downstream pins by commit (cloud's .objectstack-sha moved to ecd10e9e, a
+# push head and a feature landing, not a release), so releases or `next`
+# snapshots alone would package about one commit a day and miss the pin.
+# Head coverage, replaying that week's push times with a 21-minute build: per
+# push, main's head already had its image 24% of the time, and every push head
+# gets one; coalesced to the newest head (one running, one waiting), 15%, and
+# 41% of push heads never get one. Cost per push: about 21 runner-minutes (the
+# dispatch run of 2026-11-28 took 21.5 min) against the one merge-queue CI run
+# each push already pays, about 600 (ci.yml 527 + lint.yml 76 on one queue
+# run): about 3.5% more. Storage: about 0.8 GB per build with no layer shared
+# between builds (no cache-from), so about 80 GB a day; digest tags are never
+# deleted, and retention is a decision of its own. A push for a commit already
+# packaged builds nothing, and a push never carries `rebuild` or
+# `replace_published`, so it never moves a published tag.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       sha:
@@ -70,11 +90,11 @@ on:
 permissions:
   contents: read
 
-# One build per commit at a time; a second request for the same commit waits,
-# then finds the tag and builds nothing. A PR's dry run is superseded by its
+# One build per commit at a time; a second request for the same commit (a push
+# and a dispatch for it) waits, then finds the tag and builds nothing. A PR's dry run is superseded by its
 # next push.
 concurrency:
-  group: framework-build-base-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event.client_payload.sha || inputs.sha }}
+  group: framework-build-base-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.sha || github.event.client_payload.sha || inputs.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -152,10 +172,11 @@ jobs:
 
   publish:
     name: Build & push ghcr.io/objectstack-ai/framework-build-base
-    # Trusted runs only: a dispatch from main, or a repository_dispatch (which
+    # Trusted runs only, in this repository (a fork's copy never publishes): a
+    # push to main, a dispatch from main, or a repository_dispatch (which
     # always runs main's copy of this file). This `if` is the policy, not a
     # security boundary: anyone who can push a branch can also edit it there.
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.repository == 'objectstack-ai/objectstack' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     # One cold reading on record, the `verify` job of run 42464408854: job wall
     # 18m45s, of which the build 15m25s (install 33 s, 82 framework tasks
@@ -170,7 +191,7 @@ jobs:
       - name: Resolve the framework commit
         id: sha
         env:
-          REQUESTED: ${{ github.event_name == 'repository_dispatch' && github.event.client_payload.sha || inputs.sha }}
+          REQUESTED: ${{ github.event_name == 'push' && github.sha || github.event_name == 'repository_dispatch' && github.event.client_payload.sha || inputs.sha }}
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
         run: |
