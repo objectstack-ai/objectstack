@@ -5172,6 +5172,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-object-related-list-pair-i18n.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-search-companion-agreement.test.ts",
       "verb": "findOne",
       "pinned": 1
