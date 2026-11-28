@@ -8,7 +8,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import { acceptsNothing, stripUnauthorableProperties } from './unauthorable-nodes.js';
+import { MetadataProtectionFields } from '@objectstack/spec/kernel';
+import { acceptsNothing, isPlatformStampedKey, PLATFORM_STAMPED_KEYS, stripUnauthorableProperties } from './unauthorable-nodes.js';
 
 const NEVER = { description: '[REMOVED] `x` was removed. Delete the key.', not: {} };
 
@@ -114,5 +115,52 @@ describe('stripUnauthorableProperties', () => {
         const input = { type: 'object', default: { properties: { dead: { not: {} } } }, properties: { live: { type: 'string' } } };
         const out: any = stripUnauthorableProperties(input);
         expect(out.default).toEqual({ properties: { dead: { not: {} } } });
+    });
+});
+
+describe('[#35879] the platform-stamped keys', () => {
+    const STAMPED = Object.keys(MetadataProtectionFields);
+
+    it('are the ADR-0010 envelope, read off its declaration: seven keys, frozen', () => {
+        expect([...PLATFORM_STAMPED_KEYS].sort()).toEqual([
+            '_lock', '_lockDocsUrl', '_lockReason', '_lockSource', '_packageId', '_packageVersion', '_provenance',
+        ]);
+        expect(STAMPED.every(isPlatformStampedKey)).toBe(true);
+        expect(isPlatformStampedKey('_diagnostics'), 'a read decoration is not a stamp').toBe(false);
+        expect(isPlatformStampedKey('name')).toBe(false);
+        expect(Object.isFrozen(PLATFORM_STAMPED_KEYS)).toBe(true);
+    });
+
+    it('are dropped from a properties map at the root and at depth, beside the live keys', () => {
+        // The envelope derives to satisfiable nodes: only the NAME decides.
+        const shape = z.object({
+            name: z.string(),
+            fields: z.record(z.string(), z.object({ type: z.string(), ...MetadataProtectionFields })),
+            ...MetadataProtectionFields,
+        });
+        const json = z.toJSONSchema(shape, { unrepresentable: 'any' }) as any;
+        expect(Object.keys(json.properties)).toEqual(expect.arrayContaining(STAMPED));
+        expect(STAMPED.some((k) => acceptsNothing(json.properties[k])), 'no envelope node is a tombstone').toBe(false);
+
+        const out: any = stripUnauthorableProperties(json);
+        expect(Object.keys(out.properties)).toEqual(['name', 'fields']);
+        expect(Object.keys(out.properties.fields.additionalProperties.properties)).toEqual(['type']);
+    });
+
+    it('keeps a stamped key its parent requires, as it keeps a required tombstone', () => {
+        const input = { type: 'object', properties: { _lock: { type: 'string' }, name: { type: 'string' } }, required: ['_lock'] };
+        const out: any = stripUnauthorableProperties(input);
+        expect(Object.keys(out.properties)).toEqual(['_lock', 'name']);
+        expect(out).toBe(input);
+    });
+
+    it('never reads a stamped NAME outside a properties map: a $defs entry and DATA keep it', () => {
+        const input = {
+            type: 'object',
+            $defs: { _lock: { type: 'string' } },
+            default: { _lock: 'full' },
+            properties: { name: { type: 'string' } },
+        };
+        expect(stripUnauthorableProperties(input)).toBe(input);
     });
 });

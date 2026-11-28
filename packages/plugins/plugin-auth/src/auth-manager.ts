@@ -5864,6 +5864,18 @@ export class AuthManager {
   }
 
   /**
+   * Whether self-registration runs off for a given declared
+   * `emailAndPassword.disableSignUp`: forced off ({@link signUpForcedOff}),
+   * else the deployment env (`readDisableSignUpEnv`), else the declaration,
+   * else on. The one formula `getPublicConfig()` answers with, and the one the
+   * auth plugin states as `auth.signup_enabled`'s declared default (the value
+   * the switch shows while nothing is stored), so the two cannot disagree.
+   */
+  public resolveDisableSignUp(declared: boolean | undefined): boolean {
+    return this.signUpForcedOff() ? true : (readDisableSignUpEnv() ?? declared ?? false);
+  }
+
+  /**
    * The tenancy posture ACTUALLY IN FORCE on this deployment — the one fact
    * both `organization/create`'s gate and `/auth/config`'s
    * `features.multiOrgEnabled` are derived from, so the two can never disagree.
@@ -6053,7 +6065,6 @@ export class AuthManager {
     // lock registration policy; otherwise we fall back to configured/settings
     // `emailAndPassword.disableSignUp` (default `false`).
     const emailPasswordConfig: Partial<EmailAndPasswordConfig> = this.config.emailAndPassword ?? {};
-    const disableSignUpFromEnv = readDisableSignUpEnv();
     // SSO-only ("enforced") hides the local password form + self-registration.
     // `enabled` stays true (break-glass), but signup is forced off and the UI
     // suppresses the password form via `features.ssoEnforced` below. A
@@ -6070,7 +6081,7 @@ export class AuthManager {
     const audience = this.getAudience();
     const emailPassword = {
       enabled: emailPasswordConfig.enabled !== false, // Default to true
-      disableSignUp: this.signUpForcedOff() ? true : (disableSignUpFromEnv ?? emailPasswordConfig.disableSignUp ?? false),
+      disableSignUp: this.resolveDisableSignUp(emailPasswordConfig.disableSignUp),
       // Mirrors the wiring in createAuthInstance() through the SAME resolver:
       // a self-registration-permitting posture forces verification ON, except
       // an `open` deployment's explicit opt-out (#20389) — the advertised flag

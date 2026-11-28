@@ -32,6 +32,7 @@ import {
 } from './crypto-adapter.js';
 import {
   type SettingsActionHandler,
+  type SettingsDeclaredDefault,
   type SettingsLiveStatus,
   type SettingsLiveStatusProvider,
   type SettingsLiveValue,
@@ -1013,6 +1014,10 @@ export class SettingsService {
   private optionSourceVerdictsHeld = false;
   /** Sourced keys whose `OS_*` override was taken in force while held, `[namespace, key]`. */
   private readonly heldOptionSourceVerdicts = new Map<string, [string, string]>();
+  /** Declared defaults by namespace, then key — see {@link registerDeclaredDefault}. */
+  private readonly declaredDefaults = new Map<string, Map<string, SettingsDeclaredDefault>>();
+  /** Declared-default failures already said, `namespace.key` — see {@link defaultOf}. */
+  private readonly reportedDeclaredDefaultFaults = new Set<string>();
   /** Write predicates by namespace, then key — see {@link registerWritePredicate}. */
   private readonly writePredicates = new Map<
     string,
@@ -1638,7 +1643,8 @@ export class SettingsService {
     const envRaw = this.env[envName];
     if (typeof envRaw !== 'string') return null;
 
-    const value = coerceEnvValue(envRaw, reg.defaults.get(key));
+    // The type the key's default has (ADR-0007 rung 4, see `defaultOf`).
+    const value = coerceEnvValue(envRaw, this.defaultOf(reg, key));
 
     // Families are judged in the SAME order `validatePatch` judges them —
     // options (when no domain is declared) → pattern → valueDomain → bounds —
@@ -2190,6 +2196,65 @@ export class SettingsService {
   }
 
   /**
+   * Register (or replace) what the running deployment declares for one
+   * manifest key — the value the key takes in the running system while nothing
+   * is stored and no `OS_*` override is in force. See
+   * {@link SettingsDeclaredDefault}. The last registration wins, the same
+   * override rule as {@link registerAction}.
+   */
+  registerDeclaredDefault(namespace: string, key: string, provider: SettingsDeclaredDefault): void {
+    const reg = this.registry.get(namespace);
+    if (!reg) throw new UnknownNamespaceError(namespace);
+    if (!reg.scopes.has(key)) throw new UnknownKeyError(namespace, key);
+    let byKey = this.declaredDefaults.get(namespace);
+    if (!byKey) this.declaredDefaults.set(namespace, (byKey = new Map()));
+    byKey.set(key, provider);
+  }
+
+  /**
+   * The bottom rung of the cascade for one key (ADR-0007 §Resolution, rung 4,
+   * as amended): what the deployment declares for it
+   * ({@link registerDeclaredDefault}), else the manifest `default`.
+   *
+   * THE one place that answers it, for every site that reads the default: the
+   * cascade walk, a patch's clear, and the type an `OS_*` value is read as.
+   * Before, those three read the manifest default, so with nothing stored a
+   * key read as a console default the runtime never applied, and a save of
+   * that default was "no change" to every write predicate.
+   *
+   * Asked on each use, never cached, so it follows the deployment's state. A
+   * provider that throws is a functional degradation, not a durability one:
+   * nothing claimed persisted is lost, the page shows the manifest default as
+   * it did before this seam — so `warn`, once per key, naming the consequence.
+   */
+  private defaultOf(reg: RegisteredManifest, key: string): unknown {
+    const namespace = reg.manifest.namespace;
+    const provider = this.declaredDefaults.get(namespace)?.get(key);
+    if (provider) {
+      try {
+        const declared = provider();
+        // A provider is synchronous by contract (the cascade reads it inline);
+        // a promise would be served as the value, so it is a fault like a throw.
+        if (declared !== null && typeof declared === 'object' && typeof (declared as { then?: unknown }).then === 'function') {
+          throw new Error('the provider answered a promise; a declared default is answered synchronously');
+        }
+        if (declared !== null && declared !== undefined) return declared;
+      } catch (err: any) {
+        const id = `${namespace}.${key}`;
+        if (!this.reportedDeclaredDefaultFaults.has(id)) {
+          this.reportedDeclaredDefaultFaults.add(id);
+          this.logger?.warn?.(
+            `SettingsService: the deployment's declared default for setting '${id}' could not be read, so with `
+            + 'nothing stored it resolves to the manifest default, which may not be what runs. '
+            + `Cause: ${err?.message ?? err}`,
+          );
+        }
+      }
+    }
+    return reg.defaults.get(key);
+  }
+
+  /**
    * The namespace's live-status statement as an `info_banner` specifier, ready
    * to head the page, or `undefined` when no provider is registered or the
    * provider has nothing to state. The banner half of {@link liveStatementOf}.
@@ -2648,7 +2713,8 @@ export class SettingsService {
       }
     }
 
-    const def = reg.defaults.get(key);
+    // Rung 4: what the deployment declares, else the manifest default (`defaultOf`).
+    const def = this.defaultOf(reg, key);
     chain.push({ scope: 'default', value: def ?? null });
 
     // Effective row: highest priority entry. Lock anywhere up the chain
@@ -3563,7 +3629,7 @@ export class SettingsService {
     }
     for (const [key, value] of entries) {
       data[key] = value === null || typeof value === 'undefined'
-        ? reg.defaults.get(key) ?? null
+        ? this.defaultOf(reg, key) ?? null
         : value;
     }
 

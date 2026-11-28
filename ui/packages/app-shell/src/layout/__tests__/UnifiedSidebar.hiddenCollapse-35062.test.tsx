@@ -833,9 +833,11 @@ describe('the docked sidebar’s right edge resizes it, and the float takes the 
     expect(resizeHandle(), 'the float is not resized').toBeNull();
     expect(frameWidth()).toBe('300px');
     for (const token of RAIL_OVERLAY_PANEL.split(' ')) expect(tokens(panel())).toContain(token);
-    // A card: off the window's edges, rounded, with a shadow.
-    expect(tokens(panel())).toEqual(expect.arrayContaining(['inset-y-2', 'left-2', 'rounded-lg', 'shadow-xl']));
+    // A card: off the window's edges, rounded, with a shadow. Its offset is
+    // from the window's inline start, the primitive's own edge (objectstack#37914).
+    expect(tokens(panel())).toEqual(expect.arrayContaining(['inset-y-2', 'start-2', 'rounded-lg', 'shadow-xl']));
     expect(tokens(panel())).not.toContain('inset-y-0');
+    expect(tokens(panel())).not.toContain('start-0');
     expect(tokens(panel())).not.toContain('left-0');
   });
 

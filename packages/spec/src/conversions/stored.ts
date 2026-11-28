@@ -143,6 +143,11 @@ export type StoredConversionOptions = Omit<ApplyConversionsOptions, 'includeReti
  * stack collection (e.g. `'hook'`-adjacent plugin types) and a non-object
  * item pass through unchanged: this seam never manufactures shape.
  *
+ * **Answers `undefined` when the row yields no item**: the chain left the
+ * collection the row was wrapped in empty, because a conversion deletes what
+ * the row is (a stored `action` row of the retired action type, ADR-0160 D7).
+ * A caller then registers and serves nothing for the row.
+ *
  * Deliberately NOT applied to `'flow'` by the metadata-protocol seams: flows
  * canonicalize at `registerFlow` instead, with the same full-chain policy.
  * (The reason this was first written for — the callout rename's open-namespace
@@ -155,7 +160,7 @@ export function applyConversionsToStoredItem<T>(
   type: string,
   item: T,
   options: StoredConversionOptions = {},
-): T {
+): T | undefined {
   if (item == null || typeof item !== 'object' || Array.isArray(item)) return item;
   const singular = PLURAL_TO_SINGULAR[type] ?? type;
   const collection = SINGULAR_TO_PLURAL[singular] ?? STORED_ONLY_COLLECTIONS[singular];
@@ -169,5 +174,12 @@ export function applyConversionsToStoredItem<T>(
     },
   );
   const items = converted[collection];
-  return Array.isArray(items) && items.length > 0 ? (items[0] as T) : item;
+  // ADR-0160 D7, seventh amendment: a conversion may leave NO item of a row —
+  // a stored `action` row whose type is the retired one IS the action
+  // the conversion deletes. The seam says so with `undefined`, and its callers
+  // register and serve nothing for that row; the row itself stays as stored
+  // until it is deleted by name through the metadata API's delete door. A
+  // chain that never touched the collection hands it back as it was.
+  if (!Array.isArray(items)) return item;
+  return items.length > 0 ? (items[0] as T) : undefined;
 }

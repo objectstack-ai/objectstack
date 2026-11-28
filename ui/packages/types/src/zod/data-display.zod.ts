@@ -868,6 +868,21 @@ export const ChartDataSeriesSchema = z.looseObject({
     + 'axis ticks for a count. It is not authored: declare the aggregate on the dataset measure, '
     + 'and the chart takes it from there. Delete the key.',
   ),
+  // INTERNAL-ONLY REFUSAL, the `aggregate` posture. `measureFormat` is the
+  // renderer-internal carrier of a dataset measure's display facts
+  // (`{ format, currency, percentScale }`): the report and dashboard producers
+  // fill it from the dataset answer's field, and a value axis whose series share
+  // one prints its ticks in the measure's units. Nothing on this face may write
+  // it — a hand-written carrier can contradict the dataset's own facts — and this
+  // object is NON-STRICT, so an undeclared key would be kept and handed to the
+  // renderer. Declared and unwritable, it is refused by name instead.
+  measureFormat: retirementTombstone(
+    'REFUSED — `measureFormat` is the renderer\'s INTERNAL carrier of a dataset measure\'s display '
+    + 'facts (`format`, `currency`, `percentScale`), which a report or dashboard chart fills from the '
+    + 'dataset answer so its value axis prints in the measure\'s units. It is not authored: to format '
+    + 'this chart\'s value axis, write the axis `format` (`yAxis: [{ field: \'total\', format: \'$0,0\' }]`), which '
+    + 'takes precedence over the carrier anyway. Delete the key.',
+  ),
   // THE SIX KEYS THE RENDERER READS (objectui#7546). Each was undeclared, and
   // because this object is NON-STRICT the mirror STRIPPED it in silence while
   // `safeParse` reported success — the card's own measurement:

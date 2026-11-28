@@ -1,6 +1,6 @@
 # ADR-0007: Settings — Manifest + K/V Store + Resolver (Apple-style)
 
-**Status**: Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20 · calibrated 2026-06-12) · **Amended (2026-11-05, #30385)** — D6: a clear (`null`) of an env-pinned key is not refused; it clears the stored value beneath the override and changes nothing in force. · **Amended (2026-11-08, #30208)** — §Specifier set gains `map` (keyed rows with typed value columns); `json` stays for raw config and is no longer the home for maps.
+**Status**: Accepted — backend implemented; UI pending (objectui) (proposed 2026-05-20 · calibrated 2026-06-12) · **Amended (2026-11-05, #30385)** — D6: a clear (`null`) of an env-pinned key is not refused; it clears the stored value beneath the override and changes nothing in force. · **Amended (2026-11-08, #30208)** — §Specifier set gains `map` (keyed rows with typed value columns); `json` stays for raw config and is no longer the home for maps. · **Amended (2026-11-28, #38098)** — §Resolution rung 4: what the running deployment declares for a key (`registerDeclaredDefault`), else the manifest `specifier.default`; still `source='default'`.
 **Deciders**: ObjectStack Protocol Architects
 **Builds on**: [ADR-0005](./0005-metadata-customization-overlay.md) (Metadata Customization Overlay), [ADR-0006 v4](./0006-project-environment-split.v4.md) (Project/Environment Split — this record was originally built on v3, superseded by v4)
 **Consumers**: `@objectstack/spec`, `@objectstack/platform-objects`, new `@objectstack/service-settings`, `@objectstack/plugin-auth` (Setup app), `objectui` (Settings renderer)
@@ -77,7 +77,7 @@ ObjectStack's protocol-first DNA matches Apple's: a small set of declarative spe
    1. process.env override         (source='env',     locked=true)        ← highest
    2. sys_setting WHERE scope='tenant'                                    ← tenant
    3. sys_setting WHERE scope='user' AND user_id=ctx.user_id              ← user
-   4. manifest specifier.default                                          ← default
+   4. deployment-declared default, else manifest specifier.default        ← default
    returns: { value, source, locked }
 
  RUNTIME WRITE  SettingsService.set(ns, key, value, scope, ctx)
@@ -90,6 +90,8 @@ ObjectStack's protocol-first DNA matches Apple's: a small set of declarative spe
    PUT /api/settings/:namespace         → { key: value, ... }
    POST /api/settings/:namespace/test   → { ok, message, details }    (optional, manifest-declared)
 ```
+
+*Amended 2026-11-28 (#38098): rung 4 read "manifest specifier.default". A manifest default is the console's default; where a package's runtime takes a key from its own configuration while nothing is stored (plugin options, a host declaration), the manifest default is a value nothing applies, so the page read one thing while another ran, and a save of it was "no change" to the key's write predicates. The package now states that value (`SettingsService.registerDeclaredDefault(namespace, key, provider)`, asked on each use, never recorded); rung 4 answers it, else the manifest default. The answer stays `source='default'` (the published enum admits no other value, nothing is stored, and a clear returns to it); a stored row and an `OS_*` override still win.*
 
 ### Design principles (binding)
 

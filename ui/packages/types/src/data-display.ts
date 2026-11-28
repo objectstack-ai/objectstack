@@ -2555,6 +2555,20 @@ export interface ChartDataSeries {
    * site. Declare the aggregate on the dataset measure instead.
    */
   aggregate?: never;
+  /**
+   * NOT A KEY OF THIS SERIES — refused by name, beside {@link aggregate}.
+   *
+   * `measureFormat` is the renderer-internal carrier of a dataset measure's
+   * display facts (`{ format, currency, percentScale }`): the report and
+   * dashboard producers fill it from the dataset answer's field, and a value
+   * axis whose series share one prints its ticks in the measure's units. A
+   * hand-written carrier could contradict the dataset's own facts, so
+   * `ChartDataSeriesSchema.measureFormat` refuses it by name and this
+   * `?: never` is a `tsc` error at the authoring site. Write the value axis'
+   * `format` on the chart (`yAxis: [{ field, format }]`) instead; it takes precedence
+   * over the carrier.
+   */
+  measureFormat?: never;
 }
 
 /**

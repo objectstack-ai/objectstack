@@ -1222,7 +1222,11 @@ function KanbanColumnView({
   // objectstack#37327 — a lane of a board handed one page of its query writes
   // the grouped read's whole count, and its page count marked `+` while the
   // read has not answered or cannot (see `KanbanBoardProps.laneCounts`).
-  const hostCount = pagedCount ? null : wholeLaneCount(laneCounts, String(column.id), safeCards.length)
+  // Read beside a lane page too (objectstack#37517): that board's lanes carry
+  // a page for their "Load more", and a lane none of whose records is on the
+  // board still says so. `laneCounts` is set only on a board handed one page,
+  // which never pages its lanes itself, so a self-paged lane reads `null` here.
+  const hostCount = wholeLaneCount(laneCounts, String(column.id), safeCards.length)
   const laneCountOf = pagedCount ?? hostCount
   // A lane that holds records none of which is on the page draws that, never
   // "No cards" under a count above zero.
