@@ -1,5 +1,68 @@
 # @objectstack/metadata-protocol
 
+## 19.0.0-next.2
+
+### Minor Changes
+
+- 0b87f12: fix(metadata-protocol)!: refuse the per-item publish and rollback naming no package of a name only disabled packages hold, with or without a package-less row stored
+  
+  Clause-②: no (narrowing)
+  Metadata-protocol: narrowed
+  Skills-docs: none — no page under `skills/**` or `content/docs/**` teaches a per-item publish or rollback naming no package over a name only disabled packages hold; the refusal's own sentence names the fix
+  
+  <!-- adr-0087: not-required (already-registered disabled-holder-package-less-row-bare-write-refused) the entry the six other writes of this narrowing registered now names these three cells too -->
+  
+  **BREAKING** for a deployment that publishes or rolls back one metadata item, with no package named, at a name whose every holder is disabled and no package-less row is stored for it: the write is now refused where it answered `200`. Fix: send the same publish or rollback naming the package (`?package=ID`, in process `packageId`) where the refusal says "Name the package this publish is for" or "Name the package this rollback is for"; enable a package that holds the name (`PATCH /api/v1/packages/:id/enable`) where it says "Enable the package that holds …".
+  
+  The bare save of such an item already answers `409 RESOURCE_CONFLICT` and writes nothing (a disabled package holds no name). The per-item publish and rollback naming no package asked that judgment only where a package-less row or draft was stored, so they still wrote the disabled package's own row, or stored the package-less row again from its history, and enabling the package again served a body no read had shown.
+  
+  Every moved answer, before → after, for a type the registry reads by package, while every holder of the name is disabled, where the ADR-0146 D11 close leaves the write open:
+  
+  - `POST /api/v1/meta/:type/:name/publish` whose draft address is the disabled package's own draft (beside a package-less row or with none stored): `200` (the draft promoted into that package's active row) → `409 RESOURCE_CONFLICT`, "Name the package this publish is for, then send it again …", nothing written. The publish naming the package still promotes it.
+  - `POST /api/v1/meta/:type/:name/rollback` that restores the disabled package's own row: `200` (that row rewritten to the version's body) → `409 RESOURCE_CONFLICT`, "Name the package this rollback is for, then send it again …", nothing written. The rollback naming the package still restores it.
+  - `POST /api/v1/meta/:type/:name/rollback` with the package-less row's history but no package-less row stored: `200` (a package-less row inserted with the version's body) → `409 RESOURCE_CONFLICT`, "Enable the package that holds …", nothing written.
+  - The same three through the in-process `publishMetaItem` / `rollbackMetaItem` with no `packageId`.
+  
+  Once a holder is enabled again the same publish or rollback answers as before the disable.
+  
+  Not moved: a publish or rollback naming a package, with the package enabled or disabled; a publish with no draft at its address, which keeps its `404 NO_DRAFT`; an item the ADR-0146 D11 close covers, which keeps that close's `403 NOT_OVERRIDABLE`; a name no package holds; a name an enabled package holds; every read. Correction to the note `37608-disabled-holder-publish-rollback-refused`, released in `19.0.0-next.1` and left as released: its "Not moved" list says that a rollback of a package-bound row is not moved, and that two writes on an item only disabled packages hold still land, left open for a separate decision (#37851): a publish whose draft address is the disabled package's own draft, and a rollback with no package-less row stored. From this release on, all three are refused as listed above, while the same publish or rollback naming the package, or sent once a holder is enabled again, answers as before. Migration entry `disabled-holder-package-less-row-bare-write-refused` (`@objectstack/spec`) now carries them for the upgrade guide.
+
+### Patch Changes
+
+- c23e556: fix(metadata-protocol): a `422 INVALID_METADATA` issue entry carries the registered refusal on `params`, so a client of the save door can read the code
+  
+  Clause-②: yes (widening)
+  Metadata-protocol: none
+  
+  A spec rule that owns a registered error code stamps it on its zod issue as `params.code`, next to the fields that say which fix applies: `CONTROLLED_BY_PARENT_MASTER_INVALID` with `shape` (an object save), and `PLUGIN_UI_REQUIRED_KEY_MISSING` with `key` (`PluginSchema`, which no save-door type parses today). zod reports every such rule with its own issue code `'custom'`. The metadata save door's `422 INVALID_METADATA` built each `issues[]` entry from `path`, `message` and that `'custom'` only, so a client of the door (anything that does not parse locally the way Studio does) could not tell which rule refused the body except by its English message.
+  
+  - **`@objectstack/metadata-protocol`.** The save door's 422 entry gains an optional `params` member: the registered refusal the issue carries, present only when the issue's `params.code` is a registered error code, and holding only its string, finite-number and boolean members. An object save refused for a `controlled_by_parent` master now answers `{ path: 'fields', code: 'custom', message, params: { code: 'CONTROLLED_BY_PARENT_MASTER_INVALID', shape: 'master-not-writable' } }`. Read the registered code from `params.code`. `zodIssuesToMetadataIssues` takes a new option, `refusalParams`, which only the save door sets. The read path's `_diagnostics.errors[]` and the seed refusal's `seedApplied.issues[]` keep exactly `path`, `message` and `code`, the shape their spec schemas publish.
+  - **`@objectstack/spec`.** The `CONTROLLED_BY_PARENT_MASTER_INVALID` docblock and its ledger note now say the save door's 422 carries the code on `params.code`.
+  
+  Nothing to migrate. The entry's `code` is unchanged (still zod's issue code, `'custom'` for these rules), and an entry that carries no registered refusal gets no `params` member, so a client that matches `code` or compares whole entries for other issues reads exactly what it read before.
+- Updated dependencies [34f7078]
+- Updated dependencies [0b539b6]
+- Updated dependencies [ab04434]
+- Updated dependencies [abf1eeb]
+- Updated dependencies [c23e556]
+- Updated dependencies [b4c99b8]
+- Updated dependencies [27ee984]
+- Updated dependencies [dbe0716]
+- Updated dependencies [3c53b85]
+- Updated dependencies [0b87f12]
+- Updated dependencies [b316afa]
+- Updated dependencies [8b47659]
+- Updated dependencies [a145e24]
+- Updated dependencies [6e2a8f2]
+  - @objectstack/spec@19.0.0-next.2
+  - @objectstack/lint@19.0.0-next.2
+  - @objectstack/core@19.0.0-next.2
+  - @objectstack/formula@19.0.0-next.2
+  - @objectstack/metadata@19.0.0-next.2
+  - @objectstack/metadata-core@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+  - @objectstack/sdui-parser@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Minor Changes

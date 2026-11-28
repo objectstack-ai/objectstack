@@ -489,10 +489,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'RM1-RM12 (#18745): the retirement arm, and the class it must not widen past': 12,
   'The #8299 category: `runtime-interface-only`': 12,
   '#12881: a metadata surface that names the symbol only in PROSE': 30,
-  'The #13080 category: `type-surface-only`': 26,
+  'The #13080 category: `type-surface-only`': 29,
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
-  'TSO-U: unit pins on predicate 4\'s readers': 30,
+  'TSO-U: unit pins on predicate 4\'s readers': 37,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
   'The #22918 category: `runtime-export-retired`': 49,
@@ -3578,6 +3578,16 @@ export function memberReturnAnnotation(text, symbol) {
  * CALL, not a declaration, and the scan moves on — otherwise every consumer of a
  * method would read as a definition of it.
  *
+ * ⚠️ `name: (...) => T` is TWO shapes that share every byte up to the arrow. In an
+ * object literal it is an unannotated arrow VALUE, and what follows `=>` is its
+ * body. Everywhere else the `:` is a type annotation -- an interface or type-literal
+ * property, a class field, a `let` / parameter annotation -- and what follows `=>`
+ * IS the return type (`ui/packages/auth/src/types.ts#updateUser`, `Promise<AuthUser>`).
+ * Reading the second as unannotated calls a concrete surface ERASED, and predicate 4
+ * then admits a concrete arrow-property base narrowed to a method signature -- the
+ * permissive direction. `sitsInTypePosition` tells the two apart; a container it
+ * cannot classify keeps the value reading.
+ *
  * @returns {{ index: number, annotation: string|null }[]} `annotation: null` when
  *   the definition is there and carries NO return annotation.
  */
@@ -3589,7 +3599,9 @@ function memberDefinitionsIn(text, masked, symbol, from, to) {
   // first byte of the file and one character everywhere else, and a region test
   // that guessed which of the two it got would be off by one at exactly one
   // position in the file.
-  const head = new RegExp(`(?:^|[^\\w$.])(${symbol}\\s*(?:[:=]\\s*)?(?:async\\s+)?(?:<[^<>]*>\\s*)?\\()`, 'g');
+  // Group 2 is the separator and group 3 the `async` keyword: a function TYPE is
+  // spelled only with `:` and never `async`, so either one rules it out.
+  const head = new RegExp(`(?:^|[^\\w$.])(${symbol}\\s*(?:([:=])\\s*)?(?:(async)\\s+)?(?:<[^<>]*>\\s*)?\\()`, 'g');
   for (const m of masked.matchAll(head)) {
     const identStart = m.index + m[0].length - m[1].length;
     if (identStart < from || identStart >= to) continue;
@@ -3605,6 +3617,11 @@ function memberDefinitionsIn(text, masked, symbol, from, to) {
     const tail = masked.slice(close + 1);
     const colon = /^\s*:/.exec(tail);
     if (!colon) {
+      // A function-typed property: the text after `=>` is its return TYPE.
+      if (/^\s*=>/.test(tail) && m[2] === ':' && !m[3] && sitsInTypePosition(masked, identStart)) {
+        out.push({ index: identStart, annotation: functionTypeReturn(text, masked, close + 1) });
+        continue;
+      }
       // No annotation. It is a DEFINITION only if a body or an arrow follows;
       // otherwise this was a call expression and the next candidate is scanned.
       if (/^\s*(?:=>|\{)/.test(tail)) out.push({ index: identStart, annotation: null });
@@ -3632,6 +3649,84 @@ function memberDefinitionsIn(text, masked, symbol, from, to) {
     out.push({ index: identStart, annotation: raw.length === annotation.length ? raw : annotation });
   }
   return out;
+}
+
+/**
+ * The innermost `(`, `[` or `{` still open at `pos` in the masked text, or -1.
+ */
+function enclosingOpener(masked, pos) {
+  let depth = 0;
+  for (let i = pos - 1; i >= 0; i--) {
+    const c = masked[i];
+    if (c === ')' || c === ']' || c === '}') depth++;
+    else if (c === '(' || c === '[' || c === '{') {
+      if (depth === 0) return i;
+      depth--;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Whether a `name:` starting at `pos` is a TYPE annotation rather than an object
+ * literal's property: true at the top level and inside a parameter list (a `let` /
+ * parameter annotation), and inside a brace `braceOpensTypeBody` classifies. Any
+ * other container -- an array, a brace it cannot classify -- reads as a value,
+ * which is this reader's behaviour from before the distinction existed.
+ */
+function sitsInTypePosition(masked, pos) {
+  const open = enclosingOpener(masked, pos);
+  if (open === -1 || masked[open] === '(') return true;
+  return masked[open] === '{' && braceOpensTypeBody(masked, open);
+}
+
+/**
+ * Whether the `{` at `open` opens a body whose `name:` members are TYPE
+ * annotations: an `interface` or `class` body, a `type` alias's (or a type
+ * parameter default's) object type, an object type inside a union or intersection
+ * or a type argument, or one that follows a `:` which itself sits in a type
+ * position. Read from the header since the previous `;` / `{` / `}`; a header with
+ * braces of its own (`class C implements I<{ a: 1 }>`) is not classified.
+ */
+function braceOpensTypeBody(masked, open) {
+  let start = open - 1;
+  while (start >= 0 && !';{}'.includes(masked[start])) start--;
+  const header = masked.slice(start + 1, open).trim();
+  if (/(?:^|[^\w$.])(?:interface|class)\b/.test(header)) return true;
+  if (/^(?:export\s+)?(?:declare\s+)?type\s+[\w$]/.test(header) && header.endsWith('=')) return true;
+  if (/(?:^|[^|&])[|&]$/.test(header) || header.endsWith('<')) return true;
+  if (header.endsWith(':')) return sitsInTypePosition(masked, open);
+  return false;
+}
+
+/**
+ * The return type of a function TYPE, read from just after its parameter list's
+ * `)` at `from`: the text after `=>`, to the member's end -- a `;` or `,` at depth
+ * 0, the container's own closer, an initializer's `=`, or a line break no
+ * continuation (`|`, `&`, `.`, a trailing operator) carries over. The `>` of a
+ * nested `=>` is not a closer. `null` when nothing follows the arrow.
+ */
+function functionTypeReturn(text, masked, from) {
+  const arrow = masked.indexOf('=>', from) + 2;
+  let d = 0;
+  let end = arrow;
+  for (; end < masked.length; end++) {
+    const c = masked[end];
+    if (d === 0 && (c === ';' || c === ',' || c === ')' || c === ']' || c === '}')) break;
+    if (d === 0 && c === '=' && masked[end + 1] !== '>') break;
+    if (d === 0 && c === '\n') {
+      const sofar = masked.slice(arrow, end).trim();
+      if (sofar !== '' && !/(?:[|&<:,.?(]|=>)$/.test(sofar) && !/^\s*[|&.?]/.test(masked.slice(end + 1))) break;
+    }
+    if (c === '(' || c === '[' || c === '{' || c === '<') d++;
+    else if (c === ')' || c === ']' || c === '}') d--;
+    else if (c === '>' && d > 0 && masked[end - 1] !== '=') d--;
+  }
+  const annotation = masked.slice(arrow, end).trim();
+  if (annotation === '') return null;
+  // The author's own bytes, as the `: T` branch returns them: masking preserves offsets.
+  const raw = text.slice(arrow, end).trim();
+  return raw.length === annotation.length ? raw : annotation;
 }
 
 /**
@@ -7537,6 +7632,34 @@ function selfTest() {
     files: { 'packages/client/src/index.ts': TSO_HEAD_CLIENT, '.changeset/x.md': TSO_CS(`type-surface-only ${TSO_REF}`) },
   })), [/does not exist at the merge\n      base/, /Refused rather than assumed/]);
 
+  // TSO-R8..R9, TSO-G2: a FUNCTION-TYPED PROPERTY (`name: (...) => T`) in an
+  // interface. Its return type is the text after the arrow, at both revs; reading
+  // it as unannotated called a concrete base ERASED, and predicate 4 then admitted
+  // a real narrowing. The shape is the live `ui/packages/auth/src/types.ts#updateUser`
+  // one (`Promise<AuthUser>` -> `Promise<void>`), moved into a published package.
+  const TSO_FN_BASE = (ret) =>
+    'export interface AuthClient {\n' +
+    '  /** Update user profile */\n' +
+    `  updateUser: (data: Partial<AuthUser>) => ${ret};\n` +
+    '  signOut(): Promise<void>;\n' +
+    '}\n';
+  const TSO_FN_REF = 'packages/client/src/index.ts#updateUser';
+  const TSO_FN = (base, head) => run(mk({
+    pkgs: TSO_PKGS,
+    baseFiles: { 'packages/client/src/index.ts': base },
+    files: { 'packages/client/src/index.ts': head, '.changeset/x.md': TSO_CS(`type-surface-only ${TSO_FN_REF}`) },
+  }));
+  const TSO_FN_METHOD_HEAD = TSO_FN_BASE('Promise<AuthUser>')
+    .replace('updateUser: (data: Partial<AuthUser>) => Promise<AuthUser>;', 'updateUser(data: Partial<AuthUser>): Promise<void>;');
+  red('TSO-R8 predicate 4: a concrete arrow-property base narrowed to a METHOD SIGNATURE is not narrowed-from-erased',
+    TSO_FN(TSO_FN_BASE('Promise<AuthUser>'), TSO_FN_METHOD_HEAD),
+    [/predicate 4: narrowed-from-erased\] is FALSE/, /the return annotation of `updateUser` was already CONCRETE/, /`Promise<AuthUser>`/]);
+  red('TSO-R9 predicate 4: a concrete arrow-property base narrowed to another ARROW PROPERTY is not narrowed-from-erased',
+    TSO_FN(TSO_FN_BASE('Promise<AuthUser>'), TSO_FN_BASE('Promise<void>')),
+    [/predicate 4: narrowed-from-erased\] is FALSE/, /`Promise<AuthUser>`/]);
+  green('TSO-G2 a TRULY erased arrow-property base (`Promise<any>`) narrowed to a method signature is still admitted',
+    TSO_FN(TSO_FN_BASE('Promise<any>'), TSO_FN_METHOD_HEAD));
+
   // ---- TSO-6048: THE REGRESSION PIN -- the founding case must never admit -----
   //
   // #6048 is what this whole gate was built for: it removed the `roles` member of
@@ -7698,6 +7821,20 @@ function selfTest() {
       `length -- so an author can tell "long" from "all of it"; a short one is printed byte-identical. Got: ${JSON.stringify(shown)}`,
     );
   }
+
+  // U31-U37: `name: (...) => T` is a function TYPE wherever the `:` is a type
+  // annotation, and an unannotated arrow VALUE only inside an object literal.
+  assert(memberReturnAnnotation('export interface A {\n  updateUser: (data: Partial<AuthUser>) => Promise<AuthUser>;\n}\n', 'updateUser')?.annotation === 'Promise<AuthUser>', 'TSO-U31: an interface property typed as a function reads its return type -- the text after the arrow -- never "no return annotation"');
+  assert(memberReturnAnnotation('export type A = {\n  f: () => Promise<void>\n  g: string\n};\n', 'f')?.annotation === 'Promise<void>', 'TSO-U32: a type-literal member with no `;` ends at its line break -- the next member is not part of its return type');
+  assert(memberReturnAnnotation('export const o = {\n  f: (x: number) => x + 1,\n};\n', 'f')?.annotation === null, 'TSO-U33: an object-literal property holding an unannotated arrow is still UNANNOTATED -- what follows its arrow is a body, not a type');
+  assert(memberReturnAnnotation('export class C {\n  f: (id: string) => Promise<Row>;\n}\n', 'f')?.annotation === 'Promise<Row>', 'TSO-U34: a class field annotated with a function type reads its return type');
+  assert(memberReturnAnnotation('export class C {\n  f = (id: string) => this.load(id);\n}\n', 'f')?.annotation === null, 'TSO-U35: a class field INITIALISED with an unannotated arrow is still unannotated -- `=` is never a type annotation');
+  assert(memberReturnAnnotation('export interface A {\n  f: () => () => Promise<void>;\n  g: (a: string) => A\n    | B;\n}\n', 'f')?.annotation === '() => Promise<void>' &&
+    memberReturnAnnotation('export interface A {\n  f: () => () => Promise<void>;\n  g: (a: string) => A\n    | B;\n}\n', 'g')?.annotation === 'A\n    | B', 'TSO-U36: a return type that is itself a function type, or a union continued on the next line, is read whole');
+  assert(memberReturnAnnotation('export interface A {\n  f: () => any;\n}\n', 'f')?.annotation === 'any' &&
+    readDeclaredTypeSurface('export interface A {\n  f: () => any;\n}\n', 'f')?.erased === true &&
+    memberReturnAnnotation('export const o = { nested: { f: async (x) => x } };\n', 'f')?.annotation === null &&
+    memberReturnAnnotation('export interface A { nested: { f: (x: number) => Row } }\n', 'f')?.annotation === 'Row', 'TSO-U37: an `any` return stays readable as `any`, an `async` arrow is a value, and a type literal nested under a type keeps its type reading');
 
   // ---- TSO-D (#15627): a DOTTED member path, resolved through the nesting ---
   //

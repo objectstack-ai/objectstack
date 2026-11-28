@@ -92,7 +92,7 @@ const objectDefWithActions = {
     {
       name: 'escalate',
       label: 'Escalate',
-      locations: ['list_item'],
+      locations: ['record_row'],
       visible: "record.region == 'EU'",
       disabled: "record.priority == 'low'",
     },

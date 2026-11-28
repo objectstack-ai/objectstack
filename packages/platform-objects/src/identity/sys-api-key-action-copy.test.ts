@@ -4,7 +4,7 @@
 // record-level success message names the record (the write-feedback
 // convention).
 //
-// Both are `list_item` row actions. The console's runner fills a
+// Both are `record_row` row actions. The console's runner fills a
 // `successMessage` `{{ record.* }}` hole from the row the dispatch carries
 // (ActionRunner `composeSuccessMessage`, pinned in objectui's
 // `ActionRunner.copyTemplate-13367.test.ts`, "the row a dispatch carries is

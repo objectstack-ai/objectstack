@@ -5,7 +5,7 @@
  * The bug: the action tail is `shrink-0` (correct — buttons must not be
  * squeezed into unreadable slivers), and in a `flex-nowrap` row the title
  * column was the only flexible item, so it absorbed the entire width deficit.
- * With three labelled `record_header` actions plus `⋯` and `⟳`, the h1 was
+ * With three labelled `record_page` actions plus `⋯` and `⟳`, the h1 was
  * driven to ~30px and rendered as a single character + ellipsis, while the
  * breadcrumb above it still showed the full record name.
  *
@@ -33,6 +33,8 @@ import { ActionProvider, RecordContextProvider } from '@object-ui/react';
 // (object-ui/no-dynamic-import-in-test-hook, objectui#3010). This keeps the
 // file in the light `dom` project instead of adding it to `heavyDomTests`.
 import '../renderers';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@object-ui/react-runtime';
 
 function PageHeader({ schema }: { schema: any }) {
   const Component = ComponentRegistry.get('page:header');
@@ -43,9 +45,9 @@ function PageHeader({ schema }: { schema: any }) {
 
 /** The Field Zoo shape from the report: three labelled record-header actions. */
 const WIDE_ACTIONS = [
-  { name: 'gallery', locations: ['record_header'], label: 'Action Param Gallery' },
-  { name: 'lookup_first', locations: ['record_header'], label: 'Lookup == first of many' },
-  { name: 'assign_me', locations: ['record_header'], label: 'Assign to me (owner_id)' },
+  { name: 'gallery', locations: ['record_page'], label: 'Action Param Gallery' },
+  { name: 'lookup_first', locations: ['record_page'], label: 'Lookup == first of many' },
+  { name: 'assign_me', locations: ['record_page'], label: 'Assign to me (owner_id)' },
 ];
 
 function renderRecordHeader(actions: any[] = WIDE_ACTIONS) {
@@ -136,7 +138,7 @@ describe('PageHeaderRenderer — record title width arbitration (#7244)', () => 
     // unconditional, so a header that already fits is unaffected at runtime —
     // 192px floor + 16px gap + a ~136px tail leaves the row uncrowded.
     const { header, titleColumn } = renderRecordHeader([
-      { name: 'edit', locations: ['record_header'], label: 'Edit' },
+      { name: 'edit', locations: ['record_page'], label: 'Edit' },
     ]);
     expect(header.className).toContain('sm:flex-wrap');
     expect(titleColumn.className).toMatch(/\bsm:min-w-(?!0\b)\S+/);

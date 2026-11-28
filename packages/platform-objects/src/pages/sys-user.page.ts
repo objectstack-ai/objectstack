@@ -42,7 +42,7 @@ const TWO_FACTOR_OFFERED = P`has(features.twoFactor) && features.twoFactor == tr
  *    `tabs` slot retired (#27053); the rebuild renders the same nodes in the
  *    same order. The header the synthesizer used to supply is a `page:header`
  *    with `placedActions: true` (#29951): it draws every `sys_user` action
- *    placed at `record_header` / `record_more`, read live, so the platform's
+ *    placed at `record` / `record_page`, read live, so the platform's
  *    own (`ban_user / impersonate_user / … / update_my_profile /
  *    change_my_password / …`) and any an installed package places on
  *    `sys_user` appear in the header and its overflow menu, as they did on
@@ -88,7 +88,7 @@ export const SysUserDetailPage: Page = {
       components: [
         // ── The record header ─────────────────────────────────────────
         // The synthesized header's action set, read live: every action placed
-        // on `sys_user` at `record_header` or `record_more`, in declaration
+        // on `sys_user` at `record` or `record_page`, in declaration
         // order (admin actions, then the self-service ones), then any action
         // another package places there. A frozen id list dropped those
         // (#29951). The host appends its own system actions after these.

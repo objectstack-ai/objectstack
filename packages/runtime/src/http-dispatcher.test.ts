@@ -4465,7 +4465,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     objectName: 'todo_task',
     type: 'script',
     target: 'completeTask', // handler key differs from the declarative name
-    locations: ['record_header', 'list_item'],
+    locations: ['record'],
     ai: { exposed: true, description: 'Mark a todo task as complete.' },
   };
   const gatedAction = {
@@ -4673,7 +4673,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     objectName: 'todo_task',
     type: 'flow',
     target: 'escalation_flow',
-    locations: ['record_header'],
+    locations: ['record_page'],
     ai: { exposed: true, description: 'Escalate a ticket to the on-call team.' },
   };
   const makeFlowBridge = (execCtx: any, automation: any) => {
@@ -4763,7 +4763,7 @@ describe('HttpDispatcher — MCP action bridge (list_actions / run_action)', () 
     objectName: 'todo_task',
     type: 'script',
     body: { language: 'js', source: 'ctx.record.archived = true;' },
-    locations: ['record_header'],
+    locations: ['record_page'],
     params: [{ name: 'reason', type: 'text', required: true }],
     ai: { exposed: true, description: 'Archive a completed todo task.' },
   };

@@ -27,8 +27,8 @@ import { ActionEngine } from '../../actions/ActionEngine';
 const task = () => ({
   name: 'showcase_task',
   actions: [
-    { name: 'showcase_mark_done', label: 'Mark Done', locations: ['record_header'] },
-    { name: 'showcase_log_time', label: 'Log Time', locations: ['record_header'] },
+    { name: 'showcase_mark_done', label: 'Mark Done', locations: ['record_page'] },
+    { name: 'showcase_log_time', label: 'Log Time', locations: ['record_page'] },
   ],
 });
 

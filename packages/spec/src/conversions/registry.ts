@@ -138,6 +138,7 @@ import { permissionRlsTagsRemoved } from './entries/18/permission-rls-tags-remov
 import { flowDecisionModeInclusiveExplicit } from './entries/18/flow-decision-mode-inclusive-explicit.js';
 // Major 19: imported after every major-18 conversion, in `MAJOR_19_CONVERSIONS`'s
 // identifier order.
+import { actionLocationsActedOn } from './entries/19/action-locations-acted-on.js';
 import { agentModelProviderRemoved } from './entries/19/agent-model-provider-removed.js';
 import { knowledgeSourceContentFieldsToContent } from './entries/19/knowledge-source-content-fields-to-content.js';
 import { knowledgeSourceIdToName } from './entries/19/knowledge-source-id-to-name.js';
@@ -323,6 +324,7 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
  * `order: 2` are settled by `id`.
  */
 const MAJOR_19_CONVERSIONS: readonly OrderedConversion[] = [
+  { conversion: actionLocationsActedOn, order: 3 },
   { conversion: agentModelProviderRemoved, order: 2 },
   { conversion: knowledgeSourceContentFieldsToContent, order: 2 },
   { conversion: knowledgeSourceIdToName, order: 1 },

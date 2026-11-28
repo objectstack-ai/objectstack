@@ -12,6 +12,6 @@ export const LogCallAction: Action = {
   objectName: 'dc_account',
   type: 'script',
   target: 'logCall',
-  locations: ['record_header'],
+  locations: ['record_page'],
   successMessage: 'Call logged.',
 };

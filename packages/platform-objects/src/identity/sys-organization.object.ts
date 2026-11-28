@@ -69,7 +69,7 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Create Organization',
       icon: 'plus',
       variant: 'primary',
-      locations: ['list_toolbar'],
+      locations: ['list'],
       type: 'api',
       target: '/api/v1/auth/organization/create',
       // Hidden while cloud-managed: creating an organization makes the caller
@@ -101,7 +101,7 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Edit Organization',
       icon: 'pencil',
       mode: 'edit',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/update',
       recordIdParam: 'organizationId',
@@ -133,7 +133,7 @@ export const SysOrganization = ObjectSchema.create({
       icon: 'trash',
       variant: 'danger',
       mode: 'delete',
-      locations: ['list_item'],
+      locations: ['record_row'],
       type: 'api',
       target: '/api/v1/auth/organization/delete',
       recordIdParam: 'organizationId',
@@ -157,7 +157,7 @@ export const SysOrganization = ObjectSchema.create({
       icon: 'check-circle-2',
       variant: 'secondary',
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/organization/set-active',
       recordIdParam: 'organizationId',
@@ -178,7 +178,7 @@ export const SysOrganization = ObjectSchema.create({
       // OWN actions only (spec `component.zod.ts`, page:header), so the
       // organization record page cannot offer an invite from a mirror on
       // another object. Ruling 6228318638 (B′ on #24034): declared at
-      // `record_header`, primary, first by `order`.
+      // `record_page`, primary, first by `order`.
       //
       // The record IS the organization, so its id rides as `organizationId`
       // instead of better-auth's active-org fallback — an admin on another
@@ -193,7 +193,7 @@ export const SysOrganization = ObjectSchema.create({
       // Lower than every sibling (unset = 0), so the stable `order` sort puts
       // it first in the record header.
       order: -1,
-      locations: ['record_header'],
+      locations: ['record_page'],
       type: 'api',
       target: '/api/v1/auth/organization/invite-member',
       recordIdParam: 'organizationId',
@@ -246,7 +246,7 @@ export const SysOrganization = ObjectSchema.create({
       // grade may leave.
       order: 1,
       mode: 'custom',
-      locations: ['list_item', 'record_header'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/organization/leave',
       recordIdParam: 'organizationId',
@@ -275,8 +275,8 @@ export const SysOrganization = ObjectSchema.create({
       // better-auth's slug-taken check and plugin-auth's
       // `beforeUpdateOrganization` slug guard both run only on a sent slug.
       //
-      // One door per field. A record page reaches no `list_item` action, so
-      // this one is declared at `record_header` too, and nothing on that page
+      // One door per field. A record page reaches no `record_row` action, so
+      // this one is declared at `record_page` too, and nothing on that page
       // sends a slug to better-auth. `update_organization` is the slug door of
       // a composition without the cloud orchestrator. Where the orchestrator
       // governs the slug, the composition that serves its route declares the
@@ -288,7 +288,7 @@ export const SysOrganization = ObjectSchema.create({
       icon: 'pencil',
       variant: 'secondary',
       mode: 'edit',
-      locations: ['record_header', 'list_item'],
+      locations: ['record'],
       type: 'api',
       target: '/api/v1/auth/organization/update',
       recordIdParam: 'organizationId',

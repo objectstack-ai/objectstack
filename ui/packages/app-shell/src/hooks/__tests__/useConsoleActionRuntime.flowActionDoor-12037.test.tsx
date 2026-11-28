@@ -58,7 +58,7 @@ const DECLARED = {
   label: 'Reassign…',
   type: 'flow',
   target: FLOW,
-  locations: ['list_item', 'list_toolbar'],
+  locations: ['record_row', 'list'],
   requiredPermissions: ['showcase.reassign'],
 };
 const OBJECTS = [{ name: OBJECT, label: 'Task', fields: {}, actions: [DECLARED] }];

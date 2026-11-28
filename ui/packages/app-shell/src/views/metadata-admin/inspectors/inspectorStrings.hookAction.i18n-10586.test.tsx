@@ -95,6 +95,8 @@ import { InspectorComboField } from './InspectorComboField';
 // namespace, whose `zh` catalogue is fetched on demand (objectstack#25922).
 // Resident before any case, so the zh rows below read synchronously.
 import { loadStudioCatalogue } from '@object-ui/i18n/namespaces/studio';
+// Paid at collection, not inside a clocked case (check:test-source-alias).
+import '@objectstack/lint';
 await loadStudioCatalogue('zh');
 
 /** Each fixture starts from the same catalog, fields and held set. */
@@ -299,7 +301,7 @@ const ACTION_FIXTURES: readonly Fixture[] = [
     state.held = ['a.b', 'c.d'];
     mountAction(lang, {
       name: 'a2', type: 'api', method: 'PATCH', variant: 'secondary', component: 'action:icon', mode: 'edit',
-      locations: ['record_header'], requiredPermissions: ['a.b', 'c.d'],
+      locations: ['record_page'], requiredPermissions: ['a.b', 'c.d'],
     });
   },
   // A bound flow action with a field-backed input.
@@ -307,16 +309,16 @@ const ACTION_FIXTURES: readonly Fixture[] = [
     state.fields = [{ name: 'amount', label: 'Amount' }];
     mountAction(lang, {
       name: 'a3', type: 'flow', objectName: 'account', variant: 'danger', component: 'action:menu', mode: 'delete',
-      params: [{ field: 'amount' }], locations: ['list_item'],
+      params: [{ field: 'amount' }], locations: ['record_row'],
     });
   },
-  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a5', type: 'form', variant: 'link', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a6', type: 'url', locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a7', type: 'script', body: { language: 'js' }, locations: ['record_more'] }),
+  (lang) => mountAction(lang, { name: 'a4', type: 'modal', variant: 'ghost', component: 'action:group', mode: 'custom', locations: ['record_page'] }),
+  (lang) => mountAction(lang, { name: 'a5', type: 'form', variant: 'link', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a6', type: 'url', locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a7', type: 'script', body: { language: 'js' }, locations: ['record_page'], component: 'action:menu' }),
   // The declarative single-record write, empty and with one row.
-  (lang) => mountAction(lang, { name: 'a8', type: 'script', operation: 'update', patch: {}, locations: ['record_more'] }),
-  (lang) => mountAction(lang, { name: 'a9', type: 'script', operation: 'update', patch: { status: 'done' }, locations: ['record_more'] }),
+  (lang) => mountAction(lang, { name: 'a8', type: 'script', operation: 'update', patch: {}, locations: ['record_page'], component: 'action:menu' }),
+  (lang) => mountAction(lang, { name: 'a9', type: 'script', operation: 'update', patch: { status: 'done' }, locations: ['record_page'], component: 'action:menu' }),
 ];
 
 /** The pre-fix English the action fixtures render. */
@@ -426,7 +428,7 @@ const ACTION_EN = [
   'Text', 'Long text', 'Number', 'Checkbox', 'Select', 'Date', 'Date/time', 'Lookup',
   'Run a script — sandboxed JS / expression body',
   'Update fields on this record — no code',
-  'Record header', 'Record · more menu', 'Record · section', 'Record · related list', 'List toolbar', 'List · row',
+  'Record · page and rows', 'Record · page', 'Record · section', 'Record · related list', 'List toolbar', 'List · row',
 ] as const;
 
 describe('ActionDefaultInspector reads its words in the designer locale (objectui#10586)', () => {
@@ -435,7 +437,7 @@ describe('ActionDefaultInspector reads its words in the designer locale (objectu
     expectNone(seen, ACTION_EN);
     expect(seen.has(zhRow('engine.inspector.action.behavior'))).toBe(true);
     expect(seen.has(zhRow('engine.inspector.action.type.script'))).toBe(true);
-    expect(seen.has(zhRow('engine.inspector.action.location.record_header'))).toBe(true);
+    expect(seen.has(zhRow('engine.inspector.action.location.record_page'))).toBe(true);
     // A slotted sentence keeps its node: the capability list sits inside the zh words.
     const [lead] = zhRow('engine.inspector.action.capabilityGateSelf').split('{capabilities}');
     expect(lead.trim().length, 'the zh self clause opens with words').toBeGreaterThan(0);

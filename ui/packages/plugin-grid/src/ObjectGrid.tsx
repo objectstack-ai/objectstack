@@ -32,7 +32,7 @@ import { SchemaRenderer, isPermissionError, useDataScope, useNavigationOverlay, 
 // what stops a seventh site picking a convention of its own.
 import { resolveGridCellRendering } from './cellRendererResolution';
 import { isMaskedGridColumn } from './maskedColumn';
-import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES } from '@object-ui/fields';
+import { formatCurrency, formatDate, getBadgeColorClasses, getBadgeHexAppearance, FieldEditWidget, hasFieldEditWidget, hasInCellPanelEditWidget, DISCRETE_EDIT_TYPES, coerceToSafeValue, MaskedCellRenderer, withKnownObjects, RICH_TEXT_FIELD_TYPES, resolveFormulaValueType } from '@object-ui/fields';
 import { useLocalization, useDisplayLocale } from '@object-ui/i18n';
 // Two resolvers, two vocabularies — the repo spells the distinction into the
 // NAMES (objectui#4167). `resolveInlineI18nLabel` is the spec's own
@@ -1370,7 +1370,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *
    *   - The PRODUCER derives it. `app-shell/src/views/ObjectView.tsx:1968`
    *     builds this key from `objectDef.actions` filtered by
-   *     `locations.includes('list_item')`, then localizes each def — see its
+   *     `actionRendersAt(action, 'record_row')`, then localizes each def — see its
    *     own docblock there. Twenty lines below it, `bulkActionDefs` is passed
    *     STRAIGHT THROUGH from the view author. The two keys are asymmetric by
    *     construction: one is computed for the grid, the other is authored.
@@ -1382,7 +1382,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
    *     `rowActionDefs` — which is why this read is a cast in the first place.
    *
    * The AUTHORED way to put an action on a row is unchanged and stays declared:
-   * `locations: ['list_item']` on the object's own action, plus the legacy
+   * `locations: ['record_row']` on the object's own action, plus the legacy
    * `rowActions` name list (`GRID_QUERY_INPUTS`, `index.tsx:190`) that the fold
    * below resolves against the object. Both halves — unlisted here, rejected
    * there — are pinned by `__tests__/gridNonAuthorKeys.test.tsx`, together with
@@ -1394,7 +1394,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   // Legacy `rowActions` carry a bare action NAME, which the runner cannot
   // execute on its own — resolve each against the object's declared actions so
   // it dispatches as a real def (and so a name that duplicates an existing
-  // `list_item` def stops rendering a dead twin of it). A name the object does
+  // `record_row` def stops rendering a dead twin of it). A name the object does
   // not declare draws nothing and is reported below, in development. See
   // `resolveLegacyRowActions` for the full rationale (objectui#2960).
   const { defs: foldedRowActionDefs, undeclared: undeclaredRowActions } = resolveLegacyRowActions({
@@ -1825,7 +1825,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
 
   // Publish the checkbox selection into the shared ActionRunner context so
   // actions rendered OUTSIDE the grid but inside the same <ActionProvider>
-  // (e.g. `list_toolbar` flow buttons in the ObjectView header) can resolve a
+  // (e.g. `list` flow buttons in the ObjectView header) can resolve a
   // recordId from the selected rows. Cleared on unmount / selection change so
   // a stale selection never leaks into later invocations.
   React.useEffect(() => {
@@ -2959,7 +2959,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // would stack N dialogs on that panel; one shared notice would name one.
     const res = await actionRunner.execute({
       ...rest,
-      // `_rowRecord` is the same row-context key the list_item path attaches,
+      // `_rowRecord` is the same row-context key the record_row path attaches,
       // so `recordIdParam` / `recordIdField` injection behaves identically.
       params: { ...params, _rowRecord: row },
       toast: { showOnSuccess: false, showOnError: false },
@@ -4429,14 +4429,29 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     const statusKey = detectStatusField(objectSchema);
     const statusCol = statusKey !== null ? bodyColumns.find((c) => c.accessorKey === statusKey) : undefined;
     // objectstack#34615 — the card's AMOUNT is the first shown body column whose
-    // field type is `currency` (the column draft's resolved type, so a view
-    // that presents the field as another type keeps it a plain value). It
-    // never shares the subtitle's width: it gets a line of its own under the
+    // value draws as money (the column draft's resolved type, so a view that
+    // presents the field as another type keeps it a plain value). It never
+    // shares the subtitle's width: it gets a line of its own under the
     // subtitle, drawn whole at the right edge, and the status chip moves to
     // that line's left so the two never compete for one row. A masked amount
     // is not promoted; it stays a subtitle candidate, which skips it.
+    //
+    // objectstack#37890 — money is a `currency` column, and also a `formula`
+    // or `summary` column whose cell draws a number as currency: a formula
+    // declaring `returnType: 'currency'` (an order line's total) or a summary
+    // declaring its currency. That is asked of `resolveFormulaValueType`, the
+    // rule the formula cell draws by, so the slot and the cell cannot disagree.
+    // The slot is chosen once for the whole list (every card keeps one shape),
+    // so the rule is asked how the column draws a NUMBER, not how one row's
+    // value happens to draw: only a numeric value is an amount.
+    const drawsAsMoney = (c: ObjectGridColumnDraft): boolean => {
+      if (c.type === 'currency') return true;
+      if (c.type !== 'formula' && c.type !== 'summary') return false;
+      const def = objectFields?.[c.accessorKey];
+      return def?.type === c.type && resolveFormulaValueType(def, 0) === 'currency';
+    };
     const amountCol = bodyColumns.find(
-      (c) => c !== statusCol && c.type === 'currency' && !isMaskedCardColumn(c.accessorKey),
+      (c) => c !== statusCol && drawsAsMoney(c) && !isMaskedCardColumn(c.accessorKey),
     );
     const subtitleColumns = bodyColumns
       .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))

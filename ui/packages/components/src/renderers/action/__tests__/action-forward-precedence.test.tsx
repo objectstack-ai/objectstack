@@ -82,7 +82,7 @@ const ACTION = {
   properties: { params: { region: 'eu-west-1' } },
   bodyExtra: { source: 'console' },
   bodyShape: { wrap: 'data' },
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 
 /** The host's override bag: one COLLIDING key, one the action never declared. */

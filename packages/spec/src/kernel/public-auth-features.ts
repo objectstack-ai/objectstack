@@ -155,7 +155,7 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_team_member.actions.add_team_member',
       'sys_team_member.actions.remove_team_member',
       // Fourth mirror of the email-invite entry, at the organization record
-      // page's `record_header` — a `page:header` resolves ids against its own
+      // page's header (`record_page`) — a `page:header` resolves ids against its own
       // object's actions only (ruling 6228318638, B′ on #24034).
       'sys_organization.actions.invite_user',
       // The name/logo-only rename door, at the record header and the row:
