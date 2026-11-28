@@ -78,15 +78,19 @@ export function deepMerge(
 
 /**
  * Interpolate parameters into a translated string.
- * Replaces `{{paramName}}` with the corresponding value from params.
+ * Replaces `{{paramName}}` with the corresponding value from params. Whitespace
+ * inside the braces is allowed (`{{ paramName }}`), as the Console's i18next
+ * reads the same bundle string, so one translation renders the same on both
+ * sides. A placeholder with no value is left exactly as written, spaces
+ * included. Single braces (`{paramName}`) are not a placeholder.
  *
  * @param template - Template string with `{{key}}` placeholders
  * @param params - Parameter map
  * @returns Interpolated string
  */
 function interpolate(template: string, params: Record<string, unknown>): string {
-  return template.replace(/\{\{(\w+)\}\}/g, (_match, key: string) => {
-    return params[key] != null ? String(params[key]) : `{{${key}}}`;
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
+    return params[key] != null ? String(params[key]) : match;
   });
 }
 
@@ -99,7 +103,7 @@ function interpolate(template: string, params: Record<string, unknown>): string 
  *
  * Supports:
  * - Dot-notation key resolution (e.g. 'objects.account.label')
- * - Parameter interpolation via `{{paramName}}` syntax
+ * - Parameter interpolation via `{{paramName}}` syntax (inner whitespace allowed)
  * - Fallback locale for missing translations
  * - Runtime translation loading via loadTranslations()
  *
