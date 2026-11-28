@@ -248,7 +248,17 @@
  * tracked `ui/**` test file is read by `scanPathExpressions`, the walker
  * `check:cross-package-test-inputs` and the ui test selector already use, and
  * an import is resolved by that gate's own `resolveImportTarget`, so this is
- * not a recognizer of its own and holds no list. Each read must be covered, by
+ * not a recognizer of its own and holds no list. One spelling the walker does
+ * not read is read here too: a one-piece relative literal that climbs out of
+ * `ui/` from the test's own directory and names a file on disk, the
+ * `await import(new URL('../…', import.meta.url).href)` form
+ * (`metadata-form-option-names.test.ts` loads the platform zh-CN forms pack
+ * that way). A module a test loads, by import or by that literal, runs its own
+ * first-party imports, so each one is a read of that test too:
+ * `firstPartyModuleClosure`, the third subject's answer to what a script
+ * executes, attributed `TEST (via MODULE)`; an import in it that resolves to
+ * nothing is a refusal. That is how `scripts/invoked-as.mjs`, which
+ * `scripts/ci-shard-matrix.mjs` imports, is in the population. Each read must be covered, by
  * the same pure-string rule, by a list the `test-ui` job's `if:` ORs (read
  * back out of it; `ui` must be among them), or be DECLARED a trade-off.
  *
@@ -269,10 +279,17 @@
  * Known bounds: a ui test whose read the walker cannot resolve (an unread
  * argument, a manifest-name `findUp`, which is judged with no package name) is
  * not in the population, exactly as the walker's other callers do not see it.
- * The walker reads each test file's own text, so a read made inside a module
- * the test IMPORTS is not seen either: a reads-group row whose only reader is
- * such a helper is reported as reader-less, and the leftover direction
- * therefore says check, then delete, never delete.
+ * The walker reads each test file's own text; for a module the test loads,
+ * only its static relative IMPORTS are followed, never the files it reads from
+ * disk or its dynamic imports. So a `readFileSync` inside an imported helper
+ * is not seen, nor is a module loaded by a computed `import()` (the ui
+ * selector loads `scripts/check-cross-package-test-inputs.mjs` that way): a
+ * reads-group row whose only reader is such a helper is reported as
+ * reader-less, and the leftover direction therefore says check, then delete,
+ * never delete. The walker module itself is a row ABOVE the heading for that
+ * reason, held by the sixth subject. Imports inside `ui/` are not followed
+ * here, since a change under `ui/**` starts the job anyway; a module there
+ * that reads outside `ui/` is the bound above.
  *
  * ## The sixth subject: the ui scheduling pin (#38132)
  *
@@ -286,23 +303,31 @@
  *
  * `judgeUiScheduling` holds the real ci.yml to UI_PIN_FILE, the least it may
  * schedule the ui jobs. The step's `with:` keys and the pinned outputs are
- * held EXACTLY, since neither has a direction this gate can read. The rows the
- * pin lists for each filter are a FLOOR: a pinned row gone reds, a row added
- * is free. Every job whose definition reads a ui output (UI_OUTPUT_NAMES) must
- * carry a pinned condition, and each condition is a FLOOR too: the job's `if:`
- * is read as clauses of a conjunction, each the set of its disjuncts
- * (`conditionClauses`), and must be implied clause by clause by its pin
- * (`conditionAtLeast`): dropping a clause or adding a disjunct passes, adding
- * a clause, dropping a disjunct or rewriting an atom reds, naming the clause.
- * The comparison is syntactic, so a rewrite that is in fact wider reds too,
- * which is the safe direction; a condition wider than its pin is reported in
- * the OK line, and raising the pin is how the wider schedule is then held. A
- * deliberate change updates the pin in the same PR, so the change to what runs
- * is read where it is made. The pin is a JSON record beside this script, not a
+ * held EXACTLY, since neither has a direction this gate can read. The rows of
+ * each pinned filter are held EXACTLY too, as a ratchet (the `ui` list's rows
+ * below its reads-group heading are the fifth subject's and are left out): a
+ * pinned row gone reds as missing, and a row added reds as unpinned until the
+ * pin names it, so that its later removal is caught. Every job whose
+ * definition reads a ui output (UI_OUTPUT_NAMES) must carry a pinned
+ * condition, held the same way: the job's `if:` is read as clauses of a
+ * conjunction, each the set of its disjuncts (`conditionClauses`). GitHub
+ * wraps an `if:` that names no status function in an implicit `success()`, so
+ * such a condition carries that clause (IMPLICIT_SUCCESS) and an absent `if:`
+ * is that clause alone: dropping `!cancelled()` or `always()` ADDS it, and is
+ * the narrowing it is. A condition must be implied clause by clause by its pin
+ * (`conditionAtLeast`): adding a clause, dropping a disjunct or rewriting an
+ * atom reds as narrowed, naming the clause; one that is implied but not equal
+ * in CNF (a clause dropped, a disjunct added) reds as wider than the pin. The
+ * comparison is syntactic, so a rewrite that is in fact equivalent or wider
+ * reds too, which is the safe direction. A deliberate change updates the pin in
+ * the same PR, so the change to what runs is read where it is made. The pin is a JSON record beside this script, not a
  * table in it, so no path literal here is read as this gate's population.
  *
  * Known bounds: the rows of `core`, which only `live-e2e-ui` ORs in, are not
- * floored here (the first, third and fourth subjects hold them); a narrowing
+ * pinned here (the first, third and fourth subjects hold them); the workflow's
+ * own `on:` triggers, their `paths:` / `paths-ignore:` and `branches:` filters,
+ * which decide whether ci.yml runs at all and so gate every ui job before any
+ * `if:` is read, are not judged; a narrowing
  * through another job's output a ui `if:` reads (`borrowed-verdict`,
  * `queue-verdict`, `test-ui-plan`), through `needs:`, or through a step-level
  * `if:` inside a ui job is not judged; and the `ui-tree` step's own script is
@@ -321,7 +346,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, posix, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import process from 'node:process';
 
@@ -363,8 +388,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) Build Core and the build inputs turbo.json declares': 42,
   '(10) Build Core and the scripts its own steps run': 30,
   '(11) Test Core and the generic test tasks\' root inputs': 18,
-  '(12) Test UI and the files outside ui/ that ui tests read': 33,
-  '(13) the ui scheduling pin: the paths-filter input, the ui outputs, the ui rows and every ui job condition': 30,
+  '(12) Test UI and the files outside ui/ that ui tests read': 43,
+  '(13) the ui scheduling pin: the paths-filter input, the ui outputs, the ui rows and every ui job condition': 43,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -1014,18 +1039,46 @@ export function uiRootReadsOf(root, listed = null) {
     const segs = rel.split('/');
     const scan = scanPathExpressions(source, segs.length - 1, segs, null);
     const imports = [...scan.imports].map((p) => resolveImportTarget(p, root) ?? p);
-    const candidates = [...[...scan.files, ...imports].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
+    // The second candidate source (#38133): a one-piece relative literal that
+    // resolves outside ui/ from the test's own directory, whatever call it is
+    // handed to -- `new URL(literal, import.meta.url)` for a dynamic import is
+    // the spelling the walker does not read. A file on disk only: a literal
+    // naming a directory (`'../../..'`) is a root, not a read.
+    const escaping = [...source.matchAll(ESCAPING_LITERAL)]
+      .map((m) => posix.normalize(posix.join(posix.dirname(rel), m[2])))
+      .filter((p) => !insideUiTree(p) && realKindOf(root, p) === 'file');
+    const candidates = [...[...scan.files, ...imports, ...escaping].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
     for (const name of new Set(candidates.map(([p]) => p))) {
       if (!name || insideUiTree(name) || name.startsWith('..') || name.startsWith('/') || name.split('/').includes('node_modules')) continue;
       const kind = realKindOf(root, name);
       if (!kind || !candidates.some(([p, k]) => p === name && k === kind)) continue;
-      const row = byPath.get(name) ?? { path: name, kind, from: [] };
-      if (!row.from.includes(rel)) row.from.push(rel);
-      byPath.set(name, row);
+      // A module the test loads runs its own first-party imports too, so each
+      // one is a read of this test (S4): `firstPartyModuleClosure`, the one
+      // answer to which modules a script executes, the third subject's too.
+      let reached = [name];
+      if (kind === 'file' && MODULE_FILE.test(name)) {
+        try {
+          reached = firstPartyModuleClosure(name, { root });
+        } catch (err) {
+          return { refusal: `the module ${name}, which the ui test ${rel} loads, has an import that resolves to nothing: ${err?.message ?? err}` };
+        }
+      }
+      for (const path of reached) {
+        if (insideUiTree(path)) continue;
+        const row = byPath.get(path) ?? { path, kind: path === name ? kind : 'file', from: [] };
+        const via = path === name ? rel : `${rel} (via ${name})`;
+        if (!row.from.includes(via)) row.from.push(via);
+        byPath.set(path, row);
+      }
     }
   }
   return { tests: tests.length, rows: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
 }
+
+/** A one-piece relative literal that climbs: `'../x'`, `"../../y/z.ts"`. */
+const ESCAPING_LITERAL = /(['"`])(\.\.\/[A-Za-z0-9._@/-]+)\1/g;
+/** A file whose first-party imports run when it is loaded. */
+const MODULE_FILE = /\.[cm]?[jt]sx?$/;
 
 /** `'file'`, `'dir'`, or null when `rel` names nothing on disk under `root`. */
 function realKindOf(root, rel) {
@@ -1075,19 +1128,35 @@ export function uiReadsGroupOf(raw) {
   const rows = [];
   const tradeOffs = new Map();
   const malformed = [];
+  // The reason runs on over the comment lines that follow the marker line, up
+  // to the next row, the next marker line, a bare `#` or a blank line.
+  let open = null;
   for (const line of body.slice(headings[0][1] + 1)) {
     const t = line.trim();
     const item = /^-\s*(['"]?)(.*)\1\s*$/.exec(t);
     if (item) {
+      open = null;
       rows.push(item[2]);
       continue;
     }
+    const comment = /^#\s*(.*)$/.exec(t)?.[1];
+    if (comment === undefined || comment.trim() === '') {
+      open = null;
+      continue;
+    }
     // A trade-off line STARTS with the marker; prose that mentions it does not declare one.
-    const comment = /^#\s*(.*)$/.exec(t)?.[1] ?? '';
-    if (!comment.startsWith(UI_TRADE_OFF_MARKER)) continue;
+    if (!comment.startsWith(UI_TRADE_OFF_MARKER)) {
+      if (open) tradeOffs.set(open, `${tradeOffs.get(open)} ${comment.trim()}`);
+      continue;
+    }
     const m = /^(\S+)\s+--\s+(\S.*)$/.exec(comment.slice(UI_TRADE_OFF_MARKER.length).trim());
-    if (m) tradeOffs.set(m[1], m[2]);
-    else malformed.push(t);
+    if (m) {
+      tradeOffs.set(m[1], m[2].trim());
+      open = m[1];
+    } else {
+      open = null;
+      malformed.push(t);
+    }
   }
   if (malformed.length > 0) {
     return {
@@ -1256,14 +1325,26 @@ function stripOuterParens(s) {
 /**
  * A job condition as clauses of a conjunction, each clause the set of its
  * disjuncts: `a && (b || c)` → `[[a], [b, c]]`. An atom is compared as its
- * normalised text, so the comparison is syntactic. An absent `if:` is the one
- * clause `(absent)`, GitHub's implicit `success()`.
+ * normalised text, so the comparison is syntactic. A condition naming no
+ * status function carries GitHub's implicit `success()` as one more clause
+ * (IMPLICIT_SUCCESS), and an absent `if:` is that clause alone.
  */
 export function conditionClauses(expr) {
   const text = normalizeExpression(expr);
-  if (!text) return [['(absent)']];
-  return splitTopLevel(text, '&&').map((conjunct) => [...new Set(splitTopLevel(stripOuterParens(conjunct), '||'))].sort());
+  const clauses = text
+    ? splitTopLevel(text, '&&').map((conjunct) => [...new Set(splitTopLevel(stripOuterParens(conjunct), '||'))].sort())
+    : [];
+  // GitHub wraps an `if:` that names no status function in an implicit
+  // `success()`, so that clause is real and is spelled out: dropping
+  // `!cancelled()` or `always()` ADDS it, and reads as the narrowing it is.
+  if (!clauses.some((c) => c.some((atom) => STATUS_FUNCTION.test(atom)))) clauses.push([IMPLICIT_SUCCESS]);
+  return clauses;
 }
+
+/** A status-function call inside an atom: `success()`, `always()`, `cancelled()`, `failure()`, negated or not. */
+const STATUS_FUNCTION = /\b(?:success|always|cancelled|failure)\(\s*\)/;
+/** The clause GitHub adds to an `if:` that names no status function. */
+export const IMPLICIT_SUCCESS = 'success() (implicit)';
 
 /**
  * Does `actual` run at least whenever `pinned` does? Sound and syntactic:
@@ -1316,8 +1397,17 @@ export function judgeUiScheduling(source, pin) {
     .filter(([name, expr]) => normalizeExpression(outputs[name]) !== normalizeExpression(expr))
     .map(([name, expr]) => ({ name, pinned: normalizeExpression(expr), actual: name in outputs ? normalizeExpression(outputs[name]) : '(absent)' }));
 
+  // The rows are held EXACTLY (a ratchet): a row gone narrows, and a row added
+  // is unpinned until the pin names it, so its later removal is caught. The
+  // `ui` list's reads group is the fifth subject's and is left out here.
+  const group = uiReadsGroupOf(read.raw);
+  if (group.refusal) return group;
+  const pinnedListOf = (name) => (filters[name] ?? []).filter((row) => name !== UI_REMEDY_FILTER || !group.rows.includes(row));
   const missingRows = Object.entries(pin.rows).flatMap(([name, rows]) =>
-    rows.filter((row) => !(filters[name] ?? []).includes(row)).map((row) => ({ name, row })),
+    rows.filter((row) => !pinnedListOf(name).includes(row)).map((row) => ({ name, row })),
+  );
+  const unpinnedRows = Object.entries(pin.rows).flatMap(([name, rows]) =>
+    pinnedListOf(name).filter((row) => !rows.includes(row)).map((row) => ({ name, row })),
   );
 
   const uiJobs = Object.entries(jobs)
@@ -1332,9 +1422,11 @@ export function judgeUiScheduling(source, pin) {
     const actual = jobs[id]?.if;
     const verdict = conditionAtLeast(actual, pinned);
     if (!verdict.holds) narrowedJobs.push({ id, pinned: normalizeExpression(pinned), actual: normalizeExpression(actual) || '(absent)', clauses: verdict.narrower });
-    else if (normalizeExpression(actual) !== normalizeExpression(pinned)) widenedJobs.push(id);
+    else if (JSON.stringify(conditionClauses(actual).sort()) !== JSON.stringify(conditionClauses(pinned).sort())) {
+      widenedJobs.push({ id, pinned: normalizeExpression(pinned), actual: normalizeExpression(actual) || '(absent)' });
+    }
   }
-  return { uiJobs, pinnedInputs: pin.inputs, extraInputs, missingInputs, changedOutputs, missingRows, unpinnedJobs, vanishedJobs, narrowedJobs, widenedJobs };
+  return { uiJobs, pinnedInputs: pin.inputs, extraInputs, missingInputs, changedOutputs, missingRows, unpinnedRows, unpinnedJobs, vanishedJobs, narrowedJobs, widenedJobs };
 }
 
 function reportUiScheduling(verdict) {
@@ -1362,6 +1454,19 @@ function reportUiScheduling(verdict) {
         verdict.missingRows.map((r) => `      ${r.name}: ${r.row}`).join('\n'),
     );
   }
+  if (verdict.unpinnedRows.length > 0) {
+    problems.push(
+      `row(s) the ui jobs read are not in the pin, so removing one later would go unseen. If each widening is meant,\n` +
+        `    add it to \`rows\` in ${UI_PIN_FILE} in this PR:\n` +
+        verdict.unpinnedRows.map((r) => `      ${r.name}: ${r.row}`).join('\n'),
+    );
+  }
+  for (const j of verdict.widenedJobs) {
+    problems.push(
+      `the \`${j.id}\` job's \`if:\` is wider than its pin, so narrowing it back later would go unseen. If the widening is\n` +
+        `    meant, set its condition in ${UI_PIN_FILE} to the new one in this PR:\n      pinned: ${j.pinned}\n      actual: ${j.actual}`,
+    );
+  }
   for (const j of verdict.narrowedJobs) {
     problems.push(
       `the \`${j.id}\` job's \`if:\` is not provably at least as wide as its pin; these clauses are new or narrower:\n` +
@@ -1380,18 +1485,18 @@ function reportUiScheduling(verdict) {
     for (const p of problems) console.error(`  - ${p}\n`);
     console.error(
       `What is pinned: the paths-filter step's \`with:\` keys and the \`filter\` outputs ${UI_OUTPUT_NAMES.join(', ')} (and any other\n` +
-        `output a ui job reads) exactly; the rows the pin lists for each filter as a floor; and every job reading a ui\n` +
-        `output, with its \`if:\` as a floor. An edit that schedules the ui jobs LESS is the failure this subject exists\n` +
-        `to catch. An edit that is deliberate -- a new ui job, a renamed one, an output or input rewritten -- updates\n` +
+        `output a ui job reads) exactly; the rows of each pinned filter exactly (the \`ui\` reads group is the fifth\n` +
+        `subject's); and every job reading a ui output, with its \`if:\` exactly in CNF. An edit that schedules the ui jobs\n` +
+        `LESS is the failure this subject exists to catch; one that schedules them MORE is held too, so that undoing it\n` +
+        `later is caught. An edit that is deliberate -- a row, a new ui job, a renamed one, a condition, an output or\n` +
+        `input rewritten -- updates\n` +
         `${UI_PIN_FILE} in the same PR, so the change to what runs is read where it is made.\n`,
     );
     return 1;
   }
   console.log(
-    `OK: ${CI_WORKFLOW} schedules the ${verdict.uiJobs.length} ui job(s) at least as ${UI_PIN_FILE} pins: the paths-filter input, ` +
-      `the ui outputs, the pinned rows and every ui job's \`if:\`` +
-      (verdict.widenedJobs.length > 0 ? ` (wider than the pin, which holds only its floor: ${verdict.widenedJobs.join(', ')})` : '') +
-      '.',
+    `OK: ${CI_WORKFLOW} schedules the ${verdict.uiJobs.length} ui job(s) exactly as ${UI_PIN_FILE} pins: the paths-filter input, ` +
+      `the ui outputs, the pinned rows and every ui job's \`if:\`.`,
   );
   return 0;
 }
@@ -1557,7 +1662,7 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   }
   console.log(`\nui jobs against ${UI_PIN_FILE}: ${pin.uiJobs.join(', ')}`);
   const pinRed = pin.extraInputs.length + pin.missingInputs.length + pin.changedOutputs.length + pin.missingRows.length +
-    pin.unpinnedJobs.length + pin.vanishedJobs.length + pin.narrowedJobs.length;
+    pin.unpinnedRows.length + pin.unpinnedJobs.length + pin.vanishedJobs.length + pin.narrowedJobs.length + pin.widenedJobs.length;
   console.log(pinRed === 0 ? 'ok   the paths-filter input, the ui outputs, the pinned rows and every ui job condition hold' : `FAIL ${pinRed} pin finding(s); run without --list for each`);
   return verdict.uncovered.length > 0 ||
     build.uncovered.length > 0 ||
@@ -2611,10 +2716,17 @@ export async function selfTest() {
     ["              - 'CONTRIBUTING.md'\n", 'CONTRIBUTING.md'],
     ["              - 'packages/plugins/plugin-auth/src/admin-import-users.ts'\n", 'packages/plugins/plugin-auth/src/admin-import-users.ts'],
     ["              - 'scripts/ci-shard-matrix.mjs'\n", 'scripts/ci-shard-matrix.mjs'],
+    ["              - 'scripts/invoked-as.mjs'\n", 'scripts/invoked-as.mjs'],
+    [
+      "              - 'packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts'\n",
+      'packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts',
+    ],
   ]) {
-    const dropped = realSource.replace(row, '');
+    // Dropped from INSIDE the reads group: a row may also sit in another list (`core`).
+    const at = realSource.indexOf(row, realSource.indexOf(UI_READS_GROUP_MARKER));
+    const dropped = at < 0 ? realSource : realSource.slice(0, at) + realSource.slice(at + row.length);
     assert(
-      realSource.includes(row) && uiPaths(judgeUiReads(dropped, realUiReads).uncovered).join(',') === path,
+      at >= 0 && uiPaths(judgeUiReads(dropped, realUiReads).uncovered).join(',') === path,
       `the checked-in ci.yml with the #38133 row for ${path} dropped reports exactly that path`,
     );
   }
@@ -2624,6 +2736,43 @@ export async function selfTest() {
     realSource.includes(TRADE_LINE) && uiPaths(judgeUiReads(tradeDropped, realUiReads).uncovered).join(',') === 'packages/mcp/src/skill-md.ts',
     'the checked-in ci.yml with its declared trade-off line dropped reports packages/mcp/src/skill-md.ts uncovered',
   );
+  const realReason = uiReadsGroupOf(readFilterLists(realSource).raw).tradeOffs?.get('packages/mcp/src/skill-md.ts') ?? '';
+  assert(
+    realReason.startsWith('the Console\'s objectstack-skill.test.ts imports it') && realReason.endsWith('through the `crosspkg` row (#31017).'),
+    `a trade-off's reason runs over its continuation comment lines, not just the marker line -- got ${JSON.stringify(realReason)}`,
+  );
+
+  // The `new URL(literal, import.meta.url)` spelling (the rework's M1): a
+  // dynamic import of a module outside ui/, which the shared walker does not
+  // read. The collector reads the escaping literal, and then the module's own
+  // first-party imports (S4), each attributed through the module that loads it.
+  const PACK = 'packages/q/src/pack.mjs';
+  const PACK_HELPER = 'packages/q/src/helper.mjs';
+  const urlReader = "const mod = await import(new URL('../../../../packages/q/src/pack.mjs', import.meta.url).href);\nconst root = new URL('../../..', import.meta.url);\n";
+  const packOnDisk = { [PACK]: "import { h } from './helper.mjs';\nexport const pack = h;\n", [PACK_HELPER]: 'export const h = 1;\n' };
+  const uiUrl = uiScratch({ ...packOnDisk, 'ui/packages/p/src/u.test.ts': urlReader }, (r) => r);
+  assert(
+    !uiUrl.refusal && uiPaths(uiUrl.rows).join(',') === `${PACK_HELPER},${PACK}`,
+    `a \`new URL(literal, import.meta.url)\` import outside ui/ is a read, and so is the module's own import; a literal naming a directory is not -- got ${uiUrl.refusal ?? JSON.stringify(uiUrl.rows)}`,
+  );
+  assert(
+    (uiUrl.rows ?? []).find((r) => r.path === PACK_HELPER)?.from.join(',') === `ui/packages/p/src/u.test.ts (via ${PACK})`,
+    '-- the closure member is attributed through the module that loads it',
+  );
+  assert(
+    uiPaths(judgeUiReads(uiWorkflow({ ui: ['ui/**', PACK] }), uiUrl).uncovered).join(',') === PACK_HELPER &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'packages/q/**'] }), uiUrl).uncovered?.length === 0,
+    '-- and a row for the module alone leaves its import uncovered by path',
+  );
+  const uiUrlBroken = uiScratch({ [PACK]: "import { h } from './gone.mjs';\n", 'ui/packages/p/src/u.test.ts': urlReader }, (r) => r);
+  assert(typeof uiUrlBroken.refusal === 'string', `a loaded module whose import resolves to nothing refuses, never a clean zero -- got ${JSON.stringify(uiUrlBroken)}`);
+  const uiUrlAbsent = uiScratch({ 'ui/packages/p/src/u.test.ts': urlReader }, (r) => r);
+  assert(!uiUrlAbsent.refusal && (uiUrlAbsent.rows ?? []).length === 0, '-- and an escaping literal that names nothing on disk is a synthetic path, not a read');
+  // On the real tree: the reads the rework names are collected.
+  const realUiPaths = uiPaths(realUiReads.rows);
+  for (const need of ['packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts', 'scripts/invoked-as.mjs']) {
+    assert(realUiPaths.includes(need), `on the real tree the collector reads ${need} -- got ${realUiPaths.join(', ')}`);
+  }
 
   // ── (13) the ui scheduling pin (#38132) ─────────────────────────────────
   battery('(13) the ui scheduling pin: the paths-filter input, the ui outputs, the ui rows and every ui job condition');
@@ -2631,7 +2780,8 @@ export async function selfTest() {
   const pinOf = (source, pin = realPin) => judgeUiScheduling(source, pin);
   const pinRed = (v) =>
     !v.refusal &&
-    v.extraInputs.length + v.missingInputs.length + v.changedOutputs.length + v.missingRows.length + v.unpinnedJobs.length + v.vanishedJobs.length + v.narrowedJobs.length > 0;
+    v.extraInputs.length + v.missingInputs.length + v.changedOutputs.length + v.missingRows.length + v.unpinnedRows.length +
+      v.unpinnedJobs.length + v.vanishedJobs.length + v.narrowedJobs.length + v.widenedJobs.length > 0;
   const realPinVerdict = pinOf(realSource);
   assert(
     !realPinVerdict.refusal && !pinRed(realPinVerdict) && realPinVerdict.uiJobs.length === Object.keys(realPin.conditions).length && realPinVerdict.uiJobs.includes(UI_TEST_JOB),
@@ -2671,7 +2821,23 @@ export async function selfTest() {
     (rowsDropped.missingRows ?? []).map((r) => `${r.name}:${r.row}`).join(',') === 'ui:ui/**,ui_consumers:packages/spec/**',
     `a pinned \`ui\` row and a pinned \`ui_consumers\` row dropped red by list and row -- got ${JSON.stringify(rowsDropped.missingRows)}`,
   );
-  assert(!pinRed(pinOf(realSource.replace(UI_TREE_ROW, `${UI_TREE_ROW}              - 'extra/**'\n`))), 'control: a row ADDED to `ui` widens and stays green');
+  const rowAdded = pinOf(realSource.replace(UI_TREE_ROW, `${UI_TREE_ROW}              - 'extra/**'\n`));
+  assert(
+    (rowAdded.unpinnedRows ?? []).map((r) => `${r.name}:${r.row}`).join(',') === 'ui:extra/**' && (rowAdded.missingRows ?? []).length === 0,
+    `ratchet: a row ADDED to \`ui\` above the reads group reds as unpinned, by list and row -- got ${JSON.stringify(rowAdded.unpinnedRows)}`,
+  );
+  const withExtra = realSource.replace(UI_TREE_ROW, `${UI_TREE_ROW}              - 'extra/**'\n`);
+  const pinWithExtra = { ...realPin, rows: { ...realPin.rows, ui: [...realPin.rows.ui, 'extra/**'] } };
+  assert(!pinRed(pinOf(withExtra, pinWithExtra)), '-- and goes green once the pin names it');
+  assert((pinOf(realSource, pinWithExtra).missingRows ?? []).map((r) => r.row).join(',') === 'extra/**', '-- after which removing that row reds as missing');
+  const WALKER_ROW = "              - 'scripts/check-cross-package-test-inputs.mjs'\n";
+  assert(realSource.split(WALKER_ROW).length === 2, 'the real `ui` list carries the walker-module row once');
+  assert(
+    (pinOf(realSource.replace(WALKER_ROW, '')).missingRows ?? []).map((r) => r.row).join(',') === 'scripts/check-cross-package-test-inputs.mjs',
+    'the row added in the rework round (the walker module) is pinned: dropping it reds',
+  );
+  const groupRows = uiReadsGroupOf(realSource).rows ?? [];
+  assert(groupRows.length > 0 && groupRows.every((r) => !realPin.rows.ui.includes(r)), 'the reads group rows are the fifth subject\'s and are not in the pin');
 
   const TEST_UI_IF = `    if: \${{ ${realPin.conditions[UI_TEST_JOB]} }}\n`;
   assert(realSource.includes(TEST_UI_IF), 'the real `test-ui` job carries its pinned `if:` verbatim');
@@ -2682,7 +2848,30 @@ export async function selfTest() {
   assert(narrowedIds(ifTo(pinnedTestUi.replace(" || needs.filter.outputs.ui_consumers != 'false'", ''))) === UI_TEST_JOB, '-- and so does dropping its `ui_consumers` disjunct');
   assert(narrowedIds(ifTo(pinnedTestUi.replace("needs.filter.outputs.ui != 'false'", "needs.filter.outputs.ui == 'true'"))) === UI_TEST_JOB, '-- and so does rewriting its `ui` atom');
   const ifWidened = ifTo(pinnedTestUi.replace(" && needs.test-ui-plan.outputs.shards != '[]'", ''));
-  assert(!pinRed(ifWidened) && (ifWidened.widenedJobs ?? []).join(',') === UI_TEST_JOB, 'control: a conjunct DROPPED widens, stays green, and is reported as wider than the pin');
+  assert(
+    narrowedIds(ifWidened) === '' && (ifWidened.widenedJobs ?? []).map((j) => j.id).join(',') === UI_TEST_JOB && pinRed(ifWidened),
+    'ratchet: a conjunct DROPPED is not a narrowing, but reds as wider than the pin',
+  );
+  assert(quietly(() => reportUiScheduling(ifWidened)) === 1, '-- and the report path returns 1 over it');
+
+  // GitHub's implicit success(): dropping a status function is a narrowing.
+  assert(
+    JSON.stringify(conditionClauses("a != 'false'")) === JSON.stringify([["a != 'false'"], [IMPLICIT_SUCCESS]]) &&
+      JSON.stringify(conditionClauses(undefined)) === JSON.stringify([[IMPLICIT_SUCCESS]]),
+    'a condition naming no status function carries the implicit success() clause, and an absent `if:` is that clause alone',
+  );
+  assert(!conditionAtLeast("a != 'false'", "!cancelled() && a != 'false'").holds, 'dropping `!cancelled()` is a narrowing (implicit success())');
+  assert(!conditionAtLeast("a != 'false'", "always() && a != 'false'").holds, 'dropping `always()` is a narrowing (implicit success())');
+  assert(!conditionAtLeast(undefined, '!cancelled()').holds, 'removing an `if: !cancelled()` entirely is a narrowing');
+  assert(!conditionAtLeast("!cancelled() && a", "always() && a").holds, '`always()` rewritten to `!cancelled()` is a narrowing (an atom changed)');
+  const PLAN_JOB = 'test-ui-plan';
+  const planIf = realPin.conditions[PLAN_JOB] ?? '';
+  const PLAN_LINE = `    if: \${{ ${planIf} }}\n`;
+  assert(/^!cancelled\(\) && /.test(planIf) && realSource.includes(PLAN_LINE), `the real \`${PLAN_JOB}\` job carries its pinned \`!cancelled() && ...\` \`if:\` verbatim`);
+  assert(
+    narrowedIds(pinOf(realSource.replace(PLAN_LINE, `    if: \${{ ${planIf.replace(/^!cancelled\(\) && /, '')} }}\n`))) === PLAN_JOB,
+    `on the real ci.yml, \`!cancelled()\` dropped from \`${PLAN_JOB}\` reds it as narrowed`,
+  );
 
   const newUiJob = `${realSource}\n  probe-ui:\n    needs: filter\n    if: \${{ needs.filter.outputs.ui != 'false' }}\n    runs-on: ubuntu-latest\n    steps:\n      - run: echo probe\n`;
   assert((pinOf(newUiJob).unpinnedJobs ?? []).join(',') === 'probe-ui', 'a new job reading a ui output with no pinned condition reds by name');
@@ -2777,12 +2966,17 @@ export async function selfTest() {
       `the #37935 row dropped observed red through the report path, generalised to every read outside ui/ (a root ` +
       `document and an extensionless server import found, covered by a row or by \`ui_consumers\`, a declared trade-off ` +
       `green, a stale or redundant trade-off red, a malformed one and a missing heading refused, a row above the heading ` +
-      `never a leftover, and each #38133 row and the trade-off rolled back off the real tree observed red); ` +
+      `never a leftover, and each #38133 row and the trade-off rolled back off the real tree observed red), a ` +
+      `\`new URL(literal, import.meta.url)\` import outside ui/ read with the module's own first-party imports ` +
+      `attributed through it, a directory literal read as nothing, an unresolvable module import refused, and the ` +
+      `platform-objects translation pack and the walker's imported module read on the real tree; ` +
       `and the ui scheduling pin: the real tree green against it, the condition clauses and their at-least-as-wide ` +
       `relation, and on the real ci.yml a paths-filter input added, the \`ui\` output rewritten, a \`ui\` and a ` +
       `\`ui_consumers\` row dropped, a \`test-ui\` conjunct added, a disjunct dropped and an atom rewritten each observed ` +
-      `red, a row added and a conjunct dropped observed green, a new unpinned ui job and a renamed pinned one red, ` +
-      `five pin refusals, and main() red over a missing pin file.`,
+      `red, the ratchet: a row added and a conjunct dropped each observed red until the pin names them, the ` +
+      `rework's walker-module row pinned, the implicit \`success()\` clause making a dropped \`!cancelled()\` or ` +
+      `\`always()\` a narrowing (and on the real \`test-ui-plan\` job), a new unpinned ui job and a renamed pinned ` +
+      `one red, five pin refusals, and main() red over a missing pin file.`,
   );
   selfTestReachedVerdict = true;
   return 0;

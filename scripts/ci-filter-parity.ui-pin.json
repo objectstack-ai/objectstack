@@ -1,5 +1,5 @@
 {
-  "about": "The ui scheduling pin of scripts/check-ci-filter-parity.mjs (objectstack#38132, its sixth subject): the least .github/workflows/ci.yml may schedule the ui jobs. `inputs` (the paths-filter step with: keys) and `outputs` (the filter job outputs the ui jobs read) are held exactly; `rows` (per filter) and `conditions` (per ui job if:) are floors -- an edit that schedules less reds, one that schedules more is free, and raising the pin here is how a wider schedule is then held.",
+  "about": "The ui scheduling pin of scripts/check-ci-filter-parity.mjs (objectstack#38132, its sixth subject): how .github/workflows/ci.yml schedules the ui jobs, held EXACTLY as a ratchet. `inputs` (the paths-filter step with: keys), `outputs` (the filter job outputs the ui jobs read), `rows` (per filter; the `ui` list above its UI TEST READS OUTSIDE ui/ heading, the reads group being the fifth subject's) and `conditions` (per ui job if:, compared in CNF with GitHub's implicit success()) must each equal ci.yml: an edit that schedules less reds as a narrowing, and one that schedules more reds until this file names it, so that undoing it later is caught.",
   "inputs": [
     "filters"
   ],
@@ -30,7 +30,8 @@
       "scripts/check-sdui-manifest.mjs",
       ".nvmrc",
       ".github/actions/setup-pnpm/**",
-      "package.json"
+      "package.json",
+      "scripts/check-cross-package-test-inputs.mjs"
     ],
     "ui_consumers": [
       "packages/spec/**",

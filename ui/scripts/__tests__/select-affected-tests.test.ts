@@ -25,6 +25,7 @@ import {
   scanMemo,
   selectAffectedTests,
   trackedFiles,
+  urlLiteralsLeavingTree,
 } from '../select-affected-tests.mjs';
 import { shardTotal } from '../../../scripts/ci-shard-matrix.mjs';
 import { parse as parseYaml } from 'yaml';
@@ -616,6 +617,32 @@ describe('select-affected-tests — readers', () => {
     const summaries = closureSummaries(root, ['p/x.ts'], new Set(), () => 'p');
     expect(summaries.get('p/x.ts')?.readsDisk).toBe(true);
     expect(summaries.get('p/y.ts')?.readsDisk).toBe(true);
+  });
+});
+
+describe('select-affected-tests — a `new URL` literal that leaves the tree (objectstack#38133)', () => {
+  // `metadata-form-option-names.test.ts` loads the platform pack with
+  // `await import(new URL('../../../../../../packages/...', import.meta.url).href)`:
+  // no specifier the graph follows, so before this rule the test was placed in
+  // its package and a diff confined to the pack selected nothing.
+  const leaving = "const P = new URL(\n  '../../outside/pack.ts',\n  import.meta.url,\n).href;\nawait import(P);\n";
+  const staying = "const P = new URL('./local.ts', import.meta.url).href;\nawait import(P);\n";
+
+  it('names the literal that resolves outside the tree, and not one that stays in it', () => {
+    expect(urlLiteralsLeavingTree('p/a.test.ts', leaving)).toEqual(['../../outside/pack.ts']);
+    expect(urlLiteralsLeavingTree('p/a.test.ts', staying)).toEqual([]);
+  });
+
+  it('makes the closure unbounded, so the test is always on', () => {
+    const { root } = fixture({ 'p/a.test.ts': leaving, 'p/b.test.ts': staying, 'p/local.ts': 'export {};\n' });
+    const summaries = closureSummaries(root, ['p/a.test.ts', 'p/b.test.ts'], new Set(), () => 'p');
+    expect(summaries.get('p/a.test.ts')?.readsDisk).toBe(true);
+    expect(summaries.get('p/b.test.ts')?.readsDisk).toBe(false);
+  });
+
+  it('the live reader is always on', () => {
+    const rel = 'packages/app-shell/src/views/metadata-admin/metadata-form-option-names.test.ts';
+    expect(urlLiteralsLeavingTree(rel, fs.readFileSync(path.join(repoRoot, rel), 'utf8'))).toHaveLength(1);
   });
 });
 

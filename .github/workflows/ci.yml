@@ -775,6 +775,12 @@ jobs:
               # confined to a pnpm bump matched no list here, so the ui jobs
               # skipped on the PR and in the queue alike.
               - 'package.json'
+              # The root path walker, which ui/scripts/select-affected-tests.mjs
+              # imports at run time (`loadPathWalker`) to place every ui test:
+              # select-affected-tests.test.ts asserts on it. A read inside an
+              # imported ui module, which the gate's ui-test scan does not see,
+              # so it is named here rather than in the group below.
+              - 'scripts/check-cross-package-test-inputs.mjs'
               # ── UI TEST READS OUTSIDE ui/ ───────────────────────────────
               # Each file outside ui/ that a ui test reads, named verbatim
               # (#37935, #38133). A diff confined to one could break the test
@@ -798,8 +804,13 @@ jobs:
               # identity import dialog's columns to what the endpoint reads.
               - 'packages/plugins/plugin-auth/src/admin-import-users.ts'
               # The ui shard planner and selector tests import the shard
-              # count from the root roster reader.
+              # count from the root roster reader, which imports invoked-as.
               - 'scripts/ci-shard-matrix.mjs'
+              - 'scripts/invoked-as.mjs'
+              # metadata-form-option-names.test.ts loads the platform zh-CN
+              # forms pack through `new URL(literal, import.meta.url)` and holds
+              # the Console's option maps equal to it.
+              - 'packages/platform-objects/src/apps/translations/zh-CN.metadata-forms.generated.ts'
               # ui-read trade-off: packages/mcp/src/skill-md.ts -- the
               # Console's objectstack-skill.test.ts imports it to pin the
               # "Download skill" mirror; the server half of that drift pin

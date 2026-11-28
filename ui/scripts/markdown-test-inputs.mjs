@@ -178,13 +178,55 @@ import { stripComments } from './js-comment-mask.mjs';
 
 export const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 
-/**
- * The monorepo root, whose markdown a ui test may read from outside this tree:
- * the docs pages under `content/docs` (objectstack#27145), a root ADR, the root
- * `CONTRIBUTING.md`. Every such read is admitted and labelled `../<path>`,
- * relative to this root like every other entry (objectstack#38134).
+/*
+ * The monorepo root is this tree's parent (`deriveCandidates`'s `monorepoRoot`
+ * default), whose markdown a ui test may read from outside this tree: the docs
+ * pages under `content/docs` (objectstack#27145), a root ADR, the root
+ * `CONTRIBUTING.md`. Such a read is labelled `../<path>`, relative to this root
+ * like every other entry (objectstack#38134).
  */
-const MONOREPO_ROOT = path.resolve(REPO_ROOT, '..');
+
+/** The root workflow whose `ui:` paths filter starts the ui jobs. */
+export const ROOT_CI = path.join('.github', 'workflows', 'ci.yml');
+
+/**
+ * The `ui:` globs of the root `ci.yml`'s paths filter, read as text the way the
+ * filter itself is a YAML string (the same reading as the test helper
+ * `uiFilterGlobs`). Throws on an empty list: an empty reading would admit no
+ * out-of-tree document and say nothing.
+ */
+export function uiFilterGlobsOf(ci) {
+  const lines = String(ci).split('\n');
+  const at = lines.findIndex((line) => /^ +ui:[ \t]*$/.test(line));
+  if (at === -1) throw new Error(`${ROOT_CI}: the paths filter declares no \`ui:\` list`);
+  const indent = lines[at].search(/\S/);
+  const globs = [];
+  for (const line of lines.slice(at + 1)) {
+    if (/^\s*(#.*)?$/.test(line)) continue;
+    if (line.search(/\S/) <= indent) break;
+    const m = line.match(/^\s+-\s+'([^']+)'\s*$/);
+    if (!m) throw new Error(`${ROOT_CI}: cannot read the \`ui:\` filter entry ${JSON.stringify(line)}`);
+    globs.push(m[1]);
+  }
+  if (globs.length === 0) throw new Error(`${ROOT_CI}: the \`ui:\` paths filter lists no globs`);
+  return globs;
+}
+
+/** A paths-filter glob against a monorepo path: `**` crosses separators, `*` does not. */
+export function filterGlobMatches(glob, file) {
+  return new RegExp(
+    `^${glob
+      .split('**')
+      .map((part) => part.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*'))
+      .join('.*')}$`,
+  ).test(file);
+}
+
+/** The `ui:` globs of `<monorepoRoot>/.github/workflows/ci.yml`, or null when that file is absent. */
+function uiGlobsAt(monorepoRoot) {
+  const file = path.join(monorepoRoot, ROOT_CI);
+  return existsSync(file) ? uiFilterGlobsOf(readFileSync(file, 'utf8')) : null;
+}
 
 /**
  * Where `deriveCandidates()` looks for tests.
@@ -263,7 +305,6 @@ export const ADJUDICATED = new Map([
     'packages/auth/src/__tests__/reserved-auth-features.test.ts',
     {
       reads: ['packages/auth/README.md'],
-      notRead: ['../README.md'],
       walker: 'not-markdown: sweeps package `src` directories for `.ts` sources',
     },
   ],
@@ -297,7 +338,6 @@ export const ADJUDICATED = new Map([
     'packages/components/src/__tests__/page-node-headings-drawn-11436.test.tsx',
     {
       reads: ['../content/docs/frontend/**', 'packages/**'],
-      notRead: ['../README.md', '../packages/core/README.md'],
       walker: 'markdown-tree: walks `../content/docs/frontend` and parses every fence of every `.md`/`.mdx` under it, and walks `packages` for every `README.md` and parses its fences; its walk of `examples` collects JSON and script sources, not markdown',
     },
   ],
@@ -319,7 +359,7 @@ export const ADJUDICATED = new Map([
     'packages/components/src/__tests__/index-css-scan-excludes-tests.test.ts',
     {
       reads: ['packages/components/CHANGELOG.md'],
-      notRead: ['../CHANGELOG.md', 'CHANGELOG.md'],
+      notRead: ['CHANGELOG.md'],
     },
   ],
   [
@@ -362,7 +402,7 @@ export const ADJUDICATED = new Map([
     'packages/create-plugin/src/__tests__/cli-cancel-and-nontty-8786.test.ts',
     {
       reads: [],
-      notRead: ['../README.md', 'packages/create-plugin/README.md'],
+      notRead: ['packages/create-plugin/README.md'],
       walker: 'not-markdown: walks GENERATED output in a temp directory; its `README.md` literal names a file the generator writes, not one in this tree',
     },
   ],
@@ -370,7 +410,7 @@ export const ADJUDICATED = new Map([
     'packages/create-plugin/src/__tests__/templates.test.ts',
     {
       reads: [],
-      notRead: ['../README.md', 'packages/create-plugin/README.md'],
+      notRead: ['packages/create-plugin/README.md'],
       walker: 'not-markdown: reads sibling `package.json` manifests; its `README.md` literal is a generated filename',
     },
   ],
@@ -394,7 +434,6 @@ export const ADJUDICATED = new Map([
         '../content/docs/frontend/app-shell.mdx',
         'packages/layout/README.md',
       ],
-      notRead: ['../README.md'],
     },
   ],
   [
@@ -411,15 +450,15 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/layout/src/__tests__/readme-app-shell-example.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['../README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   [
     'packages/layout/src/__tests__/readme-registration-keys.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['../README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   [
     'packages/layout/src/__tests__/readme-sidebar-nav-example.test.ts',
-    { reads: ['packages/layout/README.md'], notRead: ['../README.md'] },
+    { reads: ['packages/layout/README.md'] },
   ],
   // Pins the permission-config example of the published skill guide, read from
   // the monorepo's `skills/` catalog (objectstack#38134).
@@ -433,7 +472,7 @@ export const ADJUDICATED = new Map([
   ],
   [
     'packages/plugin-dashboard/src/__tests__/readme-dashboard-examples-spec-valid.test.ts',
-    { reads: ['packages/plugin-dashboard/README.md'], notRead: ['../README.md'] },
+    { reads: ['packages/plugin-dashboard/README.md'] },
   ],
   [
     'packages/plugin-detail/src/__tests__/guideCrudAppRenders.test.tsx',
@@ -453,7 +492,7 @@ export const ADJUDICATED = new Map([
     'packages/plugin-detail/src/__tests__/relatedListParentScopeResidue-8937.test.ts',
     {
       reads: ['packages/plugin-detail/README.md'],
-      notRead: ['../CHANGELOG.md', 'CHANGELOG.md', 'packages/plugin-detail/CHANGELOG.md'],
+      notRead: ['CHANGELOG.md', 'packages/plugin-detail/CHANGELOG.md'],
     },
   ],
   [
@@ -480,7 +519,7 @@ export const ADJUDICATED = new Map([
     'packages/runner/src/__tests__/published-stylesheet-sources.test.ts',
     {
       reads: ['packages/runner/CHANGELOG.md'],
-      notRead: ['../CHANGELOG.md', 'CHANGELOG.md'],
+      notRead: ['CHANGELOG.md'],
     },
   ],
   [
@@ -539,7 +578,6 @@ export const ADJUDICATED = new Map([
     'packages/types/src/__tests__/object-calendar-container-by-reference-6152.test.ts',
     {
       reads: ['apps/**', 'content/**', 'docs/**', 'examples/**', 'packages/**', 'skills/**'],
-      notRead: ['../README.md'],
       walker: 'markdown-tree: walks `examples`, `content`, `skills`, `docs` and `apps`, and every package `README.md`, and parses the fences of each `.md`/`.mdx` that names `object-calendar`',
     },
   ],
@@ -589,7 +627,7 @@ export const ADJUDICATED = new Map([
   // README-only pull request has to run the shard.
   [
     'packages/types/src/__tests__/sidebar-declared-surface-11465.test.ts',
-    { reads: ['packages/types/README.md'], notRead: ['../packages/types/README.md'] },
+    { reads: ['packages/types/README.md'] },
   ],
   // objectui#10824. Extracts `@object-ui/plugin-timeline`'s README "Schema-Driven
   // Usage" block and runs it through `safeValidateSchema` and the strict
@@ -625,14 +663,13 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-changeset-claims.test.ts',
     {
       reads: [],
-      notRead: ['../.changeset/README.md', '../README.md', '.changeset/README.md'],
+      notRead: ['.changeset/README.md'],
     },
   ],
   [
     'scripts/__tests__/check-changeset-no-major.test.ts',
     {
       reads: ['.changeset/**'],
-      notRead: ['../README.md'],
       walker: 'markdown-tree',
     },
   ],
@@ -641,7 +678,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-changeset-overwrite.test.ts',
     {
       reads: [],
-      notRead: ['../.changeset/README.md', '.changeset/README.md'],
+      notRead: ['.changeset/README.md'],
     },
   ],
   // Reads no markdown: drives the gate against a fixture repository it writes in a temp directory.
@@ -649,7 +686,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-changeset-presence.test.ts',
     {
       reads: [],
-      notRead: ['../.changeset/README.md', '../CHANGELOG.md', '../README.md', '.changeset/README.md', 'CHANGELOG.md', 'apps/console/README.md'],
+      notRead: ['.changeset/README.md', 'CHANGELOG.md', 'apps/console/README.md'],
     },
   ],
   // Reads no markdown: its three markdown literals are probes of the root `ci.yml`
@@ -659,7 +696,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-control-bytes.test.ts',
     {
       reads: [],
-      notRead: ['../README.md', '../packages/core/README.md', 'packages/core/README.md'],
+      notRead: ['packages/core/README.md'],
     },
   ],
   [
@@ -675,7 +712,6 @@ export const ADJUDICATED = new Map([
       // ONE package README, `packages/plugin-dashboard/README.md`, whose shard
       // reported success in ten seconds having run nothing.
       reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', '../content/docs/frontend/**', 'packages/**'],
-      notRead: ['../README.md', '../packages/types/README.md'],
     },
   ],
   [
@@ -695,7 +731,7 @@ export const ADJUDICATED = new Map([
       // globs, not a read (objectstack#25712). The test's only directory walk was
       // of objectui's own `.github/workflows`, which it no longer reads.
       reads: ['apps/console/docs/**', '../content/docs/frontend/**', 'docs/**'],
-      notRead: ['../README.md', '../packages/core/README.md', 'packages/core/README.md'],
+      notRead: ['packages/core/README.md'],
     },
   ],
   // Runs the gate over its real scan surface (`listDocuments(repoRoot)`): the
@@ -705,7 +741,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-doc-json-fences.test.ts',
     {
       reads: ['../content/docs/frontend/**', '../skills/objectui/**', 'packages/**'],
-      notRead: ['../README.md'],
     },
   ],
   // `./*` rather than the eight root documents it used to list, and the
@@ -720,14 +755,12 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-doc-links.test.ts',
     {
       reads: ['./*', 'apps/**', '../content/docs/frontend/**', '../skills/objectui/**', 'docs/adr/**', 'docs/audits/**', 'examples/**', 'packages/**'],
-      notRead: ['../AGENTS.md', '../ARCHITECTURE.md', '../CHANGELOG.md', '../CLAUDE.md', '../README.md', '../ROADMAP.md', '../apps/docs/README.md', '../examples/README.md', '../packages/core/CHANGELOG.md', '../packages/core/README.md'],
     },
   ],
   [
     'scripts/__tests__/check-doc-snippet-types.test.ts',
     {
       reads: ['apps/console/docs/UI_IMPROVEMENT_PROPOSAL.md', 'apps/console/docs/deployment.md', 'apps/console/docs/error-tracking.md', '../content/docs/frontend/**', 'docs/adr/**', 'docs/audits/**', 'packages/**'],
-      notRead: ['../README.md'],
       walker: 'markdown-tree',
     },
   ],
@@ -736,7 +769,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-governed-queue-guard.test.ts',
     {
       reads: [],
-      notRead: ['../AGENTS.md', '../CLAUDE.md', '../examples/AGENTS.md', 'AGENTS.md', 'CLAUDE.md'],
+      notRead: ['AGENTS.md', 'CLAUDE.md'],
     },
   ],
   // Reads no markdown: the three documents below are ARGUMENTS to a path
@@ -750,7 +783,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-pending-changeset-literals.test.ts',
     {
       reads: [],
-      notRead: ['../.changeset/README.md', '../CHANGELOG.md', '../packages/core/README.md', '.changeset/README.md', 'CHANGELOG.md', 'packages/core/README.md'],
+      notRead: ['.changeset/README.md', 'CHANGELOG.md', 'packages/core/README.md'],
     },
   ],
   // Reads no markdown: reads workflow YAML and sources, no markdown.
@@ -761,26 +794,16 @@ export const ADJUDICATED = new Map([
       walker: 'not-markdown: `.github/workflows/*.yml`',
     },
   ],
-  // Reads no markdown: `README.md` is an argument to a pure path classifier.
-  [
-    'scripts/__tests__/check-published-dist-tooling.test.ts',
-    {
-      reads: [],
-      notRead: ['../README.md'],
-    },
-  ],
   [
     'scripts/__tests__/check-readme-exports.test.ts',
     {
       reads: ['packages/**'],
-      notRead: ['../packages/types/README.md'],
     },
   ],
   [
     'scripts/__tests__/check-shell-escape-residue.test.ts',
     {
       reads: ['.claude/skills/**', 'AGENTS.md', 'CLAUDE.md', '../content/docs/frontend/**', '../skills/objectui/**'],
-      notRead: ['../AGENTS.md', '../CLAUDE.md'],
     },
   ],
   // Judges every page of the published skill bundle through `listGuides(repoRoot)`,
@@ -789,7 +812,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/check-skill-examples.test.ts',
     {
       reads: ['../skills/objectui/**'],
-      notRead: ['../README.md'],
     },
   ],
   [
@@ -802,7 +824,6 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/component-node-vocabulary-7434.test.ts',
     {
       reads: ['../content/docs/frontend/**', 'packages/**'],
-      notRead: ['../packages/types/README.md'],
       walker: 'markdown-tree',
     },
   ],
@@ -811,7 +832,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/cross-file-line-citation-census.test.ts',
     {
       reads: [],
-      notRead: ['../README.md', '../ROADMAP.md', '../packages/core/README.md', 'packages/core/README.md', 'packages/plugin-form/CHANGELOG.md', 'packages/plugin-form/README.md'],
+      notRead: ['packages/core/README.md', 'packages/plugin-form/CHANGELOG.md', 'packages/plugin-form/README.md'],
     },
   ],
   [
@@ -857,7 +878,7 @@ export const ADJUDICATED = new Map([
     'scripts/__tests__/markdown-test-inputs.test.ts',
     {
       reads: [],
-      notRead: ['../AGENTS.md', '../README.md', '../ROADMAP.md', '../SECURITY.md', '../docs/adr/0084-application-builder-information-architecture.md', 'AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
+      notRead: ['../docs/adr/0084-application-builder-information-architecture.md', 'AGENTS.md', 'packages/app-shell/README.md', 'packages/plugin-dashboard/README.md'],
     },
   ],
   // objectstack#26080 folded `QUICK_REFERENCE.md` into the repository root's
@@ -868,14 +889,6 @@ export const ADJUDICATED = new Map([
     {
       reads: ['../CONTRIBUTING.md'],
       walker: 'not-markdown: directory listings that test whether a documented path exists',
-    },
-  ],
-  // Reads no markdown: `README.md` is a fixture file it writes and a changed path it passes.
-  [
-    'scripts/__tests__/select-affected-tests.test.ts',
-    {
-      reads: [],
-      notRead: ['../README.md'],
     },
   ],
   [
@@ -1072,7 +1085,7 @@ function pathFragments(source) {
  * candidate is one line in `ADJUDICATED` while the cost of a missed one is the
  * defect this file exists to close.
  */
-export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS, monorepoRoot = root === REPO_ROOT ? MONOREPO_ROOT : path.dirname(root) } = {}) {
+export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS, monorepoRoot = path.dirname(root), uiGlobs = uiGlobsAt(monorepoRoot) } = {}) {
   const files = [];
   for (const top of roots) collectTests(path.join(root, top), files);
 
@@ -1091,15 +1104,24 @@ export function deriveCandidates({ root = REPO_ROOT, roots = SCAN_ROOTS, monorep
       if (/^\.mdx?$/.test(fragment)) continue; // the bare extension
       for (const base of bases) {
         const resolved = path.resolve(base, fragment);
-        // Every markdown document in the monorepo a test names is a candidate,
-        // outside this tree as much as inside it (objectstack#38134): admitting
-        // only `content/docs` dropped the root `docs/adr` read of
-        // `studioMenuPlacement.test.ts` from the ledger without a word. An
-        // out-of-tree read is labelled `../<path>`, relative to this root like
-        // every other entry. Only a path above the monorepo root is not a
-        // document of this repository at all.
+        // A markdown document outside this tree is a candidate too
+        // (objectstack#38134): admitting only `content/docs` dropped the root
+        // `docs/adr` read of `studioMenuPlacement.test.ts` from the ledger
+        // without a word. An out-of-tree read is labelled `../<path>`. It is
+        // admitted only when the root `ci.yml`'s `ui:` filter covers it, so a
+        // change to it starts the job that runs this ledger's test: a root
+        // README or CHANGELOG a test merely names would otherwise tie the
+        // ledger to a file whose edit starts no ui job, and red the NEXT ui PR.
+        // A read the filter does not cover is the fifth subject of
+        // scripts/check-ci-filter-parity.mjs, which asks that question of every
+        // ui test. `uiGlobs: null` (no ci.yml above a scratch root) admits all.
+        // A path above the monorepo root is no document of this repository.
         if (!resolved.startsWith(`${monorepoRoot}${path.sep}`)) continue;
         if (resolved.includes(`${path.sep}node_modules${path.sep}`)) continue;
+        if (!resolved.startsWith(`${root}${path.sep}`) && uiGlobs) {
+          const monorepoPath = path.relative(monorepoRoot, resolved).split(path.sep).join('/');
+          if (!uiGlobs.some((glob) => filterGlobMatches(glob, monorepoPath))) continue;
+        }
         if (existsSync(resolved) && statSync(resolved).isFile()) {
           documents.add(path.relative(root, resolved));
         }

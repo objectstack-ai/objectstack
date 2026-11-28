@@ -199,6 +199,51 @@ describe('objectstack#38134 — every markdown read outside ui/ reaches the ledg
       rmSync(scratch, { recursive: true, force: true });
     }
   });
+
+  it('narrowed (S3): an out-of-tree document the root `ui:` filter does not cover is no candidate', () => {
+    const scratch = mkdtempSync(path.join(tmpdir(), 'markdown-test-inputs-38134-s3-'));
+    try {
+      const write = (rel: string, text: string) => {
+        mkdirSync(path.dirname(path.join(scratch, rel)), { recursive: true });
+        writeFileSync(path.join(scratch, rel), text);
+      };
+      const uiRoot = path.join(scratch, 'repo', 'ui');
+      write('repo/docs/notes/root-doc.md', '# root\n');
+      write('repo/ROADMAP.md', '# roadmap\n');
+      write(
+        'repo/.github/workflows/ci.yml',
+        "jobs:\n  filter:\n    steps:\n      - with:\n          filters: |\n            ui:\n              - 'ui/**'\n" +
+          "              # a comment line is skipped\n              - 'docs/notes/**'\n            ui_consumers:\n              - 'packages/spec/**'\n",
+      );
+      write(
+        'repo/ui/packages/p/src/reads-root.test.ts',
+        "readFileSync(resolve(HERE, '../../../../docs/notes/root-doc.md'));\nconst name = 'ROADMAP.md';\n",
+      );
+      const candidates = deriveCandidates({ root: uiRoot, roots: ['packages'] });
+      // The covered read is admitted; the bare root `ROADMAP.md` (the monorepo
+      // root is a base) is not, since editing it starts no ui job.
+      expect(candidates.get('packages/p/src/reads-root.test.ts')?.documents).toEqual(['../docs/notes/root-doc.md']);
+      // The control: with no filter to consult, the same name IS a candidate.
+      expect(deriveCandidates({ root: uiRoot, roots: ['packages'], uiGlobs: null }).get('packages/p/src/reads-root.test.ts')?.documents).toEqual([
+        '../ROADMAP.md',
+        '../docs/notes/root-doc.md',
+      ]);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it('every out-of-tree entry the ledger names is a path whose change starts the ui jobs', () => {
+    const globs = uiFilterGlobs(rootCi());
+    const outOfTree = [...ADJUDICATED.values()]
+      .flatMap((verdict) => [...(verdict.reads ?? []), ...(verdict.notRead ?? [])])
+      .filter((entry) => entry.startsWith('../'));
+    expect(outOfTree.length).toBeGreaterThan(0);
+    const unscheduled = [...new Set(outOfTree)]
+      .map((entry) => entry.slice('../'.length))
+      .filter((file) => !globs.some((glob) => globMatches(glob, file) || globMatches(glob, file.replace(/\*\*$/, 'x'))));
+    expect(unscheduled, 'a ledger entry outside ui/ that no `ui:` row covers ties this test to a diff that never runs it').toEqual([]);
+  });
 });
 
 /* ── objectui#9096: the ruling, stated as an assertion ───────────────────── */

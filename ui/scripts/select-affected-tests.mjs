@@ -410,6 +410,19 @@ export function moduleSpecifiers(source) {
   return { specifiers: [...specifiers], globsTheTree: /\bimport\.meta\.glob(?:Eager)?\s*\(/.test(source) };
 }
 
+/**
+ * The relative literals `rel` hands to `new URL(literal, import.meta.url)`
+ * that resolve outside this tree (a `../` past its root), as written. Pure: it
+ * reads no disk, so a literal naming nothing still counts -- the safe direction.
+ */
+export function urlLiteralsLeavingTree(rel, source) {
+  const out = [];
+  for (const m of String(source).matchAll(/\bnew\s+URL\(\s*(['"`])(\.{1,2}\/[^'"`\n$]*)\1\s*,\s*import\.meta\.url\s*,?\s*\)/g)) {
+    if (path.posix.normalize(path.posix.join(path.posix.dirname(rel), m[2])).startsWith('../')) out.push(m[2]);
+  }
+  return out;
+}
+
 /** A relative specifier resolved against the importer, as a repository-relative path, or null. */
 export function resolveRelative(root, importerRel, specifier) {
   const base = path.join(root, path.dirname(importerRel), specifier);
@@ -659,6 +672,12 @@ export function closureSummaries(root, seeds, names, dirOf, radiusOf = () => nul
       const name = workspaceNameOf(spec, names);
       if (name) node.packageNames.add(name);
     }
+    // A file named by a relative `new URL(literal, import.meta.url)` that
+    // resolves OUTSIDE this tree is loaded with no specifier this graph can
+    // follow (`await import(url.href)`, `readFileSync(url)`), and nothing
+    // inside the tree can bound it: unbounded, so the test is always on
+    // (objectstack#38133, `metadata-form-option-names.test.ts`).
+    if (/\.(?:[cm]?[jt]sx?)$/.test(rel) && urlLiteralsLeavingTree(rel, source).length > 0) node.readsDisk = true;
     // Item 2d: a library program reads the disk with or without `fs`.
     if (!touchesDisk && /\.(?:[cm]?[jt]sx?)$/.test(rel) && libraryReadsDisk(source, info.specifiers)) touchesDisk = true;
     // Item 2c: a module whose disk use is pinned as no test input.
