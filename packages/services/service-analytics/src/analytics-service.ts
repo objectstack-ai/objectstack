@@ -449,28 +449,25 @@ function resolveMemberSource(
 }
 
 /**
- * [#35543] Refuse a `where` member that names no field — `INVALID_FIELD` / 400,
- * the answer `/data` gives the same body — before any strategy compiles it.
+ * [#35543] Refuse a `where` member that is empty or blank — `INVALID_FIELD` /
+ * 400, the answer `/data` gives the same body — before any strategy compiles it.
  *
- * A member is a field name when it is a bare identifier (`status`) or a
- * relationship path ending in one (`account.name`, `deal.stage`). An empty or
- * blank key is never one. Any other spelling is refused only when it would
- * reach SQL as written: undeclared, or minted by cube inference with the
- * spelling itself as its `sql`. A cube that DECLARES the key over its own
- * `sql` keeps it, since the strategies compile that `sql`, not the key.
+ * Such a key names no field and no expression: there is nothing in it for a
+ * field gate to judge, which is why every other gate passes it by
+ * ({@link namedQueryFields} skips the empty member outright). The empty key
+ * then compiled `WHERE  = ?` (500 DATABASE_ERROR) and the blank one reached
+ * the field-read gate as an expression (403 PERMISSION_DENIED).
+ *
+ * ⛔ Only whitespace-only text. A key that is text but no column reference
+ * (`amount + 1`) keeps the #21156 shape gate's `PERMISSION_DENIED` / 403: it
+ * could read fields, and that gate's verdict is one answer in every tier.
  */
 function assertWhereMemberIsFieldName(cube: Cube, member: string): void {
-  const blank = member.trim() === '';
-  if (!blank) {
-    if (BARE_IDENTIFIER.test(member) || IDENTIFIER_PATH.test(member)) return;
-    const entry = declaredMemberEntry(cube, member, 'any');
-    if (entry && entry.sql !== member) return;
-  }
+  if (member.trim() !== '') return;
   const err = new Error(
-    `Filter member '${member}' in 'where' on cube '${cube.name}' names no field: a filter key is a field name ` +
-      `or a relationship path ending in one (such as 'account.name'), and ` +
-      `${member === '' ? 'an empty key' : blank ? 'a blank key' : `'${member}'`} is not. ` +
-      `The query was refused before it reached the database.`,
+    `Filter member '${member}' in 'where' on cube '${cube.name}' is ${member === '' ? 'an empty' : 'a blank'} key, ` +
+      `which names no field. A filter key is a field name or a relationship path ending in one ` +
+      `(such as 'account.name'). The query was refused before it reached the database.`,
   ) as Error & { code?: string; status?: number; field?: string; param?: string; member?: string };
   err.code = 'INVALID_FIELD';
   err.status = 400;
@@ -5095,12 +5092,11 @@ export class AnalyticsService implements IAnalyticsService {
     }
     if (members.length === 0) return;
 
-    // [#35543] A filter key that is no field name at all — empty, blank, or a
-    // spelling that would reach SQL as a column it cannot be — is refused
-    // first. It needs no field probe: no object has such a field. Before, the
-    // empty key compiled `WHERE  = $1` (500 DATABASE_ERROR) and the blank one
-    // reached the field-read gate (403 PERMISSION_DENIED), where `/data`
-    // answers both `400 INVALID_FIELD`.
+    // [#35543] An empty or blank filter key is refused first. It needs no
+    // field probe: no object has such a field. Before, the empty key compiled
+    // `WHERE  = $1` (500 DATABASE_ERROR) and the blank one reached the
+    // field-read gate (403 PERMISSION_DENIED), where `/data` answers both
+    // `400 INVALID_FIELD`.
     for (const member of members) assertWhereMemberIsFieldName(cube, member);
 
     const probe = this.getObjectFieldNames;

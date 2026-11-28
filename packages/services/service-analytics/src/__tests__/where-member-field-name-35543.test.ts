@@ -10,7 +10,7 @@
  * POST /analytics/query  where {"": "z"}                     -> 500 DATABASE_ERROR (near "=": syntax error)
  * POST /analytics/dataset/query  runtimeFilter {"": "z"}     -> 500 DATABASE_ERROR
  * MCP query_dataset  runtimeFilter {"": "z"}                 -> isError, DATABASE_ERROR
- * the same three with {" ": "z"} or {"foo bar": "z"}         -> 403 PERMISSION_DENIED (field-read gate)
+ * the same three with {" ": "z"}                            -> 403 PERMISSION_DENIED (field-read gate)
  * POST /data/showcase_invoice/query  where {"": "z"}         -> 400 INVALID_FIELD
  * ```
  *
@@ -96,7 +96,7 @@ describe('[#35543] a where key that names no field is INVALID_FIELD / 400 on eve
   for (const [label, key] of [
     ['an empty key', ''],
     ['a blank key', ' '],
-    ['a key with a space in it', 'foo bar'],
+    ['a tab-only key', '\t'],
   ] as const) {
     for (const index of [0, 1, 2]) {
       it(`${label} on ${DOOR_NAMES[index]} is refused before the engine is reached`, async () => {
@@ -112,6 +112,13 @@ describe('[#35543] a where key that names no field is INVALID_FIELD / 400 on eve
     const b = await boot();
     const [, door] = doors(b)[0];
     await expect(door({ $or: [{ status: 'paid' }, { '': 'z' }] })).rejects.toMatchObject(REFUSED);
+    expect(b.statements).toEqual([]);
+  });
+
+  it('a key that is text but no column reference keeps the #21156 shape verdict, 403', async () => {
+    const b = await boot();
+    const [, door] = doors(b)[0];
+    await expect(door({ 'amount + 1': 'z' })).rejects.toMatchObject({ code: 'PERMISSION_DENIED', status: 403 });
     expect(b.statements).toEqual([]);
   });
 
