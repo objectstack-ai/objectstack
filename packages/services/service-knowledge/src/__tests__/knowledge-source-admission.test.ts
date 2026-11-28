@@ -1075,6 +1075,43 @@ describe('admitAuthoredSource — source admission at save, as the authoring pri
     expect(await placed.admitAuthoredSource(omitted, MANAGER)).toEqual({ admitted: true });
   });
 
+  /**
+   * The package duplicate asks with `door: 'duplicate'`: its caller copies a
+   * package, so every arm says the source cannot be copied, none says to save
+   * the source or that nothing was written (the door's prefix says once that
+   * nothing was copied), and the status, code, object and field are the save's.
+   */
+  it('door: duplicate words every arm for the duplicate\'s caller; the status and code are the save\'s', async () => {
+    const hideTitle = makeSecurity(() => ['id', 'body', 'salary_note', 'status']);
+    const arms: Array<[string, () => Promise<unknown>, (door: { door: 'save' | 'duplicate' }) => Promise<unknown>, RegExp | undefined]> = [];
+    const at = (label: string, svc: KnowledgeService, body: unknown, ctx: ExecutionContext | undefined, remedy?: RegExp) =>
+      arms.push([label, () => svc.admitAuthoredSource(body, ctx), (door) => svc.admitAuthoredSource(body, ctx, door), remedy]);
+    const members = setup({ sources: [], security: salaryHiddenFromMembers }).svc;
+    at('content field', members, item('ticket', ['body', 'salary_note']), MEMBER, /`metadataFields`, then duplicate the package again, or have someone who may query it duplicate the package\.$/);
+    at('where field', members, item('ticket', ['body'], { where: { salary_note: 'x' } }), MEMBER, /`where`, then duplicate the package again, or have someone who may query it duplicate the package\.$/);
+    at('display field', setup({ sources: [], security: hideTitle }).svc, item('ticket', ['body']), MEMBER, /Have someone who may query it duplicate the package\.$/);
+    at('gate throws', setup({ sources: [], schemaThrows: true, logger: { warn: vi.fn(), error: vi.fn() } }).svc, item('ticket', ['body']), MANAGER, /indexes\. Duplicate the package again\.$/);
+    const mute: KnowledgeFieldSecurity = { getQueryableFields: async () => undefined, getReadableFields: async () => undefined };
+    at('security answers neither', setup({ sources: [], security: mute }).svc, item('ticket', ['body']), MANAGER, /Duplicate the package again\.$/);
+    at('no identity', members, item('ticket', ['body']), undefined, /: the duplicate carries no identity/);
+    at('unmounted adapter', members, { ...item('ticket', ['body']), adapter: 'ragflow' }, MANAGER, /mount the 'ragflow' store and duplicate the package again\.$/);
+    at('disabled package', setup({ sources: [], objects: [TICKET], disabled: ['ticket'] }).svc, item('ticket', ['body']), MANAGER, undefined);
+
+    for (const [label, asSaved, asDuplicated, remedy] of arms) {
+      const saved = (await asSaved()) as { admitted: false; message: string };
+      const duplicated = (await asDuplicated({ door: 'duplicate' })) as { admitted: false; message: string };
+      expect(saved.admitted, label).toBe(false);
+      const { message: _s, ...savedRest } = saved;
+      const { message, ...duplicatedRest } = duplicated;
+      expect(duplicatedRest, label).toEqual(savedRest);
+      expect(message, label).toMatch(/^The knowledge source( "authored")? cannot be copied: /);
+      expect(message, label).not.toMatch(/save the source|save it again|was not saved|Nothing was written|nothing was copied|the save /i);
+      if (remedy) expect(message, label).toMatch(remedy);
+      // The save's own sentence is what it was: asked with no door, or with `save`.
+      expect(await asDuplicated({ door: 'save' }), label).toEqual(saved);
+    }
+  });
+
   it('registers nothing and searches nothing: the verdict is a read', async () => {
     const { svc, adapter } = setup({ sources: [], security: salaryHiddenFromMembers });
     await svc.admitAuthoredSource(item('ticket', ['body']), MANAGER);

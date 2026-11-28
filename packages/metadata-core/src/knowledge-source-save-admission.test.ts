@@ -139,8 +139,19 @@ describe('authoredKnowledgeSourceRefusal — source admission at save', () => {
         for (const refusal of [none, scoped, unresolved]) {
             expect(refusal?.message).not.toMatch(/save the source|Nothing was written/);
         }
-        // A verdict of the knowledge service is its own sentence, passed through as before.
-        expect(await ask(() => serviceAnswering(REFUSED))).toEqual({ status: 403, code: 'PERMISSION_DENIED', message: REFUSED.message });
+        // A verdict of the knowledge service is its own sentence, passed through
+        // as it answers: the service is asked with this door, so it words it.
+        const service = serviceAnswering(REFUSED);
+        expect(await ask(() => service)).toEqual({ status: 403, code: 'PERMISSION_DENIED', message: REFUSED.message });
+        expect(service.admitAuthoredSource).toHaveBeenCalledWith(ITEM, AUTHOR, { door: 'duplicate' });
+    });
+
+    it('a save hands the knowledge service no door: it is asked with the item and the context alone', async () => {
+        for (const door of [undefined, 'save'] as const) {
+            const service = serviceAnswering({ admitted: true });
+            await authoredKnowledgeSourceRefusal({ type: 'knowledge_source', item: ITEM, executionContext: AUTHOR, resolveKnowledgeService: () => service, ...(door ? { door } : {}) });
+            expect(service.admitAuthoredSource.mock.calls, String(door)).toEqual([[ITEM, AUTHOR]]);
+        }
     });
 
     it('`isSystem: false` is not a bypass', async () => {

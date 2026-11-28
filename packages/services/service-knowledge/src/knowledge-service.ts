@@ -3241,12 +3241,22 @@ export class KnowledgeService implements IKnowledgeService {
    * gate that throws, or a security service that answers neither field
    * question, the save is refused `503 SERVICE_UNAVAILABLE`. The system
    * context is admitted, as it bypasses the gates at search.
+   *
+   * `options.door` words the sentences for the door that asks (the gates and
+   * the status and code are the same at both): `save`, the default, for a
+   * door that saves one item; `duplicate` for the package duplicate, which
+   * copies a package's sources. Its caller is told the source cannot be
+   * copied and to duplicate the package again, never to save the source, and
+   * no "nothing was written": that door's own prefix says once that nothing
+   * was copied.
    */
   async admitAuthoredSource(
     item: unknown,
     ctx: ExecutionContext | undefined,
+    options?: { door?: 'save' | 'duplicate' },
   ): Promise<{ admitted: true } | { admitted: false; status: number; code: string; message: string; object: string; field?: string }> {
     if (ctx?.isSystem) return { admitted: true };
+    const wording = AUTHORED_SOURCE_DOOR_WORDING[options?.door === 'duplicate' ? 'duplicate' : 'save'];
     const body = (item as { name?: unknown; source?: unknown } | null | undefined) ?? {};
     const declared = body.source as
       | { object?: unknown; content?: unknown; contentFields?: unknown; metadataFields?: unknown; where?: unknown }
@@ -3267,7 +3277,7 @@ export class KnowledgeService implements IKnowledgeService {
         ? { where: where as Record<string, unknown> }
         : {}),
     };
-    const named = `The knowledge source${describeName(body)} was not saved`;
+    const named = `The knowledge source${describeName(body)} ${wording.notDone}`;
     const refuse = (status: number, code: string, message: string, field?: string) =>
       ({ admitted: false as const, status, code, message, object, ...(field === undefined ? {} : { field }) });
     const unavailable = (why: string) =>
@@ -3275,9 +3285,9 @@ export class KnowledgeService implements IKnowledgeService {
         503,
         'SERVICE_UNAVAILABLE',
         `${named}: whether you may search object '${object}' could not be judged (${why}), and an author must be ` +
-          'allowed to search what their source indexes. Nothing was written; try again.',
+          `allowed to search what their source indexes.${wording.tryAgain}`,
       );
-    if (!ctx) return refuse(403, 'PERMISSION_DENIED', `${named}: the save carries no identity, and a missing identity is not a grant of authority.`);
+    if (!ctx) return refuse(403, 'PERMISSION_DENIED', `${named}: ${wording.act} carries no identity, and a missing identity is not a grant of authority.`);
     // [ADR-0161 K4 ◆] A source that names no adapter where this deployment
     // cannot place one is refused at its save as at its registration, so the
     // author hears it: several adapters registered, none the deployment's.
@@ -3291,7 +3301,7 @@ export class KnowledgeService implements IKnowledgeService {
     // the boot log or a search's 503. A save is served after every store's
     // `start()`, so the adapters registered now are the deployment's.
     if (typeof authoredAdapter === 'string' && !registeredAdapters.includes(authoredAdapter)) {
-      return refuse(400, 'VALIDATION_ERROR', `${named}: ${this.unmountedAdapterSaveText(authoredAdapter, registeredAdapters)}`);
+      return refuse(400, 'VALIDATION_ERROR', `${named}: ${this.unmountedAdapterSaveText(authoredAdapter, registeredAdapters, wording.again)}`);
     }
     const engine = this.options.dataEngine;
     if (!engine) return unavailable('the knowledge service has no data engine');
@@ -3340,7 +3350,7 @@ export class KnowledgeService implements IKnowledgeService {
             'PERMISSION_DENIED',
             `${named}: its \`where\` reads field '${field}' of object '${object}', which you may not query (it is ` +
               'hidden from you, or served to you masked), and the source would select its records by that field. ' +
-              'Remove the field from `where`, or have someone who may query it save the source.',
+              `Remove the field from \`where\`${wording.thenAgain}, or have someone who may query it ${wording.byWhoMay}.`,
             field,
           );
         }
@@ -3351,9 +3361,9 @@ export class KnowledgeService implements IKnowledgeService {
           `${named}: you may not query field '${field}' of object '${object}' (it is hidden from you, or served ` +
             'to you masked), and the index would hold its text unmasked. ' +
             (listedByAuthor
-              ? 'Remove the field from `content` and `metadataFields`, or have someone who may query it save the source.'
+              ? `Remove the field from \`content\` and \`metadataFields\`${wording.thenAgain}, or have someone who may query it ${wording.byWhoMay}.`
               : "The source does not list it: it is the object's display field, which every document carries as its " +
-                'title. Have someone who may query it save the source.'),
+                `title. Have someone who may query it ${wording.byWhoMay}.`),
           field,
         );
       }
@@ -3368,13 +3378,13 @@ export class KnowledgeService implements IKnowledgeService {
    * can take. Leaving `adapter` out is offered only where an omitted adapter
    * would be placed ({@link adapterIdFor}).
    */
-  private unmountedAdapterSaveText(adapter: string, mounted: readonly string[]): string {
+  private unmountedAdapterSaveText(adapter: string, mounted: readonly string[], again: string): string {
     const deployment = this.options.deploymentAdapter;
     const placeable = (deployment !== undefined && mounted.includes(deployment)) || mounted.length === 1;
     const remedies = [
       ...(mounted.length === 0 ? [] : [`name one of ${mounted.map((id) => `'${id}'`).join(', ')} as its \`adapter\``]),
       ...(placeable ? ["leave `adapter` out, and the deployment's store holds it"] : []),
-      `mount the '${adapter}' store and save it again`,
+      `mount the '${adapter}' store and ${again}`,
     ];
     return (
       `it names adapter '${adapter}', which this deployment does not mount ` +
@@ -3552,6 +3562,39 @@ function describeEntry(entry: KnowledgeSourceEntry): KnowledgeSourceDescription 
 }
 
 /** ` 'NAME'` for a refusal about an input that carries a usable name (or its retired `id`), else nothing. */
+/**
+ * The door that asks {@link KnowledgeService.admitAuthoredSource}: `save` for
+ * a door that saves one item, `duplicate` for the package duplicate.
+ */
+type AuthoredSourceDoor = 'save' | 'duplicate';
+
+/**
+ * What each door's caller is told: the source not done, the act that carries
+ * the identity, the retry after a verdict that could not be judged, the redo
+ * after a fix, and the act someone who may query the field performs. The
+ * `save` row is the save door's wording, unchanged.
+ */
+const AUTHORED_SOURCE_DOOR_WORDING: Readonly<
+  Record<AuthoredSourceDoor, { notDone: string; act: string; tryAgain: string; again: string; thenAgain: string; byWhoMay: string }>
+> = {
+  save: {
+    notDone: 'was not saved',
+    act: 'the save',
+    tryAgain: ' Nothing was written; try again.',
+    again: 'save it again',
+    thenAgain: '',
+    byWhoMay: 'save the source',
+  },
+  duplicate: {
+    notDone: 'cannot be copied',
+    act: 'the duplicate',
+    tryAgain: ' Duplicate the package again.',
+    again: 'duplicate the package again',
+    thenAgain: ', then duplicate the package again',
+    byWhoMay: 'duplicate the package',
+  },
+};
+
 function describeName(input: unknown): string {
   const { name, id } = (input ?? {}) as { name?: unknown; id?: unknown };
   const shown = typeof name === 'string' && name !== '' ? name : typeof id === 'string' && id !== '' ? id : undefined;

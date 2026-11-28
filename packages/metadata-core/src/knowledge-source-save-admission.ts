@@ -69,7 +69,10 @@
  * written). A door that copies sources rather than saves one, the package
  * duplicate, asks with `door: 'duplicate'` and gets its caller's remedy
  * (duplicate the package again) and no "nothing was written" of its own: that
- * door's prefix says once that nothing was copied.
+ * door's prefix says once that nothing was copied. The door is handed on to
+ * the knowledge service's own verdict
+ * ({@link KnowledgeSourceSaveAdmitter.admitAuthoredSource}), which words it
+ * the same way; a save hands on no door.
  *
  * ## Fail direction
  *
@@ -129,9 +132,18 @@ function isKnowledgeServiceNotInScope(value: unknown): value is KnowledgeService
     return typeof value === 'object' && value !== null && (value as Record<symbol, unknown>)[NOT_IN_SCOPE] === true;
 }
 
-/** The member of the `knowledge` service the doors ask, reached duck-typed. */
+/**
+ * The member of the `knowledge` service the doors ask, reached duck-typed.
+ * `options.door` is passed only by a door other than `save` (the package
+ * duplicate), so the service words its own verdict for that door's caller; a
+ * save asks with the item and the context alone, as before.
+ */
 export interface KnowledgeSourceSaveAdmitter {
-    admitAuthoredSource(item: unknown, context: unknown): Promise<AuthoredKnowledgeSourceVerdict>;
+    admitAuthoredSource(
+        item: unknown,
+        context: unknown,
+        options?: { door?: KnowledgeSourceSaveDoor },
+    ): Promise<AuthoredKnowledgeSourceVerdict>;
 }
 
 /** The remedy and the no-op each door's caller is told. */
@@ -237,7 +249,11 @@ export async function authoredKnowledgeSourceRefusal(input: {
     if (typeof admit !== 'function') return undefined;
     let verdict: AuthoredKnowledgeSourceVerdict;
     try {
-        verdict = await admit.call(service, input.item, input.executionContext);
+        // The service words its verdict for the door: a duplicate is asked with
+        // its door, a save as before.
+        verdict = await (door === 'save'
+            ? admit.call(service, input.item, input.executionContext)
+            : admit.call(service, input.item, input.executionContext, { door }));
     } catch (err) {
         return unavailable(err instanceof Error ? err.message : String(err), door);
     }
