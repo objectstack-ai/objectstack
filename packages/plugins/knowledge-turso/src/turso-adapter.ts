@@ -120,13 +120,13 @@ export const VECTOR_INDEX_OVERFETCH = 40;
  * after the filter for its answer to stand; below it the leg runs again as
  * the exact scan. The candidates are ranked before the filter, so a filter
  * that keeps a few percent of the passages leaves a pool from which the
- * float32 re-rank picks the wrong neighbours. Simulated at 200,000 passages
+ * float32 re-rank picks the wrong neighbours. Measured at 200,000 passages
  * of 1,536 dimensions (clustered, topK 10, 40 candidates a hit), a pool of
  * at least topK gave a recall@10 of 0.95 with 10% of the passages in scope,
- * 0.90 at 5% and 0.88 at 3%; a pool of at least 4 × topK gave 0.98 or more
- * at every share.
+ * 0.91 at 5% and 0.88 at 3%; a pool of at least 4 × topK still left a query
+ * at 0.7 with 10% in scope. At 8 × topK a scope of 15% or less runs exact.
  */
-const VECTOR_MIN_POOL = 4;
+const VECTOR_MIN_POOL = 8;
 
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
 const VECTOR_BACKFILL_BATCH = 2048;

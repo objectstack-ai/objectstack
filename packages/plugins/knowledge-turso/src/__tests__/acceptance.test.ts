@@ -1032,7 +1032,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(vectorLegs(mixed.sql, from)).toEqual({ approximate: 0, exact: 1 });
     });
 
-    it('the filter runs on the over-fetched candidates; a leg it leaves under 4 × topK in scope is run again exactly', async () => {
+    it('the filter runs on the over-fetched candidates; a leg it leaves under 8 × topK in scope is run again exactly', async () => {
       const s = source('ann_scope');
       const QUERY = 'w1x w2x w3x w4x';
       // 56 passages near the query, published; 4 far from it, drafts.
@@ -1040,8 +1040,8 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ...Array.from({ length: 56 }, (_, i) => doc(s, `near_${String(i).padStart(2, '0')}`, `${QUERY} w${(i % 9) + 5}x`)),
         ...['a', 'b', 'c', 'd'].map((n) => doc(s, `far_${n}`, `w1x wqx wrx ws${n}x`, { metadata: { status: 'draft' } })),
       ];
-      // Four candidates a hit, so the candidates are not every row of this small table.
-      const { adapter, sql } = await built(s, docs, { vectorIndexOverfetch: 4 });
+      // Eight candidates a hit, so the candidates are not every row of this small table.
+      const { adapter, sql } = await built(s, docs, { vectorIndexOverfetch: 8 });
       // A filter only the far passages pass: none is among the candidates, so the exact scan answers.
       let from = sql.length;
       const drafts = await adapter.search(QUERY, { source: s, topK: 3, filter: { status: 'draft' } });
@@ -1055,7 +1055,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         ...wordsOf(52, 11).map((text, i) => doc(t, `rest_${String(i).padStart(2, '0')}`, `w1x ${text}`)),
       ];
       const over = await built(t, tiers, { vectorIndexOverfetch: 10 });
-      // Every passage but the two best in scope: 18 or more of the 2 × 10 candidates are left, 4 × topK
+      // Every passage but the two best in scope: 18 or more of the 2 × 10 candidates are left, 8 × topK
       // and more, so the candidates answer, without the exact scan.
       from = over.sql.length;
       const allButBest = tiers.flatMap((d) => d.sourceRecordId ?? []).filter((id) => !id.startsWith('best_'));
@@ -1063,7 +1063,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(wide).toHaveLength(2);
       for (const hit of wide) expect(hit.sourceRecordId).toMatch(/^second_/);
       expect(vectorLegs(over.sql, from)).toEqual({ approximate: 1, exact: 0 });
-      // Two passages in scope: at most 2 of the 20 candidates, fewer than 4 × topK, so the exact scan answers.
+      // Two passages in scope: at most 2 of the 20 candidates, fewer than 8 × topK, so the exact scan answers.
       from = over.sql.length;
       const scoped = ['second_1', 'second_4'];
       const narrow = await over.adapter.search(QUERY, { source: t, topK: 2, scope: [{ kind: 'record', ids: scoped }] });
@@ -1247,12 +1247,12 @@ describe('knowledge-turso approximate vector index: recall and options', () => {
     }
   });
 
-  it('refuses a threshold below 1 and an over-fetch that is not a whole number of 4 or more', () => {
+  it('refuses a threshold below 1 and an over-fetch that is not a whole number of 8 or more', () => {
     const client = store.client();
     const embedder = new FakeEmbedder();
-    for (const bad of [{ vectorIndexThreshold: 0 }, { vectorIndexThreshold: Number.NaN }, { vectorIndexOverfetch: 3 }, { vectorIndexOverfetch: 4.5 }]) {
+    for (const bad of [{ vectorIndexThreshold: 0 }, { vectorIndexThreshold: Number.NaN }, { vectorIndexOverfetch: 7 }, { vectorIndexOverfetch: 8.5 }]) {
       expect(() => new TursoKnowledgeAdapter({ client, embedder, ...bad })).toThrow(RangeError);
     }
-    expect(() => new TursoKnowledgeAdapter({ client, embedder, vectorIndexThreshold: Infinity, vectorIndexOverfetch: 4 })).not.toThrow();
+    expect(() => new TursoKnowledgeAdapter({ client, embedder, vectorIndexThreshold: Infinity, vectorIndexOverfetch: 8 })).not.toThrow();
   });
 });
