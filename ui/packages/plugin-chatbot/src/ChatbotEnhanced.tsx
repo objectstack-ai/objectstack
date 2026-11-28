@@ -226,6 +226,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
       reviewLinkHref,
       surfaceContextLabel,
       surfaceContextTitle,
+      promptInputHeaderSlot,
       processVisibility = 'summary',
       surface = 'card',
       ...props
@@ -379,7 +380,7 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     const sendTyped = React.useCallback(
       (text: string, files: File[] | undefined) => {
         // Remember the text so a rejected send can restore it (the composer's
-        // own form.reset clears the box optimistically). A fresh attempt also
+        // own submit clears its message field optimistically). A fresh attempt also
         // clears any prior send-failure restore guard.
         lastSubmittedRef.current = text;
         restoredErrorRef.current = null;
@@ -568,9 +569,10 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
     );
 
     // Restore the composer text when a send was REJECTED before reaching the
-    // model (rate-limit / network — `notSent`). The composer's own form.reset
-    // clears the box optimistically and the optimistic user bubble was rolled
-    // back (useObjectChat), so without this the typed message would just vanish.
+    // model (rate-limit / network — `notSent`). The composer's own submit
+    // clears its message field optimistically and the optimistic user bubble
+    // was rolled back (useObjectChat), so without this the typed message would
+    // just vanish.
     // Runs once per failure and never clobbers text the user has since typed.
     React.useEffect(() => {
       if (!error || !isUnsentSendError(error)) return;
@@ -1111,7 +1113,13 @@ const ChatbotEnhanced = React.forwardRef<HTMLDivElement, ChatbotEnhancedProps>(
             {/* objectstack#35445 — the page in view sits on the input's top
                 edge, inside its frame: it belongs to what the next message
                 carries, and it never lies over the conversation. */}
-            {surfaceContextLabel ? (
+            {/* objectstack#37861 — the host's own context row takes that
+                place, at the start of the line inside the frame. */}
+            {promptInputHeaderSlot ? (
+              <PromptInputHeader className="px-3 pt-2 pb-0" data-testid="prompt-input-header-slot">
+                {promptInputHeaderSlot}
+              </PromptInputHeader>
+            ) : surfaceContextLabel ? (
               <PromptInputHeader className="px-3 pt-2 pb-0" data-testid="surface-context-chip">
                 <span
                   className="inline-flex min-w-0 max-w-full items-center gap-1 truncate rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] text-muted-foreground"

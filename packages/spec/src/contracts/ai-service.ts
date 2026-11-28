@@ -1263,12 +1263,14 @@ export interface ToolExecutionContext {
         mode?: string;
     };
     /**
-     * The record(s) the conversation is pinned to — the conversation's FOCUS,
+     * The record(s) the conversation is about — the conversation's FOCUS,
      * as the client reports it on every turn (`context.focus` in the chat
-     * request body), beside the page in view ({@link surfaceContext}). Unlike
-     * the surface, a focus does not follow navigation: the user pinned it, and
-     * it stays until they remove or replace it, so "this policy" keeps meaning
-     * the pinned record while they browse elsewhere.
+     * request body), beside the page in view ({@link surfaceContext}). Until
+     * the conversation's first send, its focus is the record on the page
+     * unless the user removed it; the first send fixes it. Unlike the
+     * surface, a focus then does not follow navigation: it stays until the
+     * user removes it, so "this policy" keeps meaning the focused record
+     * while they browse elsewhere.
      *
      * Client-reported and advisory, exactly like {@link surfaceContext}:
      * NEVER an access decision. A consumer that reads the record re-reads it

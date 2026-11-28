@@ -1,22 +1,25 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * objectstack#36999 — conversation focus: a record pinned to the chat is sent
- * as `context.focus` on every turn, shown as a chip in the composer, and kept
- * across navigation; only where the agent's catalog row declares
- * `capabilities.focus`.
+ * objectstack#36999 / objectstack#37861 — conversation focus, as framework
+ * ADR-0160 D6 (seventh amendment, "The focus of a conversation") rules it:
+ * state `{ focus, dismissed }`; before the first send the focus is the record
+ * on the page unless dismissed, and follows the page; × removes it and nothing
+ * adds it again; the first send fixes both; a conversation opened again
+ * restores its own focus, from this tab or from its row's `metadata.focus`.
+ * Only where the agent's catalog row declares `capabilities.focus`.
  *
  * ## Real subjects
  *
  * The console dock body (`ChatDockConversation`) and the full-page chat
  * (`AiChatPage` at `/ai/ask`), each with the REAL `ChatPane`, the REAL
  * `useChatConversation`, the REAL `useObjectChat` transport, the REAL focus
- * state (`useConversationFocus`) and the REAL composer row
- * (`ChatFocusRow`). What is pinned is the JSON body of each POST to the
- * agent's chat route (captured off a `fetch` stub) and the row the pane hands
- * the composer. The stand-ins: the agent catalog, the model allowlist, and
- * `ChatbotEnhanced` (a recorder that renders the composer row it is handed and
- * exposes the send).
+ * state (`useConversationFocus`) and the REAL chip (`ChatFocusRow`). What is
+ * pinned is the JSON body of each POST to the agent's chat route (captured off
+ * a `fetch` stub) and the chip the pane hands the composer's input frame. The
+ * stand-ins: the agent catalog, the model allowlist, the conversation rows the
+ * server returns, and `ChatbotEnhanced` (a recorder that renders the chip it
+ * is handed inside a focusable frame and exposes the send).
  */
 
 // AiChatPage reads a dropped spreadsheet through `import('@object-ui/plugin-grid')`; load it
@@ -38,6 +41,7 @@ const state = {
         onSendMessage?: (text: string) => void;
         surfaceContextLabel?: string;
         promptHeaderSlot?: React.ReactNode;
+        promptInputHeaderSlot?: React.ReactNode;
       }
     | undefined,
   /** The JSON body of every chat POST, in order. */
@@ -47,7 +51,22 @@ const state = {
   createAttempts: 0,
   /** The next creates fail (the server answers 500). */
   failCreate: false,
+  /** The `metadata` each existing conversation's row is served with. */
+  rows: {} as Record<string, Record<string, unknown> | undefined>,
+  /** While set, a create waits on it before the server answers. */
+  holdCreate: null as Promise<void> | null,
+  /** A row's read waits on its entry before the server answers. */
+  holdRead: {} as Record<string, Promise<void> | undefined>,
 };
+
+/** A gate a stub waits on, and the call that opens it. */
+function gate(): { wait: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const wait = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { wait, open };
+}
 
 vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -59,8 +78,15 @@ vi.mock('@object-ui/plugin-chatbot', async (importOriginal) => {
       state.pane = props;
       return (
         <div data-testid="pane">
-          {props.surfaceContextLabel ? <span data-testid="frame-chip">{props.surfaceContextLabel}</span> : null}
           {props.promptHeaderSlot}
+          <div data-testid="input-frame" className="group/input-group">
+            {props.promptInputHeaderSlot ? (
+              <div data-testid="frame-slot">{props.promptInputHeaderSlot}</div>
+            ) : props.surfaceContextLabel ? (
+              <span data-testid="frame-chip">{props.surfaceContextLabel}</span>
+            ) : null}
+            <textarea data-testid="composer-input" />
+          </div>
         </div>
       );
     },
@@ -90,7 +116,9 @@ import { AiChatPage } from '../../console/ai/AiChatPage';
 import { ChatDockConversation } from '../ChatDockConversation';
 import {
   buildFocusContext,
+  chatFocusFromMetadata,
   readStoredChatFocus,
+  surfaceRecord,
   type ChatFocus,
 } from '../chatFocus';
 import type { ChatSurfaceContext } from '../chatSurfaceContext';
@@ -128,6 +156,7 @@ function installFetch(): void {
       }
       if (/\/conversations$/.test(url) && method === 'POST') {
         state.createAttempts += 1;
+        if (state.holdCreate) await state.holdCreate;
         if (state.failCreate) {
           return new Response(JSON.stringify({ error: 'down' }), {
             status: 500,
@@ -138,7 +167,12 @@ function installFetch(): void {
         return json({ id: `conv-${state.minted}`, messages: [] });
       }
       const one = /\/conversations\/([^/?]+)$/.exec(url);
-      if (one && method === 'GET') return json({ id: decodeURIComponent(one[1]), messages: [] });
+      if (one && method === 'GET') {
+        const id = decodeURIComponent(one[1]);
+        if (state.holdRead[id]) await state.holdRead[id];
+        const metadata = state.rows[id];
+        return json({ id, messages: [], ...(metadata ? { metadata } : {}) });
+      }
       return json({ success: true, data: [] });
     }),
   );
@@ -148,6 +182,7 @@ const record = (id: string): ChatSurfaceContext => ({
   artifact: { type: 'object', name: 'account' },
   selection: { kind: 'record', id },
 });
+const LIST: ChatSurfaceContext = { artifact: { type: 'object', name: 'account' } };
 
 /** The dock's page in view, moved the way a navigation moves it. */
 const page: {
@@ -213,7 +248,12 @@ async function send(text: string): Promise<Record<string, unknown>> {
   return state.sent[before].context ?? {};
 }
 
+const chip = () => screen.queryByTestId('chat-focus-chip');
+const pageChip = () => screen.queryByTestId('surface-context-chip');
+const removeButton = () => screen.queryByTestId('chat-focus-remove');
+
 const ACCOUNT_1: ChatFocus = { object: 'account', id: 'rec_1' };
+const ACCOUNT_9: ChatFocus = { object: 'account', id: 'rec_9' };
 
 beforeEach(() => {
   state.agents = [{ name: 'ask', label: 'Ask', capabilities: { ...CAPS, focus: true } }];
@@ -222,6 +262,9 @@ beforeEach(() => {
   state.minted = 0;
   state.createAttempts = 0;
   state.failCreate = false;
+  state.rows = {};
+  state.holdCreate = null;
+  state.holdRead = {};
   window.localStorage.clear();
   window.sessionStorage.clear();
   installFetch();
@@ -232,114 +275,330 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('buildFocusContext — the one shape both chat hosts send (objectstack#36999)', () => {
-  it('one pinned record, honoured → `focus` is a one-entry array; anything else adds no key', () => {
+describe('the focus helpers (objectstack#36999, objectstack#37861)', () => {
+  it('buildFocusContext: one record, honoured → `focus` is a one-entry array; anything else adds no key', () => {
     expect(buildFocusContext(ACCOUNT_1, true)).toEqual({ focus: [ACCOUNT_1] });
     expect(buildFocusContext(ACCOUNT_1, false)).toEqual({});
     expect(buildFocusContext(null, true)).toEqual({});
     expect(buildFocusContext(undefined, true)).toEqual({});
   });
+
+  it('surfaceRecord: a record page or a record open in a list is a record; a list or a dashboard is none', () => {
+    expect(surfaceRecord(record('rec_1'))).toEqual(ACCOUNT_1);
+    expect(surfaceRecord(LIST)).toBeNull();
+    expect(surfaceRecord({ artifact: { type: 'dashboard', name: 'sales' }, selection: { kind: 'record', id: 'x' } })).toBeNull();
+    expect(surfaceRecord(undefined)).toBeNull();
+  });
+
+  it('chatFocusFromMetadata reads the first entry of the `focus` array the conversation stores, label included', () => {
+    expect(chatFocusFromMetadata({ focus: [{ object: 'account', id: 'rec_9', label: '  Acme  ' }] })).toEqual({
+      ...ACCOUNT_9,
+      label: 'Acme',
+    });
+    expect(chatFocusFromMetadata({ focus: [ACCOUNT_9, ACCOUNT_1] })).toEqual(ACCOUNT_9);
+    expect(chatFocusFromMetadata({ focus: [{ ...ACCOUNT_9, label: ' ' }] })).toEqual(ACCOUNT_9);
+  });
+
+  it('chatFocusFromMetadata: an absent key, a bare object and malformed entries read as no focus', () => {
+    expect(chatFocusFromMetadata(undefined)).toBeNull();
+    expect(chatFocusFromMetadata({})).toBeNull();
+    expect(chatFocusFromMetadata({ focusPreRead: [ACCOUNT_9] })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: ACCOUNT_9 })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: [] })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: [{ object: 'account' }] })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: [{ object: 'account', id: 9 }] })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: [{ object: '', id: 'rec_9' }] })).toBeNull();
+    expect(chatFocusFromMetadata({ focus: ['account:rec_9'] })).toBeNull();
+  });
 });
 
-describe('the console dock — conversation focus (objectstack#36999)', () => {
-  it('the pin on the page chip pins the record; every turn carries it, the first included, across navigation', async () => {
+describe('the console dock — an unsent conversation is about the record on the page (objectstack#37861)', () => {
+  it('opens with the record as its focus, in the input frame, and the first turn carries it', async () => {
     mountDock();
     await composerReady();
-    // The page chip moved into the composer row, with its pin; the frame draws none.
-    expect(screen.getByTestId('surface-context-chip')).toHaveTextContent('Viewing: Account');
+    // The chip sits inside the input's frame, before the input; the pane hands no row above it.
+    expect(screen.getByTestId('frame-slot')).toContainElement(chip());
+    expect(state.pane?.promptHeaderSlot).toBeUndefined();
     expect(screen.queryByTestId('frame-chip')).toBeNull();
+    // No name can be read (no data source): the chip names the record by its pair.
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1');
+    expect(chip()).toHaveAttribute('aria-label', 'Asking about: account · rec_1');
+    // No pin and no switch offer exist any more.
+    expect(screen.queryByTestId('chat-focus-pin')).toBeNull();
+    expect(screen.queryByTestId('chat-focus-switch')).toBeNull();
 
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
-    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
-
-    // The first turn creates the conversation (and remounts the pane): it carries the focus.
     const first = await send('who owns this?');
     expect(state.minted).toBe(1);
     expect(first.focus).toEqual([ACCOUNT_1]);
     expect(first.surface).toEqual(record('rec_1'));
-
-    // Navigating to a list page keeps the focus; the surface moves.
-    page.go({ artifact: { type: 'object', name: 'account' } });
-    const second = await send('and its last order?');
-    expect(second.focus).toEqual([ACCOUNT_1]);
-    expect(second.surface).toEqual({ artifact: { type: 'object', name: 'account' } });
-    // The stored copy is the chip's, under the minted conversation.
-    expect(readStoredChatFocus('conv-1').focus).toEqual(ACCOUNT_1);
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: ACCOUNT_1, dismissed: false });
   });
 
-  it('opening another record asks once; a decline is remembered for the conversation', async () => {
+  it('follows the page until the first send, with no prompt; after it the focus stays', async () => {
     mountDock();
     await composerReady();
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
+    page.go(record('rec_2'));
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_2');
+    // A list has no record: the page chip, with no ×.
+    page.go(LIST);
+    expect(chip()).toBeNull();
+    expect(pageChip()).toHaveTextContent('Viewing: Account');
+    expect(removeButton()).toBeNull();
+    page.go(record('rec_3'));
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_3');
+
+    expect((await send('this one')).focus).toEqual([{ object: 'account', id: 'rec_3' }]);
+    // Sent: navigation no longer moves the focus.
+    page.go(record('rec_4'));
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_3');
+    page.go(LIST);
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_3');
+    const second = await send('and its last order?');
+    expect(second.focus).toEqual([{ object: 'account', id: 'rec_3' }]);
+    expect(second.surface).toEqual(LIST);
+  });
+
+  it('× before the first send falls back to the page chip and nothing re-adds it, before or after the send', async () => {
+    mountDock();
+    await composerReady();
+    fireEvent.click(removeButton()!);
+    expect(chip()).toBeNull();
+    expect(pageChip()).toHaveTextContent('Viewing: Account');
+    expect(removeButton()).toBeNull();
 
     page.go(record('rec_2'));
-    expect(screen.getByTestId('chat-focus-switch')).toHaveTextContent('Ask about "account · rec_2" instead?');
-    fireEvent.click(screen.getByTestId('chat-focus-switch-decline'));
-    expect(screen.queryByTestId('chat-focus-switch')).toBeNull();
+    expect(chip()).toBeNull();
+    expect(pageChip()).toBeInTheDocument();
+    expect(await send('anything?')).not.toHaveProperty('focus');
+    // The first send carried `dismissed` onto the conversation.
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
 
     page.go(record('rec_3'));
-    expect(screen.queryByTestId('chat-focus-switch')).toBeNull();
-    expect((await send('still the first one?')).focus).toEqual([ACCOUNT_1]);
+    expect(chip()).toBeNull();
+    expect(await send('and now?')).not.toHaveProperty('focus');
   });
 
-  it('accepting the offer moves the focus to the record in view', async () => {
+  it('× after the first send stops the focus; the next turn has no key and the page chip stays', async () => {
     mountDock();
     await composerReady();
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
-
-    page.go(record('rec_2'));
-    fireEvent.click(screen.getByTestId('chat-focus-switch-accept'));
-    expect(screen.queryByTestId('chat-focus-switch')).toBeNull();
-    expect((await send('this one')).focus).toEqual([{ object: 'account', id: 'rec_2' }]);
-  });
-
-  it('removing the focus stops it: the next turn has no `focus` key, and the page chip comes back', async () => {
-    mountDock();
-    await composerReady();
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
     expect((await send('first')).focus).toEqual([ACCOUNT_1]);
 
-    fireEvent.click(screen.getByTestId('chat-focus-remove'));
-    expect(screen.queryByTestId('chat-focus-chip')).toBeNull();
-    expect(screen.getByTestId('chat-focus-pin')).toBeInTheDocument();
+    fireEvent.click(removeButton()!);
+    expect(chip()).toBeNull();
+    expect(pageChip()).toBeInTheDocument();
     expect(await send('second')).not.toHaveProperty('focus');
+    page.go(record('rec_2'));
+    expect(chip()).toBeNull();
+    expect(await send('third')).not.toHaveProperty('focus');
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
   });
 
-  it('a focus pinned on an unsent conversation does not follow the user into an existing one', async () => {
-    // conv-old was pinned to rec_9 earlier in this tab; conv-bare to nothing.
-    window.sessionStorage.setItem(
-      'ai-chat-focus:conv-old',
-      JSON.stringify({ focus: { object: 'account', id: 'rec_9' }, declined: false }),
-    );
+  it('a conversation started on a list has no focus, and does not take one on a record page after its first send', async () => {
+    mountDock(LIST);
+    await composerReady();
+    expect(chip()).toBeNull();
+    expect(pageChip()).toHaveTextContent('Viewing: Account');
+    expect(await send('how many?')).not.toHaveProperty('focus');
+    page.go(record('rec_2'));
+    expect(chip()).toBeNull();
+    expect(await send('and this one?')).not.toHaveProperty('focus');
+  });
+
+  it('another target while unsent is another conversation: × on the last one does not carry over', async () => {
     mountDock();
     await composerReady();
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
-    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
+    fireEvent.click(removeButton()!);
+    expect(chip()).toBeNull();
 
-    // Opened from the history without a send: conv-old shows ITS focus, and sends it.
+    page.open({ agent: 'ask', fresh: true });
+    await composerReady();
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1'));
+    expect((await send('fresh')).focus).toEqual([ACCOUNT_1]);
+  });
+});
+
+describe('the console dock — a conversation opened again restores its own focus (objectstack#37861)', () => {
+  it('a send made while the dock resolves a thread joins it, and the thread keeps its own focus: × there stays ×', async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: null, dismissed: true }));
+    const read = gate();
+    state.holdRead['conv-old'] = read.wait;
+    mountDock();
+    await composerReady();
     page.open({ agent: 'ask', conversationId: 'conv-old' });
-    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
     await composerReady();
-    expect((await send('and now?')).focus).toEqual([{ object: 'account', id: 'rec_9' }]);
-    expect(readStoredChatFocus('conv-old').focus).toEqual({ object: 'account', id: 'rec_9' });
+    // Still resolving: no id yet, so the composer shows the page's record.
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1');
 
-    // A conversation with no focus of its own shows none and sends no key.
-    page.open({ agent: 'ask', conversationId: 'conv-bare' });
-    await waitFor(() => expect(screen.queryByTestId('chat-focus-chip')).toBeNull());
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('asked during the resolve');
+    });
+    await act(async () => {
+      read.open();
+    });
+    await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
+    // The send joined the thread the resolve found; no create minted a row.
+    expect(state.minted).toBe(0);
+    expect(state.sent[before].context).not.toHaveProperty('focus');
+    expect(readStoredChatFocus('conv-old')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+    expect(pageChip()).toBeInTheDocument();
+  });
+
+  it('a thread this dock created, resolved again while a send waits, keeps its own ×', async () => {
+    mountDock();
     await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
+    fireEvent.click(removeButton()!);
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+
+    page.open({ agent: 'ask', fresh: true });
+    await composerReady();
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1'));
+    const read = gate();
+    state.holdRead['conv-1'] = read.wait;
+    page.open({ agent: 'ask', conversationId: 'conv-1' });
+    await composerReady();
+
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('asked during the resolve');
+    });
+    await act(async () => {
+      read.open();
+    });
+    await waitFor(() => expect(state.sent.length).toBe(before + 1), { timeout: 4000 });
+    expect(state.minted).toBe(1);
+    expect(state.sent[before].context).not.toHaveProperty('focus');
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+  });
+
+  it("a thread this dock created, opened from history while a later send's create is on the wire, keeps its own ×", async () => {
+    mountDock();
+    await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
+    fireEvent.click(removeButton()!);
+
+    page.open({ agent: 'ask', fresh: true });
+    await composerReady();
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1'));
+    const create = gate();
+    state.holdCreate = create.wait;
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('second thread');
+    });
+    await waitFor(() => expect(state.createAttempts).toBe(2));
+
+    page.open({ agent: 'ask', conversationId: 'conv-1' });
+    await waitFor(() => expect(pageChip()).toBeInTheDocument());
+    await act(async () => {
+      create.open();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-1')).toEqual({ focus: null, dismissed: true });
+    expect(chip()).toBeNull();
+    expect(state.sent.slice(before).map((body) => body.context?.focus)).not.toContainEqual([ACCOUNT_1]);
+    await composerReady();
+    expect(await send('and now?')).not.toHaveProperty('focus');
+  });
+
+  it("a history row opened while the first send's create is on the wire keeps its own focus", async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
+    const create = gate();
+    state.holdCreate = create.wait;
+    mountDock();
+    await composerReady();
+    const before = state.sent.length;
+    await act(async () => {
+      state.pane!.onSendMessage!('first');
+    });
+    await waitFor(() => expect(state.createAttempts).toBe(1));
+
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9'));
+    await act(async () => {
+      create.open();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(readStoredChatFocus('conv-old')).toEqual({ focus: ACCOUNT_9, dismissed: false });
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9');
+    // No turn the dock sent since carries the page's record.
+    expect(state.sent.slice(before).map((body) => body.context?.focus)).not.toContainEqual([ACCOUNT_1]);
+    await composerReady();
+    expect((await send('and now?')).focus).toEqual([ACCOUNT_9]);
+  });
+
+  it('from this tab: a history row keeps its focus, and a sent one without a focus shows none', async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
+    mountDock();
+    await composerReady();
+    expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_1');
+
+    page.open({ agent: 'ask', conversationId: 'conv-old' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9'));
+    await composerReady();
+    expect((await send('and now?')).focus).toEqual([ACCOUNT_9]);
+
+    // A sent conversation with no focus of its own shows the page chip, though the page shows a record.
+    page.open({ agent: 'ask', conversationId: 'conv-bare' });
+    await waitFor(() => expect(chip()).toBeNull());
+    await composerReady();
+    expect(pageChip()).toBeInTheDocument();
     expect(await send('anything?')).not.toHaveProperty('focus');
     expect(state.minted).toBe(0);
   });
 
-  it('a first send whose create fails hands its focus to no conversation opened after it', async () => {
-    window.sessionStorage.setItem(
-      'ai-chat-focus:conv-old',
-      JSON.stringify({ focus: { object: 'account', id: 'rec_9' }, declined: false }),
-    );
+  it('in a new tab, from the row\'s `metadata.focus`: the chip names the stored label and follow-ups send the focus', async () => {
+    state.rows['conv-other-tab'] = { focus: [{ object: 'account', id: 'rec_9', label: 'Acme Corp' }] };
+    mountDock(record('rec_1'));
+    await composerReady();
+
+    page.open({ agent: 'ask', conversationId: 'conv-other-tab' });
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('Acme Corp'));
+    await composerReady();
+    expect(chip()).toHaveAttribute('data-focus-id', 'rec_9');
+    expect((await send('and its renewals?')).focus).toEqual([ACCOUNT_9]);
+    // From here the tab holds its own copy.
+    expect(readStoredChatFocus('conv-other-tab')).toEqual({ focus: ACCOUNT_9, dismissed: false });
+  });
+
+  it('a row with no `metadata.focus` (absent, or malformed) restores no focus', async () => {
+    state.rows['conv-none'] = { activePackageId: 'crm' };
+    state.rows['conv-bad'] = { focus: ACCOUNT_9 };
+    mountDock(record('rec_1'));
+    await composerReady();
+
+    page.open({ agent: 'ask', conversationId: 'conv-none' });
+    await waitFor(() => expect(chip()).toBeNull());
+    await composerReady();
+    expect(await send('one')).not.toHaveProperty('focus');
+
+    page.open({ agent: 'ask', conversationId: 'conv-bad' });
+    await waitFor(() => expect(chip()).toBeNull());
+    await composerReady();
+    expect(await send('two')).not.toHaveProperty('focus');
+  });
+
+  it('this tab\'s × outranks the row\'s metadata', async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-x', JSON.stringify({ focus: null, dismissed: true }));
+    state.rows['conv-x'] = { focus: [ACCOUNT_9] };
     mountDock();
     await composerReady();
-    fireEvent.click(screen.getByTestId('chat-focus-pin'));
-    expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1');
+    page.open({ agent: 'ask', conversationId: 'conv-x' });
+    await waitFor(() => expect(state.pane?.onSendMessage).toBeTypeOf('function'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(chip()).toBeNull();
+    expect(await send('still none?')).not.toHaveProperty('focus');
+  });
+
+  it('a first send whose create fails hands its focus to no conversation opened after it', async () => {
+    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_9, dismissed: false }));
+    mountDock();
+    await composerReady();
 
     // The first send's create fails: no conversation, no turn.
     state.failCreate = true;
@@ -355,50 +614,80 @@ describe('the console dock — conversation focus (objectstack#36999)', () => {
 
     // A history row opened next keeps ITS focus: the failed send minted nothing to carry onto.
     page.open({ agent: 'ask', conversationId: 'conv-old' });
-    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_9'));
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('account · rec_9'));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(readStoredChatFocus('conv-old').focus).toEqual({ object: 'account', id: 'rec_9' });
-  });
-
-  it('a page that shows no one record offers no pin', async () => {
-    mountDock({ artifact: { type: 'object', name: 'account' } });
-    await composerReady();
-    expect(screen.getByTestId('surface-context-chip')).toBeInTheDocument();
-    expect(screen.queryByTestId('chat-focus-pin')).toBeNull();
+    expect(readStoredChatFocus('conv-old').focus).toEqual(ACCOUNT_9);
   });
 });
 
-describe('the full-page chat — conversation focus behaves as in the dock (objectstack#36999)', () => {
-  it('a conversation pinned in the dock rides every turn on the full page; removing it stops it', async () => {
-    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_1, declined: false }));
-    mountPage('/ai/ask/conv-old');
+describe('the focus chip — × is reachable (objectstack#37861)', () => {
+  it('× is a labelled button with a 24px hit area, shown on hover, while the composer has focus, and on touch', async () => {
+    mountDock();
     await composerReady();
-    await waitFor(() => expect(screen.getByTestId('chat-focus-chip')).toHaveTextContent('account · rec_1'));
+    const button = removeButton()!;
+    expect(button.tagName).toBe('BUTTON');
+    expect(button).toHaveAttribute('type', 'button');
+    expect(button).toHaveAccessibleName('Stop asking about this record');
+    const classes = button.className.split(/\s+/);
+    expect(classes).toEqual(
+      expect.arrayContaining([
+        'size-6',
+        'group-hover/focus-chip:opacity-100',
+        'group-focus-within/input-group:opacity-100',
+        'focus-visible:opacity-100',
+        'pointer-coarse:opacity-100',
+      ]),
+    );
+    // Logical spacing only, so the chip mirrors with a right-to-left page.
+    expect(chip()!.className).not.toMatch(/(^|\s)-?(ml|mr|pl|pr)-/);
+    expect(button.className).not.toMatch(/(^|\s)-?(ml|mr|pl|pr)-/);
+    // Keyboard: the button takes focus and Enter/Space activate it as any button does.
+    button.focus();
+    expect(document.activeElement).toBe(button);
+  });
+});
 
-    expect((await send('first')).focus).toEqual([ACCOUNT_1]);
-    expect(state.minted).toBe(0);
-    expect((await send('second')).focus).toEqual([ACCOUNT_1]);
+describe('the full-page chat — conversation focus behaves as in the dock (objectstack#37861)', () => {
+  it('a new conversation here has no record, so no focus and no chip', async () => {
+    mountPage();
+    await composerReady();
+    expect(chip()).toBeNull();
+    expect(await send('first')).not.toHaveProperty('focus');
+    expect(state.minted).toBe(1);
+  });
 
-    fireEvent.click(screen.getByTestId('chat-focus-remove'));
+  it('a conversation opened by its address in a new tab restores the row\'s focus; × stops it', async () => {
+    state.rows['conv-77'] = { focus: [{ object: 'account', id: 'rec_9', label: 'Acme Corp' }] };
+    mountPage('/ai/ask/conv-77');
+    await waitFor(() => expect(screen.getByTestId('chat-focus-name')).toHaveTextContent('Acme Corp'));
+    await composerReady();
+    expect((await send('first')).focus).toEqual([ACCOUNT_9]);
+    expect((await send('second')).focus).toEqual([ACCOUNT_9]);
+
+    fireEvent.click(removeButton()!);
     expect(await send('third')).not.toHaveProperty('focus');
+    expect(state.minted).toBe(0);
   });
 });
 
 describe.each([
-  ['the console dock', () => { mountDock(); page.open({ agent: 'ask', conversationId: 'conv-old' }); }],
-  ['the full-page chat', () => mountPage('/ai/ask/conv-old')],
+  ['the console dock', () => mountDock()],
+  ['the full-page chat', () => mountPage('/ai/ask/conv-77')],
 ])('%s — an agent that does not declare `capabilities.focus` (objectstack#36999)', (_surface, mount) => {
-  it('draws no pin and no chip, and sends no `focus` key even for a conversation with a stored focus', async () => {
+  it('draws no chip and no frame slot, and sends no `focus` key, whatever the page or the row says', async () => {
     state.agents = [{ name: 'ask', label: 'Ask', capabilities: { ...CAPS } }];
-    window.sessionStorage.setItem('ai-chat-focus:conv-old', JSON.stringify({ focus: ACCOUNT_1, declined: false }));
+    state.rows['conv-77'] = { focus: [ACCOUNT_9] };
     mount();
     await composerReady();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
 
-    expect(screen.queryByTestId('chat-focus-row')).toBeNull();
-    expect(screen.queryByTestId('chat-focus-pin')).toBeNull();
+    expect(chip()).toBeNull();
     expect(state.pane?.promptHeaderSlot).toBeUndefined();
+    expect(state.pane?.promptInputHeaderSlot).toBeUndefined();
     expect(await send('first')).not.toHaveProperty('focus');
   });
 });
@@ -409,6 +698,6 @@ describe('the console dock — no flag leaves the page chip where it was (object
     mountDock();
     await composerReady();
     expect(screen.getByTestId('frame-chip')).toHaveTextContent('Viewing: Account');
-    expect(screen.queryByTestId('chat-focus-row')).toBeNull();
+    expect(chip()).toBeNull();
   });
 });

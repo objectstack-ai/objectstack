@@ -500,7 +500,9 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // `console.ai.empty.editApp.title`, `chatbot.plan.iterateOrNew.question` and
     // `.extend`, `chatbot.plan.suggestedFieldLegend`, `chatbot.build.nextStepQuote`
     // and `chatbot.build.draftPosture` — six spans fewer.
-    expect(okSpans, 'correctly paired spans').toBe(129);
+    // 128 once objectstack-ai/objectstack#37861 removed `console.ai.focus.switchPrompt`
+    // with the offer it drew („{{target}}“) — one interpolated span fewer.
+    expect(okSpans, 'correctly paired spans').toBe(128);
   });
 
   it('keeps the count identity that replaces the card’s count(„) === count(“)', () => {
@@ -647,7 +649,8 @@ describe('objectui#3876 — de pack closes „ with “ and not with a straight 
     // and `grid.import.scopeEntry`.
     // 129 / 129 / 0 after objectstack-ai/objectstack#37682 retired six build-chat
     // keys, one matched pair each.
-    expect({ open, close, rdq }).toEqual({ open: 129, close: 129, rdq: 0 });
+    // 128 / 128 / 0 after objectstack-ai/objectstack#37861 removed `console.ai.focus.switchPrompt`.
+    expect({ open, close, rdq }).toEqual({ open: 128, close: 128, rdq: 0 });
     // The durable shape: every „ closed by a “, every surplus “ an English
     // opener answered by a ”. Survived translating the two English values.
     expect(close).toBe(open + rdq);

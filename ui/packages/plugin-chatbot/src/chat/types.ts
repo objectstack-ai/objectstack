@@ -566,6 +566,15 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
    */
   surfaceContextTitle?: string;
   /**
+   * objectstack#37861 — a row drawn INSIDE the input's frame, on its top edge
+   * at the start of the line (the right in a right-to-left language): the
+   * host's context chip for what the next message carries, such as the
+   * record a conversation is about with its own remove control. When given
+   * it takes the place of the {@link surfaceContextLabel} chip there.
+   * Absent = the frame draws that chip as before.
+   */
+  promptInputHeaderSlot?: React.ReactNode;
+  /**
    * Controls how agent internals are exposed. `summary` keeps end-user chat
    * readable by grouping repeated tool calls and hiding raw args/results.
    * Use `debug` for developer/admin trace views.

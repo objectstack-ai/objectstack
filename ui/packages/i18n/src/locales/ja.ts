@@ -2408,12 +2408,8 @@ const ja = {
       suggestionsLabel: 'おすすめの質問',
       discussing: "表示中: {{target}}",
       focus: {
-        pin: "このレコードについて質問し続ける",
         pinned: "質問対象: {{target}}",
         remove: "このレコードについての質問をやめる",
-        switchPrompt: "代わりに「{{target}}」について質問しますか？",
-        switchAccept: "切り替える",
-        switchDecline: "このまま",
       },
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the

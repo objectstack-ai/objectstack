@@ -105,9 +105,9 @@ interface ChatPaneProps {
    * pane it keys on the conversation id, so the first send still carries it;
    * see `useConversationFocus`). Drawn and sent only while the agent's catalog
    * row declares `capabilities.focus`: then every turn carries
-   * `context.focus`, and the composer's context row replaces the page chip
+   * `context.focus`, and the composer's context chip replaces the page chip
    * ({@link ChatFocusRow}). Absent, or an agent that does not honour it →
-   * nothing changes: no pin, no chip, no key.
+   * nothing changes: no chip, no key.
    */
   conversationFocus?: ConversationFocus;
   agents: AgentDescriptor[];
@@ -371,9 +371,9 @@ export function ChatPane({
         // transport reads the body per send, so this stays fresh per turn).
         // The console dock sends the page in view too (objectstack#30043).
         ...(surfaceContext ? { surface: surfaceContext } : {}),
-        // objectstack#36999 — the record the conversation is pinned to, on
-        // EVERY turn while it is pinned (the body is the authority; nothing
-        // the server stored replaces it). No key at all otherwise.
+        // objectstack#36999 — the record the conversation is about, on EVERY
+        // turn while it has one (the body is the authority; nothing the
+        // server stored replaces it). No key at all otherwise.
         ...buildFocusContext(conversationFocus?.focus, focusHonoured),
         // The language this console renders in, so a reply that names a card
         // control names it as the card draws it. Only `Accept-Language` reaches
@@ -778,17 +778,13 @@ export function ChatPane({
         target: surfaceArtifactLabel || surfaceChipTitle,
       })
     : undefined;
-  // objectstack#36999 — while the agent honours a focus, the composer's
-  // context row (the page chip with its pin, or the pinned record's chip) is
-  // drawn here instead of the composer's text-only page chip.
+  // objectstack#36999 / objectstack#37861 — while the agent honours a focus,
+  // the composer's context chip (the conversation's record with ×, or the
+  // page chip without one) is drawn here, inside the input's frame at the
+  // start of the line, instead of the composer's text-only page chip.
   const focusRow =
-    focusHonoured && conversationFocus ? (
-      <ChatFocusRow
-        focus={conversationFocus}
-        surface={surfaceContext}
-        surfaceLabel={surfaceChipLabel}
-        surfaceTitle={surfaceChipTitle}
-      />
+    focusHonoured && conversationFocus && (conversationFocus.focus || surfaceChipLabel) ? (
+      <ChatFocusRow focus={conversationFocus} surfaceLabel={surfaceChipLabel} surfaceTitle={surfaceChipTitle} />
     ) : null;
 
   return (
@@ -854,9 +850,9 @@ export function ChatPane({
         surface="plain"
         maxHeight="100%"
         headerSlot={hideHeader || !headerHasContent ? undefined : headerSlot}
-        // objectstack#36999 — the focus row is a row of the composer's own
-        // area, in flow above the input.
-        promptHeaderSlot={focusRow ?? undefined}
+        // objectstack#37861 — the focus chip sits inside the input's frame,
+        // at the start of the line.
+        promptInputHeaderSlot={focusRow ?? undefined}
         messages={shownMessages}
         // Keys the question card's skip marks to this conversation.
         conversationId={conversationId}
@@ -946,7 +942,7 @@ export function ChatPane({
         // free text in any language into the same field) and by the model on
         // its next turn. No code parses it, so it follows the UI locale.
         toolDenyReason={t('console.ai.toolDenyReason')}
-        // The page chip (see `surfaceChipLabel` above); the focus row draws it
+        // The page chip (see `surfaceChipLabel` above); the focus chip draws it
         // instead while the agent honours a focus (objectstack#36999).
         surfaceContextLabel={focusRow ? undefined : surfaceChipLabel}
         surfaceContextTitle={focusRow ? undefined : surfaceChipTitle}
