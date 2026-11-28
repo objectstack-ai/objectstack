@@ -3445,7 +3445,7 @@ export async function selfTest() {
       const armPullJson = (over = {}) => ({ ...pullOf().json, body: LOW_BODY, labels: [], head: { sha: ARM_HEAD, ...sameRepo }, base: { sha: ARM_TIP, ref: 'main', ...sameRepo }, ...over });
       // The arm's record stage, read and favourable — a record on the head whose line reads `no`, a card never
       // labelled `security` — unless a case overrides a half (`null` hands that half in unread: the arm's `pending`).
-      const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, ...over });
+      const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 900, carried: null, securityTouching: { state: 'read', value: 'no' }, recordLeg: { state: 'stands', reason: null }, ...over });
       const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] }, ...over });
       const lowRead = (paths, over = {}) => pullLowRiskReading(armPullJson(over.pull ?? {}), paths, {
         timeline: { measured: true, reason: null, events: over.events ?? [] },
@@ -3473,6 +3473,9 @@ export async function selfTest() {
         'a doubled line': [armPlan([SK, CS], lowRead([SK, CS], { record: stageRecord({ securityTouching: { state: 'unreadable', reason: 'it carries 2 `Security-touching:` lines, and a record states exactly one' } }) })), 'is unreadable: it carries 2'],
         'no record on the head': [armPlan([SK, CS], lowRead([SK, CS], { record: stageRecord({ located: 'absent', securityTouching: null }) })), 'no contract-review record names this head'],
         'a record not read': [armPlan([SK, CS], lowRead([SK, CS], { record: { measured: false, reason: 'HTTP 502' } })), 'its contract-review record was not read (HTTP 502)'],
+        // #35612: the record leg on the same comment, as the queue reads it — a FAIL or a record below its tier.
+        'a FAIL record reading no': [armPlan([SK, CS], lowRead([SK, CS], { record: stageRecord({ recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }) })), 'does not read a clean PASS: it reads FAIL'],
+        'a record below its tier': [armPlan([SK, CS], lowRead([SK, CS], { record: stageRecord({ recordLeg: { state: 'below-tier', reason: null } }) })), "does not stand at its face's tier"],
         'a security label on the card': [armPlan([SK, CS], lowRead([SK, CS], { cardLabels: stageCard({ labels: ['security'] }) })), 'its card #1 carries the `security` label'],
         'a security label removed from the card': [armPlan([SK, CS], lowRead([SK, CS], { cardLabels: stageCard({ timeline: { measured: true, reason: null, events: [{ event: 'unlabeled', label: { name: 'security' } }] } }) })), 'the timeline of its card #1 shows the `security` label removed'],
         'a card nobody could name': [armPlan([SK, CS], lowRead([SK, CS], { cardLabels: { measured: false, reason: 'no card could be derived for it — its body names no card' } })), 'the labels of its card were not read (no card could be derived for it'],

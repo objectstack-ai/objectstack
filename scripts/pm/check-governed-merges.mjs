@@ -1254,7 +1254,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // 74 → 95 with the arm's record stage: sixteen pins on the two conjuncts and the stage's three states, five on `--pr`;
   // 95 → 100 with every other card the pull names (`others`): labelled, unread, not said to be read, each its own
   // reason, and one on `--pr`.
-  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 100,
+  // 100 → 103 (#35612): the record must stand on the queue's record leg, its control (the queue leg defers), and `--pr`.
+  '⚖️ the low-risk skills arm: skills wording on Clause-② no lands Tier S, everything else stays H (#33501)': 103,
   // 51 → 66 with the record stage as the sweep reads it at the landing: ten pins, and five on which landings it binds;
   // 66 → 71 with the other cards as they stood at the landing (four pins) and the stage's two NOT MEASURED reads.
   '⚖️ #33603: the sweep lists a low-risk arm landing APART and judges it on a same-head at-tier PASS record': 71,
@@ -2928,7 +2929,7 @@ export function lowRiskArmVerdict(matched, repo, reading = null) {
   let recordStage = LOW_RISK_RECORD_STAGE.notReached;
   if (handed) {
     recordStage = LOW_RISK_RECORD_STAGE.read;
-    reasons.push(...lowRiskRecordStageReasons(reading.record ?? null, reading.cardLabels ?? null));
+    reasons.push(...lowRiskRecordStageReasons(reading.record ?? null, reading.cardLabels ?? null, { legDeferred: reading.recordLeg === RULE_CHANGE_RECORD_LEG_DEFERRED }));
   } else if (reasons.length === 0) {
     recordStage = LOW_RISK_RECORD_STAGE.pending;
     reasons.push(LOW_RISK_RECORD_STAGE_PENDING_REASON);
@@ -2969,13 +2970,21 @@ export const LOW_RISK_RECORD_STAGE_PENDING_REASON =
  * or `{ measured: false, reason }` — no derivable card included, since a label on a card nobody
  * could name cannot be ruled out. The conjunct holds only when each card's labels were read and none is
  * `security`, and its timeline was read and never removed one: the PR's own rule, on every card it names.
+ *
+ * And the record must be one the queue's record leg CLEARS (#35612, the N1 shape of #35610 on this arm): its
+ * `recordLeg` (`{ state, reason }`, built by the guard's `lowRiskRecordStage` with `recordVerdict` then
+ * `recordPassVerdict` on the same comment) reads `stands`, so a FAIL, a record below its face's tier, an unreadable
+ * leg or a leg not read is a reason. With the carry rule above (`carried`, `lowRiskCarryRefusal`) that is the
+ * queue's `lowRiskRecordVerdict`, so `--pr` and the relay cannot read the arm Tier S over a record the queue
+ * refuses. ⛔ One caller may skip it — `legDeferred`, the queue leg, whose own record leg runs that verdict next
+ * (`RULE_CHANGE_RECORD_LEG_DEFERRED` on its reading) and so keeps its refusal kinds as they were.
  */
-export function lowRiskRecordStageReasons(record, cardLabels) {
-  return [...lowRiskRecordLineReasons(record), ...lowRiskCardLabelReasons(cardLabels)];
+export function lowRiskRecordStageReasons(record, cardLabels, { legDeferred = false } = {}) {
+  return [...lowRiskRecordLineReasons(record, legDeferred), ...lowRiskCardLabelReasons(cardLabels)];
 }
 
-/** The record stage's first conjunct: the review of record on this head reads `Security-touching: no`. Pure. */
-function lowRiskRecordLineReasons(record) {
+/** The record stage's first conjunct: the review of record on this head stands on the record leg and reads `Security-touching: no`. Pure. */
+function lowRiskRecordLineReasons(record, legDeferred = false) {
   const key = LOW_RISK_RECORD_LINE.split(':')[0];
   if (!record || record.measured !== true) {
     return [`its contract-review record was not read (${record?.reason ?? 'no reading'}), so no \`${LOW_RISK_RECORD_LINE}\` line is established`];
@@ -2989,6 +2998,7 @@ function lowRiskRecordLineReasons(record) {
   const which = `its contract-review record (${record.where ?? 'a'} comment ${record.id ?? '(no id)'})`;
   const line = record.securityTouching;
   if (record.carried && record.carried.ok !== true) reasons.push(`${which} ${record.carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
+  if (!legDeferred) reasons.push(...recordLegReasons(record.recordLeg, which));
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${key}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${key}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
   else if (line.value !== 'no') reasons.push(`${which} reads \`${key}: ${String(line.value)}\``);
@@ -3182,6 +3192,19 @@ export const RULE_CHANGE_RECORD_STAGE_PENDING_REASON =
   `its contract-review record was not read, so no \`${RULE_CHANGE_VERIFIED_KEY}:\` line is established`;
 
 /**
+ * Why the queue's record leg on the same comment (`recordLeg`, `{ state, reason }`) keeps a record stage at Tier H,
+ * or [] when it `stands`: the one wording both record stages print — the split's and the low-risk arm's. Pure.
+ */
+function recordLegReasons(leg, which) {
+  if (leg?.state === 'stands') return [];
+  const said = leg?.reason ? `: ${leg.reason}` : '';
+  if (!leg) return [`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`];
+  if (leg.state === 'not-pass') return [`${which} does not read a clean PASS${said}`];
+  if (leg.state === 'below-tier') return [`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`];
+  return [`${which} does not stand on the queue's record leg (${leg.state})${said}`];
+}
+
+/**
  * Why the record keeps the split at Tier H, or [] — the split's last conjunct. Pure.
  *
  * `record` is the reading the low-risk arm's record stage already takes (`lowRiskRecordStage`, the queue guard),
@@ -3208,14 +3231,7 @@ export function ruleChangeRecordReasons(record, declared) {
   const carried = record.ruleChangeCarried;
   if (carried && carried.ok !== true) reasons.push(`${which} ${carried.reason ?? 'was carried from an older head over hops that could not be read'}`);
   // The queue's record leg on the same comment: ⛔ a caller that hands no leg reading gets no Tier S (N1 of #35610).
-  const leg = record.recordLeg;
-  if (leg?.state !== 'stands') {
-    const said = leg?.reason ? `: ${leg.reason}` : '';
-    if (!leg) reasons.push(`${which} was not read by the queue's record leg, so whether it stands at its tier and reads a clean PASS is unknown`);
-    else if (leg.state === 'not-pass') reasons.push(`${which} does not read a clean PASS${said}`);
-    else if (leg.state === 'below-tier') reasons.push(`${which} does not stand at its face's tier (its \`Served-tier:\` line)${said}`);
-    else reasons.push(`${which} does not stand on the queue's record leg (${leg.state})${said}`);
-  }
+  reasons.push(...recordLegReasons(record.recordLeg, which));
   const line = record.ruleChangeVerified;
   if (!line || line.state === 'missing') reasons.push(`${which} carries no \`${RULE_CHANGE_VERIFIED_KEY}:\` line`);
   else if (line.state !== 'read') reasons.push(`the \`${RULE_CHANGE_VERIFIED_KEY}:\` line of ${which} is unreadable: ${line.reason ?? 'no reason recorded'}`);
@@ -7759,7 +7775,7 @@ async function selfTest() {
     // The arm's RECORD STAGE, read and favourable: a record on this head whose one line reads `no`, and a card that
     // never carried `security`. Every reading below carries it, so a row that pins Tier S pins it on the whole
     // conjunction, and the record-stage rows further down each drop one piece.
-    const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, ...over });
+    const stageRecord = (over = {}) => ({ measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, recordLeg: { state: 'stands', reason: null }, ...over });
     // `others`: every OTHER card the pull names, each read like the first; none here unless a row says so.
     const stageCard = (over = {}) => ({ measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] }, ...over });
     const read = (paths, over = {}) => ({
@@ -7849,6 +7865,22 @@ async function selfTest() {
       recordH(stageRecord({ carried: { from: 'd'.repeat(40), ok: false } }), /over hops that could not be read$/) === true &&
       recordH(stageRecord({ carried: { from: 'd'.repeat(40) } }), /over hops that could not be read$/) === true &&
       stageTier({ record: stageRecord({ carried: { from: 'd'.repeat(40), ok: true, reason: null } }) }) === GOVERNED_TIER_S);
+    // #35612 (the N1 shape of #35610 on this arm): the record must be one the queue's record leg CLEARS. A FAIL, a
+    // record below its face's tier, an unreadable leg or a leg nobody read is Tier H however its line reads `no`.
+    assert('⛔ RECORD-LEG a-record-the-queue-record-leg-refuses-FAIL-below-tier-unreadable-or-unread-is-Tier-H-though-its-line-reads-no',
+      recordH(stageRecord({ recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }), /^its contract-review record \(PR comment 9001\) does not read a clean PASS: it reads FAIL$/) === true &&
+      recordH(stageRecord({ recordLeg: { state: 'below-tier', reason: null } }), /^its contract-review record \(PR comment 9001\) does not stand at its face's tier \(its `Served-tier:` line\)$/) === true &&
+      recordH(stageRecord({ recordLeg: { state: 'unreadable', reason: 'the hops could not be diffed' } }), /does not stand on the queue's record leg \(unreadable\): the hops could not be diffed$/) === true &&
+      recordH(stageRecord({ recordLeg: undefined }), /^its contract-review record \(PR comment 9001\) was not read by the queue's record leg, so whether it stands/) === true &&
+      [{ state: 'Stands' }, 'stands', {}, null].every((recordLeg) => stageTier({ record: stageRecord({ recordLeg }) }) === GOVERNED_TIER_H));
+    // The control, one step away: the same record whose leg stands is Tier S; and the queue leg, which says its own
+    // record leg runs next (`RULE_CHANGE_RECORD_LEG_DEFERRED`), is not held to the conjunct twice.
+    assert('RECORD-LEG-CONTROL a-leg-that-stands-is-Tier-S-and-the-queue-leg-deferring-to-its-own-record-leg-skips-the-conjunct',
+      stageTier({ record: stageRecord({ recordLeg: { state: 'stands', reason: null } }) }) === GOVERNED_TIER_S &&
+      stageTier({ record: stageRecord({ recordLeg: { state: 'not-pass', reason: 'it reads FAIL' } }), recordLeg: RULE_CHANGE_RECORD_LEG_DEFERRED }) === GOVERNED_TIER_S &&
+      lowRiskRecordStageReasons(stageRecord({ recordLeg: undefined }), stageCard(), { legDeferred: true }).length === 0 &&
+      lowRiskRecordStageReasons(stageRecord({ recordLeg: undefined }), stageCard()).length === 1 &&
+      stageTier({ record: stageRecord({ recordLeg: { state: 'not-pass', reason: 'x' }, securityTouching: { state: 'read', value: 'yes' } }), recordLeg: RULE_CHANGE_RECORD_LEG_DEFERRED }) === GOVERNED_TIER_H);
     // ⛔ Fail closed on SHAPE: only a measured record FOUND on this head whose line was READ as exactly `no` passes,
     // so no stand-in, partial or mistyped reading — whatever built it — can read `no`.
     assert('⛔ RECORD-LINE no-reading-short-of-a-measured-found-record-whose-line-was-READ-as-no-passes-whatever-its-shape',
@@ -7977,6 +8009,13 @@ async function selfTest() {
           await prH({ rows: [] }, /^no contract-review record names this head/) === true &&
           await prH({ rows: [review(LOW_RISK_RECORD_LINE, { user: { login: 'some-commenter' } })] }, /^no contract-review record names this head/) === true &&
           await prH({ rows: [review(), review(null, { id: 702, created_at: '2026-11-15T04:30:00Z' })] }, /\(PR comment 702\) carries no `Security-touching:` line/) === true);
+        // #35612: `--pr` reads the record leg off the same comment (the guard's `lowRiskRecordStage`), so a record whose
+        // line reads `no` but which the queue's record leg refuses — a FAIL, below its tier — no longer prints Tier S.
+        const refused = (over) => review(LOW_RISK_RECORD_LINE, over);
+        assert('⛔ --pr-RECORD-LEG a-FAIL-or-below-tier-record-reading-no-is-Tier-H-as-the-queue-record-leg-reads-it',
+          await prH({ rows: [refused({ body: refused().body.replace('**VERDICT: PASS**', '**VERDICT: FAIL**') })] }, /^its contract-review record \(PR comment 700\) does not read a clean PASS: it reads FAIL$/) === true &&
+          await prH({ rows: [refused({ body: refused().body.replace(`Served-tier: \`${AT_TIER}\``, 'Served-tier: `TIER_DEFAULT`') })] }, /^its contract-review record \(PR comment 700\) does not stand at its face's tier/) === true &&
+          await prTier({ rows: [refused()] }) === GOVERNED_TIER_S);
         assert('⛔ --pr-CARD-LABEL a-card-carrying-security-one-that-had-it-removed-or-a-PR-naming-no-card-reads-Tier-H',
           await prH({ labels: ['docs', 'security'] }, /^its card #69 carries the `security` label$/) === true &&
           await prH({ events: [{ event: 'unlabeled', label: { name: 'security' } }] }, /^the timeline of its card #69 shows the `security` label removed$/) === true &&
@@ -11017,7 +11056,7 @@ async function selfTest() {
       changesets: { measured: true, reason: null, files: paths.filter((p) => LOW_RISK_CHANGESET_PATH.test(p)).map((path) => ({ path, text: CS_TEXT })) },
       catalogFiles: { measured: true, reason: null, files: catalog },
       // The arm's record stage, read and favourable (the skills battery pins each piece of it).
-      record: { measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' } },
+      record: { measured: true, reason: null, located: 'found', where: 'PR', id: 9001, carried: null, securityTouching: { state: 'read', value: 'no' }, recordLeg: { state: 'stands', reason: null } },
       cardLabels: { measured: true, reason: null, card: 1, labels: [], timeline: { measured: true, reason: null, events: [] }, others: { measured: true, reason: null, cards: [] } },
       ...over,
     });
