@@ -8035,7 +8035,9 @@ function selfTest() {
       'type ThemeProviderProps = {\n  children: React.ReactNode\n  defaultTheme?: Theme\n  storageKey?: string\n}\n\n';
     const ALIAS = 'type ThemeProviderState = {\n  theme: Theme\n  setTheme: (theme: Theme) => void\n}\n\n';
     const VALUE = 'const initialState: ThemeProviderState = {\n  theme: "system",\n  setTheme: () => null,\n}\n';
-    assert(memberReturnAnnotation(THEME_HEAD + ALIAS.replace('setTheme: (theme: Theme) => void', 'other: string') + VALUE, 'setTheme')?.annotation === null, 'TSO-U43: LIT CONTROL, THE ThemeProvider SHAPE -- an alias closed by a bare `}` (no `;`), then a typed `const` object literal: the literal\'s arrow stays an unannotated VALUE, never a function type returning `null`');
+    const aliasOnly = ALIAS.replace('setTheme: (theme: Theme) => void', 'other: string');
+    assert(memberReturnAnnotation(aliasOnly + VALUE, 'setTheme')?.annotation === null &&
+      memberReturnAnnotation(THEME_HEAD + aliasOnly + VALUE, 'setTheme')?.annotation === null, 'TSO-U43: LIT CONTROL, THE ThemeProvider SHAPE (its lines 13-21, and the whole head of the file) -- an alias closed by a bare `}` (no `;`), then a typed `const` object literal: the literal\'s arrow stays an unannotated VALUE, never a function type returning `null`');
     assert(memberReturnAnnotation(THEME_HEAD + ALIAS + VALUE, 'setTheme')?.annotation === 'void', 'TSO-U44: ...and in the same file the ALIAS member reads its annotation (`void`) -- the alias body before it is a statement, not a header literal, so the import before it never becomes part of its header');
   }
   assert(memberReturnAnnotation('type C<T> = T extends { a: 1 } ? A : B\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null &&
