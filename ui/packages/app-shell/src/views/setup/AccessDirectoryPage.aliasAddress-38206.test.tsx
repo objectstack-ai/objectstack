@@ -11,6 +11,9 @@
  *  1. A create (`position/new`) opens in Studio, on the environment scope's
  *     editor.
  *  2. A type's list outside the environment scope gets it, and the list renders.
+ *     The scoped address is spelled at the `setup` alias, as
+ *     `accessDirectoryLocation` spells it (kept as is); the shell serves the
+ *     alias at the package id.
  *
  * The metadata-admin pages are stubs; the gate is `usePermissions`' answer, stubbed.
  */
@@ -64,9 +67,11 @@ const where = () => screen.getByTestId('where').textContent;
 
 afterEach(() => cleanup());
 
+const SETUP = '/apps/setup/component/security/access-directory';
+
 const ADDRESSES = [
   ['the package-id address the shell serves', '/apps/com.objectstack.setup/component/security/access-directory'],
-  ['the setup alias', '/apps/setup/component/security/access-directory'],
+  ['the setup alias', SETUP],
 ] as const;
 
 describe.each(ADDRESSES)('at %s (objectstack#38206)', (_label, base) => {
@@ -81,6 +86,6 @@ describe.each(ADDRESSES)('at %s (objectstack#38206)', (_label, base) => {
     const el = await screen.findByTestId('area-page');
     expect(el.getAttribute('data-page')).toBe('list');
     expect(el.getAttribute('data-type')).toBe('position');
-    expect(where()).toBe(`${base}/position?scope=environment`);
+    expect(where()).toBe(`${SETUP}/position?scope=environment`);
   });
 });
