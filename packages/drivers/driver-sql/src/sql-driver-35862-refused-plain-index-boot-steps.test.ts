@@ -209,7 +209,7 @@ describe('a refused PLAIN index does not skip the object’s remaining boot step
 
       // And `initObjects` went on: every later step ran for this table.
       for (const step of LATER_STEPS) {
-        expect(steps[step].mock.calls.some((c) => c[0] === T), `${step} ran for ${T}`).toBe(true);
+        expect(steps[step].mock.calls.some((c: unknown[]) => c[0] === T), `${step} ran for ${T}`).toBe(true);
       }
     },
   );
