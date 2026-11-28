@@ -120,7 +120,7 @@ const TASK_OBJECT = {
     is_done: { type: 'formula', expression: "record.status == 'done'" },
   },
   actions: [
-    { name: 'complete', label: 'Complete', operation: 'update', patch: { status: 'done' }, locations: ['record_header'] },
+    { name: 'complete', label: 'Complete', operation: 'update', patch: { status: 'done' }, locations: ['record_page'] },
   ],
 };
 const MINE_NOTE = { name: 'mine_note', label: 'Mine note', type: 'input', required: true, visibleWhen: 'record.is_mine == true' };

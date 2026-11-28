@@ -87,6 +87,19 @@ function embedderKeys(): string[] {
   return aiEmbedderSettingsSpecifiers.map((s) => s.key).filter((k): k is string => typeof k === 'string');
 }
 
+/** How a host shapes what {@link contributeKnowledgeSettings} offers. */
+export interface KnowledgeSettingsContributionOptions {
+  /**
+   * Offer the embedder section (`ai.embedder_*`) and the `ai/test_embedder`
+   * action on the `ai` settings page. `false` offers neither and logs nothing
+   * about them at boot: a host that provides the embedder itself (registers
+   * the `embedder` service) leaves its administrators nothing to configure.
+   * The knowledge page, its actions and its Setup entry are offered either way.
+   * @default true
+   */
+  embedderSettings?: boolean;
+}
+
 /** What {@link contributeKnowledgeSettings} offered on this boot. */
 export interface KnowledgeSettingsContribution {
   knowledge: boolean;
@@ -108,6 +121,7 @@ export function contributeKnowledgeSettings(
   ctx: PluginContext,
   version: string,
   service?: KnowledgeBuildActionsService,
+  options: KnowledgeSettingsContributionOptions = {},
 ): KnowledgeSettingsContribution {
   const offered: KnowledgeSettingsContribution = { knowledge: false, embedder: false, nav: false };
   let settings: SettingsSlot | undefined;
@@ -133,6 +147,8 @@ export function contributeKnowledgeSettings(
   // (that copy carries option-source tables in place of declared ones). A host
   // that registered its own `ai` manifest keeps it untouched and is told why
   // it has no embedder keys; one whose `ai` already declares them keeps those.
+  // A host that switched the section off (`embedderSettings: false`) chose
+  // this: nothing joins, no handler is registered and nothing is said.
   let ai: ReturnType<SettingsSlot['getManifest']> | undefined;
   try {
     ai = settings.getManifest('ai');
@@ -142,7 +158,9 @@ export function contributeKnowledgeSettings(
   const served = ai ? keysOf(ai) : new Set<string>();
   const declaresEmbedder = aiEmbedderSettingsSpecifiers.some((s) => s.key !== undefined && served.has(s.key));
   const isBundled = isBundledAiManifest(ai);
-  if (ai && (declaresEmbedder || isBundled)) {
+  if (options.embedderSettings === false) {
+    // Off by the host's choice — see above.
+  } else if (ai && (declaresEmbedder || isBundled)) {
     if (!declaresEmbedder) settings.registerManifest(withAiEmbedderSection(aiSettingsManifest));
     settings.registerAction('ai', 'test_embedder', aiTestEmbedderActionHandler);
     offered.embedder = true;

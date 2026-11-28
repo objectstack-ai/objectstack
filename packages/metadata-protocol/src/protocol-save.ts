@@ -3535,8 +3535,12 @@ export async function packagelessRowHeldBaseDraftAddress(
  * whether or not a row is stored at the address (over none, the delete and
  * the discard are refused too, not answered the no-op receipt).
  * [ADR-0150 D3, the 2026-11-26 note] The bare per-item publish and the bare
- * per-item rollback ask the second state only (`arms: 'disabled-holders'`),
- * after the ADR-0146 D11 close, so they write nothing a disabled holder hides.
+ * per-item rollback ask the disabled-holders judgment only
+ * (`arms: 'disabled-holders'`), after the ADR-0146 D11 close, so they write
+ * nothing a disabled holder hides: [#37851 ruling A] its first state where
+ * they write a package's own row (the publish of its own draft, the rollback
+ * of its own row), its second where they write the package-unbound row,
+ * stored or not.
  * Asked after {@link servedPackagelessSaveAddress} (a name an enabled and a
  * disabled package both hold) and after the rows' own refusal (two or more
  * bindings), so neither answer moves.

@@ -53,7 +53,9 @@
  * that an ordinary user reaches it), and one objectstack registered code (ADR-0112) on the create path:
  * `ORGANIZATION_CREATION_DISABLED`, the server's refusal for the same
  * deployment posture `CreateWorkspaceDialog`'s own guard reads from
- * `/auth/config` (objectui#12977). The rest are teams, dynamic roles and org
+ * `/auth/config` (objectui#12977); and the hosted control plane's
+ * `UNPAID_ORGANIZATION_LIMIT_REACHED`, the create refused past its cap on free
+ * organizations, whose own localized sentence is preferred. The rest are teams, dynamic roles and org
  * surfaces this console has no screen for. Each row costs ten pack
  * translations (that one reuses an existing key), and an unlisted code
  * already degrades correctly, so the cost of omitting one is bounded and the
@@ -74,6 +76,14 @@ export interface OrgErrorEntry {
   key: string;
   /** English fallback, for a pack that does not (yet) define the key. */
   defaultValue: string;
+  /**
+   * The producer composes this refusal's sentence itself, in the request's
+   * language, and marks it `userMessage`: that sentence wins, and the pack
+   * key is the fallback for a refusal that arrives without one. Set only on a
+   * row whose producer owns the copy (an objectstack or cloud code, never a
+   * better-auth one, whose `message` is a third party's English).
+   */
+  preferUserMessage?: boolean;
 }
 
 /** The not-found sentence, shared by the code row and the invitation lookup below. */
@@ -83,8 +93,12 @@ const INVITATION_NOT_FOUND_ENTRY: OrgErrorEntry = {
     'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
 };
 
+/** The hosted control plane's refusal of a create past its free-organization cap. */
+export const UNPAID_ORGANIZATION_LIMIT_REACHED = 'UNPAID_ORGANIZATION_LIMIT_REACHED';
+
 /**
- * Organization error code (better-auth's, or an objectstack registered code)
+ * Organization error code (better-auth's, an objectstack registered code, or
+ * the hosted control plane's)
  * -> the console's own i18n key.
  *
  * Keyed by the code, valued by a key of OUR naming rather than a transliteration
@@ -146,6 +160,22 @@ export const ORG_ERROR_MESSAGE_KEYS: Record<string, OrgErrorEntry> = {
   ORGANIZATION_CREATION_DISABLED: {
     key: 'workspace.multiOrgDisabled',
     defaultValue: 'Creating new organizations is disabled on this instance.',
+  },
+  // The hosted control plane's cap on free (unpaid) organizations one account
+  // may own (cloud#4308): 403 with `{ code, message, userMessage, details:
+  // { unpaid_organization_limit, unpaid_organizations, next_step } }`. The
+  // cloud writes the sentence in the request's language and names the next
+  // step (upgrade a Free organization, or the contact address), so its
+  // `userMessage` is shown as sent (ruling C on objectstack#32440, as
+  // `SettingsPage` does for the delete refusal). The pack sentence below is
+  // only the fallback for a refusal without one: it names no number and no
+  // plan, since neither is the console's to know. The next step itself is
+  // read by {@link readOrgCreateNextStep}.
+  [UNPAID_ORGANIZATION_LIMIT_REACHED]: {
+    key: 'organization.errors.unpaidOrganizationLimitReached',
+    defaultValue:
+      'You already own as many free organizations as one account may. To create another, upgrade one of them to a paid plan or contact support. Organizations you were invited to do not count.',
+    preferUserMessage: true,
   },
 
   // --- accept path (AcceptInvitationPage) ---
@@ -236,7 +266,8 @@ export function invitationVerifyEmailPromptPath(
  * Order — mapped code, then the server's own sentence, then the site's own
  * fallback, then a translated last resort:
  *
- *   1. a code this console maps  -> the localized message
+ *   1. a code this console maps  -> the localized message (for a row marked
+ *      `preferUserMessage`, the producer's `userMessage` first)
  *   2. any other `Error` message -> verbatim, whatever language it is in
  *   3. `fallback`, when given    -> the caller's own localized sentence
  *   4. none of the above         -> `organization.errors.unknown`
@@ -258,12 +289,52 @@ export function resolveOrgErrorMessage(
   const code = errorCode(err);
   if (code) {
     const entry = ORG_ERROR_MESSAGE_KEYS[code];
-    if (entry) return t(entry.key, { defaultValue: entry.defaultValue });
+    if (entry) {
+      if (entry.preferUserMessage) {
+        const userMessage = producerUserMessage(err);
+        if (userMessage) return userMessage;
+      }
+      return t(entry.key, { defaultValue: entry.defaultValue });
+    }
   }
   const message = err instanceof Error ? err.message : undefined;
   if (typeof message === 'string' && message.trim()) return message;
   if (fallback) return t(fallback.key, { defaultValue: fallback.defaultValue });
   return t(UNKNOWN_ERROR.key, { defaultValue: UNKNOWN_ERROR.defaultValue });
+}
+
+/** The producer-marked user-facing sentence on a thrown value, if it carries a non-blank one. */
+function producerUserMessage(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null) return undefined;
+  const userMessage = (err as { userMessage?: unknown }).userMessage;
+  return typeof userMessage === 'string' && userMessage.trim() ? userMessage : undefined;
+}
+
+/**
+ * What a refused create tells the account to do next: the hosted control
+ * plane's `details.next_step` on {@link UNPAID_ORGANIZATION_LIMIT_REACHED}.
+ * `upgrade_to_team` means upgrading one of the account's Free organizations
+ * frees a slot; `contact_support` means no upgrade would, and the sentence
+ * names the address.
+ */
+export type OrgCreateNextStep = 'upgrade_to_team' | 'contact_support';
+
+const ORG_CREATE_NEXT_STEPS: ReadonlySet<string> = new Set<OrgCreateNextStep>(['upgrade_to_team', 'contact_support']);
+
+/**
+ * Read the next step off a rejected organization create, or `undefined` when
+ * the rejection is not {@link UNPAID_ORGANIZATION_LIMIT_REACHED} or names no
+ * step this console knows. Keyed on the code, like every row of
+ * {@link ORG_ERROR_MESSAGE_KEYS}, and read from `details` as the auth client
+ * carries it (flat body or ADR-0112 envelope alike); the sentence is never
+ * parsed for it.
+ */
+export function readOrgCreateNextStep(err: unknown): OrgCreateNextStep | undefined {
+  if (errorCode(err) !== UNPAID_ORGANIZATION_LIMIT_REACHED) return undefined;
+  const details = (err as { details?: unknown }).details;
+  if (typeof details !== 'object' || details === null) return undefined;
+  const step = (details as { next_step?: unknown }).next_step;
+  return typeof step === 'string' && ORG_CREATE_NEXT_STEPS.has(step) ? (step as OrgCreateNextStep) : undefined;
 }
 
 /** Read the HTTP status off a thrown value, if it carries one. */

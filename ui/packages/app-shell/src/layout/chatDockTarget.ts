@@ -89,6 +89,8 @@ export interface ChatDockConversationActions {
   labelPending?: boolean;
   /** The header's ＋: a new conversation, on the agent in use. */
   startNew?: () => void;
+  /** The agent in use, by route name: what the header's ☆ stores with the thread (objectstack#37863). */
+  agent?: string;
 }
 
 /**

@@ -429,7 +429,7 @@ export interface ActionDef {
   // Deriving rather than hand-writing turns that rejection into a COMPILE error
   // for free; hand-copying would have re-legitimized two dead keys.
 
-  /** Where this action renders (`record_header`, `list_toolbar`, …). Read by
+  /** Where this action renders (`record_page`, `list`, …). Read by
    *  `ActionEngine.registerActions` to seed the location filter. */
   locations?: SpecActionInput['locations'];
   /**
@@ -1819,7 +1819,7 @@ export class ActionRunner {
       if (paramDefs && paramDefs.length > 0) {
         if (this.paramCollectionHandler) {
           // Merge collected params into action.params as a values map for downstream consumers.
-          // Preserve any pre-attached row context (`_rowRecord`) used by list_item
+          // Preserve any pre-attached row context (`_rowRecord`) used by record_row
           // actions so downstream handlers (apiHandler) can inject the row id.
           // Read ONCE, before any run: a second `run` after a refusal merges
           // its values over the same base, not over the first run's values.
@@ -3278,7 +3278,7 @@ export class ActionRunner {
    * `ctx.selection.ids` / `ctx.selection.count` reflect the grid's current
    * checkbox selection (`context.selectedRecords`) — `${ctx.selection.ids}`
    * comma-joins the ids via the standard `String(array)` behaviour, so a
-   * list_toolbar url/api action can carry the selection without any bulk
+   * list url/api action can carry the selection without any bulk
    * plumbing (objectui#3139). In an aggregate bulk dispatch,
    * `${param._selectedIds}` interpolates the same ids from the injected
    * param. Consumers can extend by stuffing extra keys under

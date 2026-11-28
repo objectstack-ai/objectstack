@@ -10,6 +10,9 @@ import type { SemanticMigration } from '../../types.js';
 // per-item publish and the per-item rollback naming no package are refused
 // where the ADR-0146 D11 close leaves them open. Each answered 200 there and
 // edited, stored, removed, promoted into or restored a row no read served;
+// the per-item publish and rollback are refused with no package-less row
+// stored too, where they write the disabled package's own row or store the
+// package-less row again from its history (#37851 ruling A);
 // where a code package ships the name, the draft discard over a stored row
 // with no draft already answered 409, and only its sentence moves. No key is
 // added, removed or re-shaped and no stored row changes shape, so no tombstone
@@ -25,7 +28,9 @@ export const entry: SemanticMigration = {
     + 'POST /api/v1/meta/TYPE/NAME/rollback, and the in-process publishMetaItem and rollbackMetaItem with no '
     + 'packageId), for a name held only by installed packages that are '
     + 'disabled, of a type the registry reads by package, while a package-less row or a package-less draft is '
-    + 'stored for that name. Where the package-less write onto a packaged item was already closed (ADR-0146 D11: '
+    + 'stored for that name (for the publish and the rollback, also with none stored: the publish of the disabled '
+    + 'package\'s own draft, the rollback of its own row, and the rollback that stores the package-less row again '
+    + 'from its history). Where the package-less write onto a packaged item was already closed (ADR-0146 D11: '
     + '403 NOT_OVERRIDABLE for the save, the delete, the publish and the rollback), only the draft discard moves',
   replacement:
     'Enable a package that holds the name (PATCH /api/v1/packages/ID/enable; GET /api/v1/packages shows which '
@@ -36,7 +41,10 @@ export const entry: SemanticMigration = {
     + 'ADR-0146 D11 close covers (one read-only code package ships it, with a pair, and os migrate '
     + 'packageless-overlays would move its row) is the exception this entry does not change: its save, its '
     + 'delete, its publish and its rollback naming no package answer that close first, 403 NOT_OVERRIDABLE with that close\'s own remedy, with '
-    + 'the package enabled or disabled; there only the draft discard answers this 409.',
+    + 'the package enabled or disabled; there only the draft discard answers this 409. The publish of the disabled '
+    + 'package\'s own draft and the rollback of its own row are the other exception: they address that package\'s '
+    + 'own row, so their refusal names ?package= as the fix, as the save with no package-less row stored does, and '
+    + 'the publish or rollback naming the package (?package=ID) goes through while it stays disabled.',
   reason:
     'A package-less row stored at a name a package holds is that package\'s customization, never a second item, '
     + 'and a disabled package\'s items are withheld from every read that names no package. The writes that name no '
@@ -45,10 +53,10 @@ export const entry: SemanticMigration = {
     + 'into it and the rollback rewrote it, so enabling the package again served its item without the '
     + 'customization, or with a body nobody saw land. The save, the draft save, the delete and the draft discard '
     + 'now judge the name\'s holders past a stored package-less row, as they already did with none stored. The '
-    + 'publish and the rollback judge them only where they promote the package-less draft or restore the '
-    + 'package-less row while one is stored; with none stored they judge no holder, as before, so a publish of '
-    + 'the disabled package\'s own draft and a rollback that stores the package-less row again are not refused '
-    + 'by this entry. A name no package holds, a package-less row at a name an enabled package holds, and, for '
+    + 'publish and the rollback judge them wherever they write: the publish where it promotes the package-less '
+    + 'draft or the disabled package\'s own draft, the rollback where it restores the package-less row, stored '
+    + 'or not, or the disabled package\'s own row. The two that write the package\'s own row answer the ?package= '
+    + 'remedy, as the save with no package-less row stored does. A name no package holds, a package-less row at a name an enabled package holds, and, for '
     + 'the save, the draft save, the delete and the draft discard, a name only disabled packages hold with no '
     + 'package-less row stored (its refusal keeps the ?package= remedy) answer as before. There is no mechanical '
     + 'rewrite: whether the disabled package should be enabled again is a judgement about the deployment.',
@@ -58,8 +66,11 @@ export const entry: SemanticMigration = {
     + '?mode=draft), DELETE /api/v1/meta/TYPE/NAME (and ?state=draft), POST /api/v1/meta/TYPE/NAME/publish and '
     + 'POST /api/v1/meta/TYPE/NAME/rollback naming no package answer 409 '
     + 'RESOURCE_CONFLICT and leave every stored row of the name byte-identical (the publish where the draft it '
-    + 'promotes is the package-less one, the rollback where it restores the package-less row; a publish of a '
-    + 'package\'s own draft and a publish with no draft answer as before). Where that close applies, the '
+    + 'promotes is the package-less one, the rollback where it restores the package-less row; a publish with no '
+    + 'draft answers as before). With no package-less row stored, the publish of a disabled package\'s own draft '
+    + 'and the rollback naming no package answer the same 409 and write nothing: the ?package= remedy where they '
+    + 'write the package\'s own row, the enable remedy where the rollback would store the package-less row again. '
+    + 'Where that close applies, the '
     + 'draft discard answers the same 409, and the save, the draft save, the delete, the publish and the rollback '
     + 'answer 403 NOT_OVERRIDABLE '
     + 'as they did before, storing nothing. Once a holder is enabled again, the read naming no package serves the '

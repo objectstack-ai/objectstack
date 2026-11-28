@@ -81,7 +81,7 @@ const RemoteProbe = ObjectSchema.create({
       label: 'Ping Remote',
       type: 'api',
       target: 'https://example.invalid/ping',
-      locations: ['record_header'],
+      locations: ['record_page'],
     },
     {
       name: 'rename_probe',
@@ -90,7 +90,7 @@ const RemoteProbe = ObjectSchema.create({
       method: 'PATCH',
       target: '/api/v1/data/probe_remote_thing/${ctx.recordId}',
       bodyExtra: { name: 'renamed-through-the-door' },
-      locations: ['record_header'],
+      locations: ['record_page'],
     },
   ],
 } as any);

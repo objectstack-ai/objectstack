@@ -37,6 +37,14 @@ export default defineConfig({
         find: /^@objectstack\/embedder-openai$/,
         replacement: path.resolve(__dirname, '../../plugins/embedder-openai/src/index.ts'),
       },
+      // The record-sync queue suite boots a real kernel over the SQL driver and
+      // the platform's queue service; their source, like every sibling here.
+      { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      { find: /^@objectstack\/service-queue$/, replacement: path.resolve(__dirname, '../service-queue/src/index.ts') },
+      {
+        find: /^@objectstack\/platform-objects\/audit$/,
+        replacement: path.resolve(__dirname, '../../platform-objects/src/audit/index.ts'),
+      },
       {
         find: /^@objectstack\/platform-objects\/system$/,
         replacement: path.resolve(__dirname, '../../platform-objects/src/system/index.ts'),

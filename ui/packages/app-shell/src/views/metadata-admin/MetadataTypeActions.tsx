@@ -12,8 +12,8 @@
  * /api/v1/datasources/${ctx.recordId}/test`). Rendering happens in two
  * chrome slots:
  *
- *   • ResourceEditPage  → `location='record_header'`, `recordId` = item name.
- *   • ResourceListPage  → `location='list_toolbar'` (no recordId).
+ *   • ResourceEditPage  → `location='record_page'`, `recordId` = item name.
+ *   • ResourceListPage  → `location='list'` (no recordId).
  *
  * Execution path mirrors ObjectView's auth-aware `apiHandler` rather than the
  * core ActionRunner's bare `fetch`: the metadata API endpoints require the

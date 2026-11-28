@@ -3736,7 +3736,7 @@ const RECORD_PAGE_HEADER_ACTIONS_DIFFER_EXPLANATION: RuleExplanation = {
       '`variant: \'primary\'`, else the first button. The incoming order is where the two pages differ: the ' +
       'full page takes it from the header\'s `actions` list, the standard page (phone, drawer, preview) from ' +
       'the object\'s action declaration order, and the standard page draws every action placed at ' +
-      '`record_header` or `record_more`, listed or not. This finding means the two give a different primary ' +
+      '`record` or `record_page`, listed or not. This finding means the two give a different primary ' +
       'button, or the listed actions in a different order.',
     'The order has one declaration point, the actions. Give each an `order` (lower first) and the main one ' +
       '`variant: \'primary\'`, and both pages sort alike; the header\'s list then only chooses which actions ' +
@@ -5651,22 +5651,22 @@ const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
       '`actions`; a `record:related_list`\'s `actions`; an `action` nav entry\'s ' +
       '`actionDef.actionName`; and an `object` nav entry\'s deep-link `runAction`.',
     'A name resolves when any action in the stack carries it: a `stack.actions` entry or an entry ' +
-      'of any object\'s `actions`. The runtime ships no built-in action names (`list_toolbar` and ' +
-      '`list_item` are locations, not actions), so a name that resolves nowhere is dead: most ' +
+      'of any object\'s `actions`. The runtime ships no built-in action names (`list` and ' +
+      '`record_row` are locations, not actions), so a name that resolves nowhere is dead: most ' +
       'surfaces draw a button that does nothing when clicked, the alert drops its call-to-action ' +
       'without a word, and the header draws no button, with only a browser-console warning. An ' +
       'error: there is no cross-package escape to soften it with, and an action another installed ' +
       'package contributes is the one legitimate miss.',
     'To fix a miss, define the action — a `stack.actions` entry or an entry of the object\'s `actions` — ' +
       'placed where the surface looks for it, or remove the reference. A `page:header` draws only actions ' +
-      'placed at `record_header` or `record_more`, so a header action needs one of the two in its ' +
+      'placed at `record` or `record_page`, so a header action needs one of the two in its ' +
       '`locations`; the selection bar and an alert\'s call-to-action place an action by name, with no ' +
       '`locations` entry.',
     // The drawn locations are held to the rule by its test, over every location.
     'A `record:related_list` is the exception, and resolves the way its renderer does: against the ' +
       'RELATED object\'s own actions (written on it, or a `stack.actions` entry bound to it by ' +
       '`objectName`), never the page\'s object or a global action, and only an action placed at a ' +
-      'location the list draws (`list_toolbar` as a header button, `list_item` and `record_related` ' +
+      'location the list draws (`list` as a header button, `record`, `record_row` and `record_related` ' +
       'as a row-menu item): naming it in `actions` is not a placement. An id that misses either test ' +
       'draws no button, only a refusal notice above the list. So define the action on the related ' +
       'object (in its `actions`, or in `stack.actions` with `objectName` naming it) with one of those ' +
@@ -6377,7 +6377,7 @@ const ACTION_NO_PLACEMENT_EXPLANATION: RuleExplanation = {
       'publishes and is listed in Setup, and no user can ever click it — the ADR-0078 shape of a ' +
       'declaration that renders nothing.',
     // Held equal to `ACTION_LOCATIONS` (`@objectstack/spec/ui`) by the rule's test.
-    'The locations an action can declare: `list_toolbar`, `list_item`, `record_header`, `record_more`, ' +
+    'The locations an action can declare: `list`, `record`, `record_page`, `record_row`, ' +
       '`record_related`, `record_section`. A list view places an action by NAME instead: naming it in ' +
       '`bulkActions` or `bulkActionDefs` puts it on the selection bar, which the view drives, never ' +
       '`locations` (an action that only makes sense over a selection has no single-record location). ' +

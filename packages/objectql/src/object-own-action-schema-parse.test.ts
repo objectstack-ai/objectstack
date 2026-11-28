@@ -26,7 +26,7 @@ import { ObjectQL } from './engine.js';
 /** One gated declaration, authored on an object's own action. */
 const GATED = {
     name: 'gated', label: 'Gated', type: 'url' as const, target: 'https://example.com/gated',
-    locations: ['record_header' as const], visible: "record.name != ''",
+    locations: ['record_page' as const], visible: "record.name != ''",
     requiresFeature: 'multiOrgEnabled' as const,
 };
 const LOWERED = { dialect: 'cel', source: "(record.name != '') && features.multiOrgEnabled != false" };

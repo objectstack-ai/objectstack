@@ -2444,7 +2444,29 @@ const es = {
           availableObjects: "Enumera los objetos de datos disponibles.",
           recentActivity: "Resume mi actividad reciente.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Resumir este registro',
+            related: '¿Qué está relacionado con este registro?',
+          },
+          list: {
+            summarize: 'Resumir los registros de esta lista',
+            recent: '¿Qué registros se añadieron esta semana?',
+          },
+          dashboard: {
+            explain: '¿Qué muestra este panel?',
+            standOut: '¿Qué destaca en este panel?',
+          },
+          report: {
+            summarize: 'Resumir este informe',
+            takeaways: '¿Cuáles son las conclusiones clave de este informe?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Preguntas sugeridas',
       discussing: "Viendo: {{target}}",
       focus: {
         pin: "Seguir preguntando sobre este registro",
@@ -3580,6 +3602,7 @@ const es = {
     recent: "Reciente",
     starred: "Destacados",
     removeFromFavorites: "Quitar {{name}} de favoritos",
+    conversationUnavailable: "Esta conversación ya no está disponible",
     allReports: "Todos los informes",
     collapse: 'Contraer la barra lateral',
     expand: 'Expandir la barra lateral',
@@ -4220,10 +4243,12 @@ const es = {
       slugTaken: 'Ese slug ya está en uso.',
       notAllowedToCreate: 'No tiene permiso para crear una organización nueva.',
       organizationLimitReached: 'Ha alcanzado el número máximo de organizaciones que puede crear. Las organizaciones a las que se le ha invitado no cuentan para este límite.',
+      unpaidOrganizationLimitReached: 'Ya tiene tantas organizaciones gratuitas como permite una cuenta. Para crear otra, cambie una de ellas a un plan de pago o contacte con soporte. Las organizaciones a las que se le ha invitado no cuentan.',
       notTheRecipient: 'No es el destinatario de esta invitación.',
       invitationNotFound: 'Esta invitación ya se utilizó, caducó o fue revocada. Si ya la aceptó, encontrará la organización en su lista de organizaciones.',
       unknown: 'Algo salió mal. Inténtelo de nuevo.',
     },
+    viewPlans: 'Ver planes y mejorar',
     backToList: "Volver a las organizaciones",
     notFound: "Organización no encontrada",
     notFoundDescription: "Esta organización no existe o no tienes acceso.",
@@ -5620,6 +5645,7 @@ const es = {
       toggleFailed: "Error al cambiar el estado de la aplicación: {{reason}}",
       setDefaultDone: "{{name}} establecida como predeterminada",
       setDefaultFailed: "Error al establecer la aplicación predeterminada: {{reason}}",
+      restoreDefaultFailed: "No se pudo restaurar {{name}} como aplicación predeterminada, por lo que ya no es la predeterminada: {{reason}}",
       appDeleted: "{{name}} eliminada",
       deleteFailed: "Error al eliminar la aplicación: {{reason}}",
       nothingToDelete: "Nada que eliminar para {{name}}: {{reason}}",

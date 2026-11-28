@@ -132,7 +132,7 @@ const ACTION_API = {
   variant: 'primary',
   refreshAfter: true,
   ai: { exposed: false },
-  locations: ['record_header', 'list_toolbar', 'list_item', 'record_section', 'record_more'],
+  locations: ['record', 'list', 'record_section'],
   requiredPermissions: ['account.sync'],
   visible: "record.status == 'open'",
   disabled: 'record.locked == true',
@@ -175,7 +175,6 @@ const ACTION_API_SITES: Site[] = [
   { key: 'engine.actionPreview.placement.row', vars: { n: 2 } },
   { key: 'engine.actionPreview.placement.section' },
   { key: 'engine.actionPreview.placement.sectionBody' },
-  { key: 'engine.actionPreview.placement.more' },
   { key: 'engine.actionPreview.section.testRequest' },
   { key: 'engine.actionPreview.api.paramsOther', vars: { count: 7 } },
   { key: 'engine.actionPreview.api.liveWarning', vars: { method: 'POST' } },
@@ -217,12 +216,19 @@ describe('ActionPreview — the designer words read engine.actionPreview.* (obje
         'sync_account',
         "record.status == 'open'",
         'record.locked == true',
-        'record_header',
-        'list_item',
+        'record_page',
+        'record_row',
         'account.sync',
         'reference',
         'stage',
       ]);
+    });
+
+    // objectstack#36495: the ⋯ frame is drawn for a record page action folded
+    // into the header's menu (`component: 'action:menu'`, formerly `record_more`).
+    it(`${lang}: a folded record page action draws the ⋯ frame`, () => {
+      mountAction(lang, { name: 'archive', label: 'Archive', type: 'api', target: '/api/archive', locations: ['record_page'], component: 'action:menu' });
+      expectSites(lang, [{ key: 'engine.actionPreview.placement.more' }]);
     });
 
     it(`${lang}: a one-param api action counts its param in the singular`, () => {

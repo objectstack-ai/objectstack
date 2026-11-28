@@ -3209,7 +3209,29 @@ const en = {
           availableObjects: 'List the available data objects.',
           recentActivity: 'Summarize my recent activity.',
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Summarize this record',
+            related: 'What is related to this record?',
+          },
+          list: {
+            summarize: 'Summarize the records in this list',
+            recent: 'Which records were added this week?',
+          },
+          dashboard: {
+            explain: 'What does this dashboard show?',
+            standOut: 'What stands out on this dashboard?',
+          },
+          report: {
+            summarize: 'Summarize this report',
+            takeaways: 'What are the key takeaways from this report?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Suggested questions',
       // objectui#3546 slice four — the AI console surfaces: the /ai chat page's app switcher,
       // connection banner and plan/publish cards, the ChatDock chrome, and the
       // conversation-list date buckets. `group.*` is the template-key family
@@ -4216,6 +4238,7 @@ const en = {
     recent: 'Recent',
     starred: 'Starred',
     removeFromFavorites: 'Remove {{name}} from favorites',
+    conversationUnavailable: 'This conversation is no longer available',
     allReports: 'All reports',
     collapse: 'Collapse sidebar',
     expand: 'Expand sidebar',
@@ -5026,10 +5049,12 @@ const en = {
       slugTaken: 'That URL slug is already taken',
       notAllowedToCreate: 'You are not allowed to create a new organization',
       organizationLimitReached: 'You have reached the limit on organizations you can create. Organizations you were invited to do not count toward it.',
+      unpaidOrganizationLimitReached: 'You already own as many free organizations as one account may. To create another, upgrade one of them to a paid plan or contact support. Organizations you were invited to do not count.',
       notTheRecipient: 'You are not the recipient of the invitation',
       invitationNotFound: 'This invitation has already been used, has expired, or was revoked. If you accepted it, the organization is in your organization list.',
       unknown: 'Something went wrong. Please try again.',
     },
+    viewPlans: 'View plans and upgrade',
     backToList: 'Back to organizations',
     notFound: 'Organization not found',
     notFoundDescription: 'This organization does not exist or you do not have access.',
@@ -6311,6 +6336,7 @@ const en = {
       toggleFailed: 'Failed to toggle app status: {{reason}}',
       setDefaultDone: '{{name}} set as default',
       setDefaultFailed: 'Failed to set default app: {{reason}}',
+      restoreDefaultFailed: 'Could not restore {{name}} as the default app, so it is no longer the default: {{reason}}',
       appDeleted: '{{name}} deleted',
       deleteFailed: 'Failed to delete app: {{reason}}',
       // A `reset: false` answer: no customization row existed, so nothing was

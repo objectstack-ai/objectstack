@@ -50,7 +50,7 @@ const OBJECT_SCHEMA = {
 const schema = (visible: string) => ({
   type: 'page:header',
   title: 'Task',
-  actions: [{ name: 'reassign', locations: ['record_header'], label: 'Reassign', type: 'api', visible }],
+  actions: [{ name: 'reassign', locations: ['record_page'], label: 'Reassign', type: 'api', visible }],
 });
 
 function renderHeader(record: any, visible: string) {

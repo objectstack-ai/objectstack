@@ -25,6 +25,22 @@ export const Lead = ObjectSchema.create({
   // record page show it.
   enable: { trackHistory: true },
 
+  // [ADR-0085 §5] The record's sections: the create and edit forms, the
+  // drawer and the record page lay a lead out by these groups, each listing
+  // its members in display order (so `company` comes second here, wherever
+  // it sits among the fields). The public Web-to-Lead form keeps its own
+  // section: it is a named, shared form (views/lead.view.ts).
+  fieldGroups: [
+    {
+      key: 'lead_information',
+      label: 'Lead Information',
+      fields: ['name', 'company', 'email', 'phone', 'title', 'source'],
+    },
+    { key: 'qualification', label: 'Qualification', fields: ['status', 'lead_score', 'assigned_to', 'account'] },
+    { key: 'conversion', label: 'Conversion', fields: ['converted_opportunity', 'is_closed'] },
+    { key: 'notes', label: 'Notes', fields: ['notes'] },
+  ],
+
   fields: {
     name: Field.text({
       label: 'Lead Name',

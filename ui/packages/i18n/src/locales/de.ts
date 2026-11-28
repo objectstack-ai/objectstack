@@ -2374,7 +2374,29 @@ const de = {
           availableObjects: "Liste die verfügbaren Datenobjekte auf.",
           recentActivity: "Fasse meine letzten Aktivitäten zusammen.",
         },
+        // objectstack#37862 — the drawer's empty conversation: the platform's
+        // suggestions by the kind of page in view (`emptyConversationModel.ts`).
+        page: {
+          record: {
+            summarize: 'Diesen Datensatz zusammenfassen',
+            related: 'Was hängt mit diesem Datensatz zusammen?',
+          },
+          list: {
+            summarize: 'Die Datensätze in dieser Liste zusammenfassen',
+            recent: 'Welche Datensätze wurden diese Woche hinzugefügt?',
+          },
+          dashboard: {
+            explain: 'Was zeigt dieses Dashboard?',
+            standOut: 'Was fällt auf diesem Dashboard auf?',
+          },
+          report: {
+            summarize: 'Diesen Bericht zusammenfassen',
+            takeaways: 'Was sind die wichtigsten Erkenntnisse aus diesem Bericht?',
+          },
+        },
       },
+      // objectstack#37862 — the accessible name of the empty conversation's suggestions.
+      suggestionsLabel: 'Vorgeschlagene Fragen',
       discussing: "Angezeigt: {{target}}",
       focus: {
         pin: "Weiter zu diesem Datensatz fragen",
@@ -3500,6 +3522,7 @@ const de = {
     recent: "Zuletzt",
     starred: "Markiert",
     removeFromFavorites: "{{name}} aus Favoriten entfernen",
+    conversationUnavailable: "Diese Unterhaltung ist nicht mehr verfügbar",
     allReports: "Alle Berichte",
     collapse: 'Seitenleiste einklappen',
     expand: 'Seitenleiste ausklappen',
@@ -4132,10 +4155,12 @@ const de = {
       slugTaken: 'Dieser URL-Slug ist bereits vergeben.',
       notAllowedToCreate: 'Sie dürfen keine neue Organisation erstellen.',
       organizationLimitReached: 'Sie haben die maximale Anzahl an Organisationen erreicht, die Sie erstellen können. Organisationen, zu denen Sie eingeladen wurden, zählen nicht dazu.',
+      unpaidOrganizationLimitReached: 'Sie besitzen bereits so viele kostenlose Organisationen, wie ein Konto haben darf. Um eine weitere zu erstellen, stufen Sie eine davon auf einen kostenpflichtigen Tarif hoch oder wenden Sie sich an den Support. Organisationen, zu denen Sie eingeladen wurden, zählen nicht.',
       notTheRecipient: 'Sie sind nicht der Empfänger dieser Einladung.',
       invitationNotFound: 'Diese Einladung wurde bereits verwendet, ist abgelaufen oder wurde widerrufen. Wenn Sie sie angenommen haben, finden Sie die Organisation in Ihrer Organisationsliste.',
       unknown: 'Etwas ist schiefgelaufen. Bitte versuchen Sie es erneut.',
     },
+    viewPlans: 'Tarife ansehen und upgraden',
     backToList: "Zurück zu den Organisationen",
     notFound: "Organisation nicht gefunden",
     notFoundDescription: "Diese Organisation existiert nicht oder Sie haben keinen Zugriff darauf.",
@@ -5469,6 +5494,7 @@ const de = {
       toggleFailed: "Ändern des App-Status fehlgeschlagen: {{reason}}",
       setDefaultDone: "{{name}} als Standard festgelegt",
       setDefaultFailed: "Festlegen der Standard-App fehlgeschlagen: {{reason}}",
+      restoreDefaultFailed: "{{name}} konnte nicht als Standard-App wiederhergestellt werden und ist daher nicht mehr der Standard: {{reason}}",
       appDeleted: "{{name}} gelöscht",
       deleteFailed: "Löschen der App fehlgeschlagen: {{reason}}",
       nothingToDelete: "Nichts zu löschen für {{name}}: {{reason}}",

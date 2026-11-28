@@ -36,11 +36,9 @@
  *    the stored-metadata family never) — the posture the MCP record tools take.
  *
  * Then, per source, the **field gate**: every field the source serves (each
- * `content` member, each
- * `metadataFields` member, the title field — `documentTitleField` — and,
- * while the index may hold documents assembled under the earlier title rule, a
- * declared `title`), less the credential-class and `internal` fields the index
- * never carries, must be QUERYABLE by the caller.
+ * `content` member, each `metadataFields` member and the title field —
+ * `documentTitleField`), less the credential-class and `internal` fields the
+ * index never carries, must be QUERYABLE by the caller.
  * Queryable, not merely readable: a passage carries the value the index read
  * under a system context, unmasked, and the search matches on it — a field the
  * caller is served masked is readable and not queryable, exactly the fields
@@ -49,6 +47,32 @@
  * cannot be partially withheld after the fact (its text and its embedding are
  * one unit), and searching it at all would make row presence an oracle on the
  * hidden value.
+ *
+ * ## An index built under an earlier title rule
+ *
+ * A document indexed before the title became the display field carries the
+ * value of a field named `title`, which the field gate no longer asks about
+ * (it serves the display field, ADR-0161 K5). A complete build under the
+ * current recipe rewrites every such document it walks (its `docHash` covers
+ * the title), and removes the rest only when it purges: the recipe hash
+ * names the title rule (ADR-0161 K7) and was first recorded by code that
+ * already read the display field. So a source over which such a document
+ * could be served ({@link mayServeEarlierRuleTitle}) is searched only once
+ * its adapter's `indexStatus` reports the fingerprint and the recipe hash
+ * the service computes now, and only where the builds that record that hash
+ * purge: never for a source with `refresh.onRecordChange: false`, nor on an
+ * adapter with no `listDocuments`, no `completeBuild` or no `indexStatus`
+ * (`KnowledgeService.unprovenIndex`). Until then it is refused
+ * `KNOWLEDGE_REBUILD_REQUIRED` (`KnowledgeService.search`), never served
+ * through a gate that asks about `title`.
+ *
+ * The proof speaks for the index as its last complete build left it, not for
+ * a document left in place by that build's purge or written after it. So each
+ * hit of a proven source is also checked against its record as it reads now
+ * (`KnowledgeService.dropUnverifiedHits`): it is served only when the record
+ * still belongs to the source and the stored `docHash` is the one the current
+ * recipe assembles from it. A check that cannot be made drops the hit, and the
+ * check's read decides only whether a hit is served.
  *
  * The fields the source's `where` reads ({@link selectingFieldsOf}) are judged
  * by the same rule, at save and at search: the source selects its records by
@@ -263,23 +287,35 @@ export function servedFieldsOf(objSource: ObjectKnowledgeSource, schema: unknown
     ...collectCredentialWriteResponseFields(schema),
     ...collectInternalWriteResponseFields(schema),
   ]);
-  const declared = declaredFields(schema);
   const served = new Set<string>();
   for (const field of objSource.content) served.add(field);
   for (const field of objSource.metadataFields ?? []) served.add(field);
   // `recordToDocument` serves the title field's value whatever the source names.
   const titleField = documentTitleField(schema);
   if (titleField !== undefined) served.add(titleField);
-  // A document indexed before the title became the display field carries the
-  // value of a field named `title`, and stays in the index until a complete
-  // reindex writes it again. So `title` stays a served field whenever the
-  // object declares one (or its fields cannot be enumerated), as it was.
-  // Retire this arm once the index is proven rebuilt under the display-field
-  // rule: the recipe hash that names the title rule (ADR-0161 K7) and the
-  // rebuild of a stale source.
-  if (!declared || declared.some(([name]) => name === 'title')) served.add('title');
   for (const field of withheld) served.delete(field);
   return served;
+}
+
+/**
+ * Whether an index of `objSource` built under the earlier title rule could
+ * serve a field the field gate does not ask about: the object declares a
+ * field named `title` (or its fields cannot be enumerated), the index may
+ * carry it (it is neither credential-class nor `internal`), and the source
+ * does not serve it ({@link servedFieldsOf}). A source for which this is
+ * `true` is searched for a caller only once its index is proven built under
+ * the current recipe; for any other source the earlier rule served nothing
+ * the gate does not ask about.
+ */
+export function mayServeEarlierRuleTitle(objSource: ObjectKnowledgeSource, schema: unknown): boolean {
+  const declared = declaredFields(schema);
+  if (declared && !declared.some(([name]) => name === 'title')) return false;
+  const withheld = new Set<string>([
+    ...collectCredentialWriteResponseFields(schema),
+    ...collectInternalWriteResponseFields(schema),
+  ]);
+  if (withheld.has('title')) return false;
+  return !servedFieldsOf(objSource, schema).has('title');
 }
 
 /** Logical keys of the filter grammar: never field names. */

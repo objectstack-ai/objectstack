@@ -24,14 +24,14 @@ import {
 } from '../designModeHeaderPinsModel';
 
 const ACTIONS = [
-  { name: 'log_call', label: 'Log call', locations: ['record_more'] },
-  { name: 'mark_won', label: 'Mark won', locations: ['record_header'], order: 2 },
-  { name: 'convert', label: 'Convert', locations: ['record_header'], order: 1 },
-  { name: 'clone', label: 'Clone', locations: ['record_header'], order: 3 },
-  { name: 'share', label: 'Share', locations: ['record_header'], order: 4 },
-  { name: 'archive', label: 'Archive', locations: ['record_header'], component: 'action:menu' },
-  { name: 'mass_assign', label: 'Assign', locations: ['list_toolbar'] },
-  { name: 'new_task', label: 'New task', locations: ['list_toolbar'], variant: 'primary' },
+  { name: 'log_call', label: 'Log call', locations: ['record_page'], component: 'action:menu' },
+  { name: 'mark_won', label: 'Mark won', locations: ['record_page'], order: 2 },
+  { name: 'convert', label: 'Convert', locations: ['record_page'], order: 1 },
+  { name: 'clone', label: 'Clone', locations: ['record_page'], order: 3 },
+  { name: 'share', label: 'Share', locations: ['record_page'], order: 4 },
+  { name: 'archive', label: 'Archive', locations: ['record_page'], component: 'action:menu' },
+  { name: 'mass_assign', label: 'Assign', locations: ['list'] },
+  { name: 'new_task', label: 'New task', locations: ['list'], variant: 'primary' },
 ];
 
 const TEXTS = { unknown: (n: string) => `unknown ${n}`, notPlaced: (n: string) => `not placed ${n}` };
@@ -54,7 +54,7 @@ describe('the header pins under the design mode (objectstack#36366)', () => {
     expect(servedPins({ actionLayout: { record: ['convert'], list: { more: ['x'] } } })).toEqual({});
   });
 
-  it("with no arm set the panel shows the header's own first three: by order, record_header only, never an action:menu", () => {
+  it("with no arm set the panel shows the header's own first three: by order, record_page only, never an action:menu", () => {
     expect(defaultPins(ACTIONS, 'record')).toEqual(['convert', 'mark_won', 'clone']);
     expect(defaultPins(ACTIONS, 'list')).toEqual(['new_task', 'mass_assign']);
     const candidates = pinCandidates(ACTIONS, 'record', []);

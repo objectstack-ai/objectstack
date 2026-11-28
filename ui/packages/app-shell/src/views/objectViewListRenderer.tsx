@@ -29,6 +29,7 @@ import { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { withUnpublishedObjectReads } from '../preview/unpublishedObjectReads.js';
 import { useMetadata } from '../providers/MetadataProvider.js';
 import type { DataSource } from '@object-ui/types';
+import { actionRendersAt } from '@object-ui/types';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import { warnSuppressedListNav } from '../utils/warnSuppressedListNav.js';
 import type { useObjectActions } from '../hooks/useObjectActions.js';
@@ -923,7 +924,7 @@ export function useObjectViewListRenderer({
             rowActions: viewDef.rowActions ?? listSchema.rowActions,
             /**
              * Row-context action definitions derived from `objectDef.actions`
-             * filtered by `locations.includes('list_item')`. These are full
+             * filtered by `actionRendersAt(action, 'record_row')`. These are full
              * `ActionDef` records (with label/icon/variant/params/recordIdParam
              * /bodyShape) the row menu renders with i18n-correct labels and
              * dispatches via the action runner; legacy `rowActions: string[]`
@@ -931,10 +932,10 @@ export function useObjectViewListRenderer({
              */
             rowActionDefs: (Array.isArray((objectDef as any)?.actions)
                 ? (objectDef as any).actions
-                    .filter((a: any) =>
-                      Array.isArray(a?.locations) && a.locations.includes('list_item'))
+                    // `actionRendersAt`: a `record` action is on each row too.
+                    .filter((a: any) => actionRendersAt(a, 'record_row'))
                     // Localize label / confirm / success the same way the
-                    // record_header and list_toolbar paths do — through the ONE
+                    // record_page and list paths do — through the ONE
                     // shared resolver (objectui#4265), so this surface cannot
                     // drift back to a label-only resolution. The `visible` CEL
                     // is forwarded untouched (spread inside the localizer) and
