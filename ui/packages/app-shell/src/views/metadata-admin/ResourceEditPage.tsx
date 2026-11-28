@@ -125,6 +125,7 @@ import {
   readDraftForSave,
   useDraftSaveGuard,
 } from './DraftConflictDialog.js';
+import { usePackageCreateAsk } from './PackageCreateAsk.js';
 // objectstack#36902 — Save takes effect at once; the AI draft's notice is the designers'.
 import { isAiDraft, publishDetailSave } from './detailSaveAtOnce.js';
 import { StudioAiDraftNotice } from '../studio-design/StudioAiDraftNotice.js';
@@ -686,7 +687,9 @@ function MetadataResourceEditPageImpl({
   embedded,
 }: MetadataResourceEditPageImplProps) {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // objectstack#38149 — a create whose address names no package asks for one first.
+  const { ask: askPackage, dialog: packageAskDialog } = usePackageCreateAsk();
   // ADR-0048 — the owning package of the item being edited, carried on the
   // edit URL as `?package=` (emitted by the metadata list links). Scopes the
   // layered/draft read so a same-name collision resolves to the right
@@ -2115,7 +2118,30 @@ function MetadataResourceEditPageImpl({
       // (`publishDetailSave`), never the package's batch. The draft binds to
       // the active software package (`?package=`) when the URL carries one;
       // the publish names the same package and member.
-      const activePackage = readActivePackageBinding();
+      //
+      // objectstack#38149 (ADR-0070 D3, ADR-0084's amendment of 2026-11-26) —
+      // a create whose address names no package (a deep link, Studio's
+      // cross-package leg, Setup's catalog) asks the person to pick a package
+      // or create one before anything is written, and the address names it
+      // from then on, so a retried Save and the item it lands on keep it.
+      // Cancel writes nothing.
+      let activePackage = readActivePackageBinding();
+      if (createMode && !activePackage) {
+        const chosen = await askPackage({ typeLabel: translateMetadataType(type, locale, entry?.label ?? type) });
+        if (!chosen) {
+          setSaving(false);
+          return;
+        }
+        activePackage = chosen;
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.set('package', chosen);
+            return next;
+          },
+          { replace: true },
+        );
+      }
       const saveOptions = {
         force,
         mode: 'draft' as const,
@@ -2138,6 +2164,8 @@ function MetadataResourceEditPageImpl({
       if (createMode) {
         // objectui#7611 — a type whose edit page writes the live item creates
         // it live too (`createLive`): nothing is left in the draft to publish.
+        // objectstack#38149 — a create names a package now (the ask above), so
+        // such a type takes the draft-and-publish path like every other.
         const live = !!config.createLive && !activePackage;
         const receipt = await client.save<any>(type, savedName, itemToSave, { ...(live ? { force } : saveOptions), ifNoneMatch: '*' });
         wroteDraft = !live;
@@ -2273,7 +2301,9 @@ function MetadataResourceEditPageImpl({
         // author was working in. Without this the param is dropped and the
         // editor falls back to the user's default package, where the freshly
         // saved draft doesn't exist — so it reloads a blank form.
-        const qs = searchParams.toString();
+        const landing = new URLSearchParams(searchParams);
+        if (activePackage) landing.set('package', activePackage);
+        const qs = landing.toString();
         navigate(`../${encodeURIComponent(savedName)}${qs ? `?${qs}` : ''}`, {
           relative: 'path',
           // objectstack#36906 — in a Studio package's area a new dashboard or
@@ -4060,6 +4090,7 @@ function MetadataResourceEditPageImpl({
       {/* objectui#11773 — the draft-version conflict, apart from the
           destructive-change confirmation above: two different 409s. */}
       {draftConflictDialog}
+      {packageAskDialog}
       {/* objectui#13333 — reset / delete / discard-draft / discard the AI's draft, asked in-app. */}
       <AlertDialog
         open={pendingConfirm !== null}

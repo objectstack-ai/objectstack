@@ -27,7 +27,9 @@ import { useCallback } from 'react';
 import { toast } from 'sonner';
 import type { useObjectTranslation } from '@object-ui/i18n';
 import { buildAddViewSpec } from './objectViewTabs.js';
-import { saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { isRuntimeCreateNotSaved, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { runtimeCreateRefusalText } from './metadata-admin/PackageCreateAsk.js';
+import { useMetadataLocale } from './metadata-admin/i18n.js';
 import type { RuntimeCreateApp, RuntimePersistCtx } from './runtime-metadata-persistence.js';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
 
@@ -76,6 +78,7 @@ export function useViewSharing({
     refresh: () => void;
     t: TFn;
 }): UseViewSharing {
+    const locale = useMetadataLocale();
     const openView = useCallback((id: string) => {
         if (routeViewId) navigate(`../${id}`, { relative: 'path' });
         else navigate(`view/${id}`);
@@ -105,6 +108,12 @@ export function useViewSharing({
             openView(env.name);
             return true;
         } catch (err) {
+            // objectstack#38149 — no package took it: nothing was written.
+            if (isRuntimeCreateNotSaved(err)) {
+                const text = runtimeCreateRefusalText(err, 'view', locale);
+                if (text) toast.error(text);
+                return false;
+            }
             console.error('[ObjectView] Failed to create a shared view:', err);
             toast.error(t('form.saveError'), {
                 description: viewSaveRefusalText(err, t),
@@ -112,7 +121,7 @@ export function useViewSharing({
             });
             return false;
         }
-    }, [metadataClient, objectDef, objectName, publishNew, refresh, openView, t]);
+    }, [metadataClient, objectDef, objectName, publishNew, refresh, openView, t, locale]);
 
     return { createShared };
 }

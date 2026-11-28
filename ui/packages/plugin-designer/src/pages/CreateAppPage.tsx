@@ -21,7 +21,17 @@ import { toast } from 'sonner';
 
 const DRAFT_STORAGE_KEY = 'objectui-app-wizard-draft';
 
-export function CreateAppPage() {
+export interface CreateAppPageProps {
+  /**
+   * objectstack#38149 — the host's save of the new app: it asks which package
+   * the app goes in (or creates one) and saves the app there. Resolves `false`
+   * when the author cancelled, and the wizard stays open with nothing written.
+   * Absent, the app is saved through the client naming no package.
+   */
+  saveApp?: (name: string, app: Record<string, unknown>) => Promise<boolean>;
+}
+
+export function CreateAppPage({ saveApp }: CreateAppPageProps = {}) {
   const navigate = useNavigate();
   const { appName } = useParams();
   const { objects, refresh } = useMetadata();
@@ -56,10 +66,15 @@ export function CreateAppPage() {
     async (draft: AppWizardDraft) => {
       try {
         const appSchema = wizardDraftToAppSchema(draft);
-        // Persist app metadata to backend
-        const client = adapter?.getClient();
-        if (client) {
-          await client.meta.saveItem('app', draft.name, appSchema);
+        // Persist app metadata to backend: into the package the host's save
+        // asks for, or, with no host save, through the client.
+        if (saveApp) {
+          if (!(await saveApp(draft.name, appSchema as unknown as Record<string, unknown>))) return;
+        } else {
+          const client = adapter?.getClient();
+          if (client) {
+            await client.meta.saveItem('app', draft.name, appSchema);
+          }
         }
         // Clear draft from localStorage on successful creation
         localStorage.removeItem(DRAFT_STORAGE_KEY);
@@ -72,7 +87,7 @@ export function CreateAppPage() {
         toast.error(err?.message || 'Failed to create application');
       }
     },
-    [navigate, refresh, adapter],
+    [navigate, refresh, adapter, saveApp],
   );
 
   const handleCancel = useCallback(() => {

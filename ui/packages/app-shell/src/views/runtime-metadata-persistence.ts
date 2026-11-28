@@ -146,16 +146,19 @@ export interface RuntimePersistCtx {
    */
   objectName?: string | null;
   /**
-   * objectstack#35624 — the app the console is in, for a NEW view
-   * ({@link createRuntimeMetadata}). Absent (outside any app, or a caller that
-   * creates no view) → the create saves as before, naming no package.
+   * objectstack#35624 — the app the console is in, for a NEW item
+   * ({@link createRuntimeMetadata}, {@link saveAndPublishRuntimeMetadata}):
+   * the create is saved into a package of the app, or into the one the person
+   * picks when none can be had (objectstack#38149,
+   * {@link pickRuntimeCreatePackage}). Absent → a write that creates nothing
+   * (an in-place save of an existing row), which names no package, as before.
    */
   app?: RuntimeCreateApp | null;
 }
 
 /**
- * objectstack#35624 — the app a console create runs in, and what it is told
- * when the create cannot be saved there.
+ * objectstack#35624 — the app a console create runs in, and how a create that
+ * no package of the app can take is answered (objectstack#38149).
  */
 export interface RuntimeCreateApp {
   /**
@@ -165,17 +168,17 @@ export interface RuntimeCreateApp {
    */
   packageId: string | null;
   /**
-   * Called after a create that had an app but was saved naming no package (no
-   * writable package of the app could be had, {@link resolveRuntimeCreatePackage}).
-   * The save itself landed; this says where it went.
+   * objectstack#38149 — ask the person to pick a package or create one
+   * (`PackageCreateAsk.tsx`), when no package of the app can be had. Resolves
+   * the package id, or `null` when they cancel: nothing is written then.
    */
-  onSavedOutsideApp?: () => void;
+  askPackage: (request: { preselect?: string | null }) => Promise<string | null>;
 }
 
 /** The two package doors {@link resolveRuntimeCreatePackage} asks. */
 export interface RuntimeCreatePackageDoors {
-  /** Every listed package by id, with the server's `writable` verdict. */
-  listPackages: () => Promise<ReadonlyMap<string, { writable: boolean }>>;
+  /** Every listed package by id, with the server's `writable` verdict and its manifest. */
+  listPackages: () => Promise<ReadonlyMap<string, { writable: boolean; manifest?: Record<string, unknown> }>>;
   /** `POST /packages/:base/ensure-customization`: the base's pair, created on first use. */
   ensureCustomization: (basePackageId: string) => Promise<{ packageId: string; writable: boolean }>;
 }
@@ -185,40 +188,109 @@ const PACKAGE_DOORS: RuntimeCreatePackageDoors = {
   ensureCustomization: ensureCustomizationPackage,
 };
 
+/** Manifest scopes of the packages the platform itself ships (ADR-0016 §3.8). */
+const KERNEL_SCOPES = new Set(['system', 'cloud']);
+
 /**
- * objectstack#35624 (ruling C, 「C 存进应用定制包」) — where a view created in
- * an app's console is saved: the app's own package when it is writable, else
- * the app's customization package `<base>.custom` (ADR-0146 D3, the App is the
- * customization unit), asked of the ensure door, which creates it on first use
- * and names it, so its id is never spelled here. `null` when neither can be
- * had: the app's package is not listed, or the ensure door refuses (a walled
- * deployment answers a tenant administrator `403`; a kernel base is refused
- * too). The caller then saves naming no package, as before this card, and says
- * so ({@link RuntimeCreateApp.onSavedOutsideApp}).
+ * Where {@link resolveRuntimeCreatePackage} says a console create goes:
+ *  - `package` — that package, named in the save;
+ *  - `ask` — no package of the app can be had, so the person picks one or
+ *    creates one (objectstack#38149); `preselect` is the app's package when
+ *    the list names it as writable, else none;
+ *  - `refused` — no pick could take it: the app is a system app, whose
+ *    package the platform ships and which no customization package can hold
+ *    (`system-app`, decisions Q-b of topic objectstack#37424, answered C), or
+ *    the ensure door refuses this caller itself (`caller-refused`, a walled
+ *    deployment's tenant administrator, `403`), carrying the door's reason.
+ */
+export type RuntimeCreatePackage =
+  | { kind: 'package'; packageId: string }
+  | { kind: 'ask'; preselect: string | null }
+  | { kind: 'refused'; reason: 'system-app' }
+  | { kind: 'refused'; reason: 'caller-refused'; message: string };
+
+/**
+ * objectstack#35624 (ruling C, 「C 存进应用定制包」) — where a view or report
+ * created in an app's console is saved: the app's own package when it is
+ * writable, else the app's customization package `<base>.custom` (ADR-0146 D3,
+ * the App is the customization unit), asked of the ensure door, which creates
+ * it on first use and names it, so its id is never spelled here.
  *
- * A refusal here never fails the create: the ruling's fallback is the
- * package-less save, so a door that answers no is reported and passed over.
+ * objectstack#38149 — when neither can be had, the create is no longer saved
+ * naming no package. Outside any app, for an app whose package is not listed,
+ * or where the ensure door refuses the base, the person is asked
+ * (`kind: 'ask'`). A system app (a kernel-scoped package) and a refusal of the
+ * caller by the ensure door (`403`) are refused instead, because no pick
+ * would be taken there either (`kind: 'refused'`).
  */
 export async function resolveRuntimeCreatePackage(
   appPackageId: string | null | undefined,
-  /** The metadata type being created, named in the warning when the package-less fallback is taken. */
+  /** The metadata type being created, named in the warning when a door fails. */
   type: string,
   doors: RuntimeCreatePackageDoors = PACKAGE_DOORS,
-): Promise<string | null> {
-  if (!appPackageId) return null;
+): Promise<RuntimeCreatePackage> {
+  if (!appPackageId) return { kind: 'ask', preselect: null };
+  let listed: { writable: boolean; manifest?: Record<string, unknown> } | undefined;
   try {
-    const listed = (await doors.listPackages()).get(appPackageId);
-    if (!listed) return null;
-    if (listed.writable) return appPackageId;
-    const pair = await doors.ensureCustomization(appPackageId);
-    return pair.writable ? pair.packageId : null;
+    listed = (await doors.listPackages()).get(appPackageId);
   } catch (err) {
-    console.warn(
-      `[runtime-metadata] the customization package of "${appPackageId}" could not be had; the ${type} is saved naming no package:`,
-      err,
-    );
-    return null;
+    console.warn(`[runtime-metadata] the package list could not be read; the ${type} asks for its package:`, err);
+    return { kind: 'ask', preselect: null };
   }
+  if (!listed) return { kind: 'ask', preselect: null };
+  if (listed.writable) return { kind: 'package', packageId: appPackageId };
+  const scope = listed.manifest?.scope;
+  if (typeof scope === 'string' && KERNEL_SCOPES.has(scope)) return { kind: 'refused', reason: 'system-app' };
+  try {
+    const pair = await doors.ensureCustomization(appPackageId);
+    return pair.writable ? { kind: 'package', packageId: pair.packageId } : { kind: 'ask', preselect: null };
+  } catch (err) {
+    if ((err as { status?: unknown } | null)?.status === 403) {
+      return { kind: 'refused', reason: 'caller-refused', message: err instanceof Error ? err.message : String(err) };
+    }
+    console.warn(`[runtime-metadata] the customization package of "${appPackageId}" could not be had; the ${type} asks for its package:`, err);
+    return { kind: 'ask', preselect: null };
+  }
+}
+
+/**
+ * objectstack#38149 — a console create that was not saved, and why: the
+ * person cancelled the ask (`cancelled`), or no package could take it
+ * ({@link RuntimeCreatePackage} `refused`). Nothing was written.
+ */
+export class RuntimeCreateNotSavedError extends Error {
+  readonly reason: 'cancelled' | 'system-app' | 'caller-refused';
+  constructor(reason: 'cancelled' | 'system-app' | 'caller-refused', message?: string) {
+    super(message ?? `The create was not saved (${reason}).`);
+    this.name = 'RuntimeCreateNotSavedError';
+    this.reason = reason;
+  }
+}
+
+/** Whether `err` is a {@link RuntimeCreateNotSavedError}. */
+export function isRuntimeCreateNotSaved(err: unknown): err is RuntimeCreateNotSavedError {
+  return err instanceof RuntimeCreateNotSavedError;
+}
+
+/**
+ * objectstack#38149 — the package a console create is saved into: the one
+ * {@link resolveRuntimeCreatePackage} names, else the one the person picks or
+ * creates when asked. Throws {@link RuntimeCreateNotSavedError} when they
+ * cancel or the create is refused, before anything is written.
+ */
+export async function pickRuntimeCreatePackage(
+  app: RuntimeCreateApp,
+  type: string,
+  doors: RuntimeCreatePackageDoors = PACKAGE_DOORS,
+): Promise<string> {
+  const target = await resolveRuntimeCreatePackage(app.packageId, type, doors);
+  if (target.kind === 'package') return target.packageId;
+  if (target.kind === 'refused') {
+    throw new RuntimeCreateNotSavedError(target.reason, target.reason === 'caller-refused' ? target.message : undefined);
+  }
+  const chosen = await app.askPackage({ preselect: target.preselect });
+  if (!chosen) throw new RuntimeCreateNotSavedError('cancelled');
+  return chosen;
 }
 
 /**
@@ -452,8 +524,10 @@ export function viewEnvelope(
  * name's one holding package when the request names none (ADR-0146 D8), so
  * they reach this draft in the pair, and a view saved package-less before this
  * card keeps its package-less address (a `?package=` there would fork it).
- * Only the view callers pass an app; a report, dashboard or page is created
- * exactly as before.
+ * objectstack#38149 — any type a caller passes an app for is saved this way,
+ * and when no package of the app can be had the person is asked
+ * ({@link pickRuntimeCreatePackage}): a create never saves naming no package.
+ * The callers pass an app for every create they make.
  */
 export async function createRuntimeMetadata(
   type: RuntimeArtifactType,
@@ -471,8 +545,7 @@ export async function createRuntimeMetadata(
         ' The server PUT /meta/:type/:name route requires a name segment.',
     );
   }
-  const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
+  const packageId = ctx.app ? await pickRuntimeCreatePackage(ctx.app, type) : null;
   // objectstack#36137 — the first-write pin: a create over a name that already
   // holds a pending draft is refused `409 METADATA_CONFLICT`, never written over it.
   await ctx.metadataClient.save(
@@ -483,14 +556,6 @@ export async function createRuntimeMetadata(
   );
   invalidateViewCaches(type, name, ctx);
   announceDraftLedgerWrite();
-  if (app?.packageId && !packageId) {
-    // The write landed: a notice that fails must not report it as refused.
-    try {
-      app.onSavedOutsideApp?.();
-    } catch (err) {
-      console.warn('[runtime-metadata] the saved-outside-app notice failed:', err);
-    }
-  }
   return name;
 }
 
@@ -618,9 +683,9 @@ export type SaveAndPublishOutcome = 'published' | 'pending-draft';
  * passes the app it was made in
  * ({@link RuntimePersistCtx.app}): its first write is saved into the app's
  * package as {@link createRuntimeMetadata} saves it. The publish names no
- * package (ADR-0146 D8 addresses the name's one holder). When no package can be
- * had it is saved naming none and nothing is said: it is published, so no
- * draft bar has to count it.
+ * package (ADR-0146 D8 addresses the name's one holder). objectstack#38149 —
+ * when no package of the app can be had the person is asked, and a cancelled
+ * or refused ask writes nothing ({@link pickRuntimeCreatePackage}).
  */
 export async function saveAndPublishRuntimeMetadata(
   type: RuntimeArtifactType,
@@ -628,8 +693,7 @@ export async function saveAndPublishRuntimeMetadata(
   body: any,
   ctx: RuntimePersistCtx,
 ): Promise<SaveAndPublishOutcome> {
-  const app = type === 'view' ? ctx.app : null;
-  const packageId = app?.packageId ? await resolveRuntimeCreatePackage(app.packageId, type) : null;
+  const packageId = ctx.app ? await pickRuntimeCreatePackage(ctx.app, type) : null;
   let draftVersion: string | undefined;
   try {
     const receipt = await ctx.metadataClient.save(

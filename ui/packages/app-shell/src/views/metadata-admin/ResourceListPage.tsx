@@ -43,7 +43,7 @@ import { useObjectTranslation } from '@object-ui/i18n';
 import { navEntryTitle } from './navEntryTitle.js';
 import { getIcon } from '../../utils/getIcon.js';
 import { MetadataTypeActions } from './MetadataTypeActions.js';
-import { CreatePackageDialog } from './PackagesPage.js';
+import { PACKAGE_PICKED_STATE, usePackageCreateAsk } from './PackageCreateAsk.js';
 import {
   useMetadataClient,
   useMetadataTypes,
@@ -249,6 +249,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const [queryDraft, setQueryDraft] = React.useState(urlListState.query);
   const navigationType = useNavigationType();
   const routeLocation = useLocation();
+  const routeLocationStateRef = React.useRef<unknown>(routeLocation.state);
+  routeLocationStateRef.current = routeLocation.state;
   React.useEffect(() => {
     if (navigationType !== 'REPLACE') setQueryDraft(urlListState.query);
   }, [routeLocation.key, navigationType, urlListState.query]);
@@ -262,7 +264,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           next.delete(LIST_PAGE_PARAM);
           return next;
         },
-        { replace: true },
+        // objectstack#38149 — the location state carries the package repair's
+        // own-write mark, which a filter or sort write keeps.
+        { replace: true, state: routeLocationStateRef.current },
       );
     },
     [setSearchParams],
@@ -476,7 +480,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     if (!activePackage) return;
     const next = new URLSearchParams(searchParams);
     next.set('package', activePackage);
-    setSearchParams(next, { replace: true });
+    // objectstack#38149 — the repair marks its own write: a package it wrote
+    // from a heuristic pick is not one the person named, so a create still asks.
+    setSearchParams(next, { replace: true, state: { [PACKAGE_PICKED_STATE]: activePackage } });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPackages, urlPackage, items, activePackage, appPackage, host]);
 
@@ -488,10 +494,21 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       ? `?package=${encodeURIComponent(activePackage)}`
       : '';
 
-  // ADR-0070 D3 — never start a create that would orphan the item. When a real
-  // writable base exists, create into it (defaulting away from the Local/null
-  // scope); when none exists yet, prompt to create a base first.
-  const [showCreateBase, setShowCreateBase] = React.useState(false);
+  // objectstack#38149 (ADR-0070 D3, ADR-0084's amendment of 2026-11-26) — a
+  // create that names no package asks the person to pick one or create one
+  // (`PackageCreateAsk.tsx`), and writes nothing until they answer. A package
+  // is NAMED by the area's route, or by a `?package=` the person put in the
+  // address (a link that names it, or a choice in the scope selector). The
+  // heuristic pick — the current app's package, the package owning the most
+  // rows of the type, the first — and the address the repair above wrote from
+  // it are not named: the ask pre-selects that pick instead.
+  const { ask: askPackage, dialog: packageAskDialog } = usePackageCreateAsk();
+  const pickedState = (routeLocation.state as Record<string, unknown> | null | undefined)?.[PACKAGE_PICKED_STATE];
+  const packageNamed =
+    !!urlPackage && !!projectPackages?.some((p) => p.id === urlPackage) && pickedState !== urlPackage;
+  // Packages load only for the package scope; the environment scope and the
+  // area never wait on them. New waits with them (objectstack#38149).
+  const packagesPending = !envScope && !host && projectPackages === null;
   // objectstack#36897 — in the Studio area an object or a flow is created in
   // the list's own dialog (`MetadataListCreateDialog`), and on a read-only
   // base every create lands in the base's `.custom` pair (ADR-0146 D3) — where
@@ -500,14 +517,9 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const createInPair = !!host?.readOnly && host.pairCreate === true;
   const createInDialog = !!host?.packageId && LIST_CREATE_DIALOG_TYPES.includes(type);
   const [createOpen, setCreateOpen] = React.useState(false);
-  const handleCreate = React.useCallback(() => {
+  const handleCreate = React.useCallback(async () => {
     if (createInDialog) {
       setCreateOpen(true);
-      return;
-    }
-    // An environment-authored item belongs to no package (ADR-0131 D3).
-    if (envScope) {
-      navigate(`./new?${ENVIRONMENT_SCOPE_QUERY}`);
       return;
     }
     // The Studio area creates into its own package.
@@ -515,25 +527,22 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
       navigate(`./new${pkgSuffix}`);
       return;
     }
-    const bases = projectPackages ?? [];
-    // The cross-package leg creates into the package Setup's list would pick;
-    // the area then opens that package's create (`areaLocationRedirect`).
-    if (allLeg) {
-      const pick = pickedPackage ?? bases[0]?.id;
-      if (pick) navigate(`./new?package=${encodeURIComponent(pick)}`);
-      else if (projectPackages !== null) setShowCreateBase(true);
+    if (packagesPending) return;
+    // Setup's list, scoped to a package the person named.
+    if (!envScope && !allLeg && packageNamed && activePackage) {
+      navigate(`./new?package=${encodeURIComponent(activePackage)}`);
       return;
     }
-    if (projectPackages !== null && bases.length === 0) {
-      setShowCreateBase(true);
-      return;
-    }
-    if (bases.length > 0 && !activePackage) {
-      navigate(`./new?package=${encodeURIComponent(bases[0].id)}`);
-      return;
-    }
-    navigate(`./new${pkgSuffix}`);
-  }, [projectPackages, activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog]);
+    // Setup's catalog (positions and permission sets, decisions Q-a of topic
+    // objectstack#37424), the cross-package leg, and a Setup list on a
+    // heuristic pick: ask. The environment scope keeps its own address.
+    const chosen = await askPackage({
+      preselect: envScope ? null : pickedPackage,
+      typeLabel: translateMetadataType(type, locale, entry?.label ?? type),
+    });
+    if (!chosen) return;
+    navigate(`./new?${envScope ? `${ENVIRONMENT_SCOPE_QUERY}&` : ''}package=${encodeURIComponent(chosen)}`);
+  }, [activePackage, pickedPackage, pkgSuffix, navigate, envScope, host?.packageId, allLeg, createInDialog, packagesPending, packageNamed, askPackage, type, locale, entry?.label]);
 
   // objectui#7611 — the activation state the switch column shows. Re-read on
   // the list's own refresh, never on an unrelated render. The anchors arrive
@@ -868,10 +877,6 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   // write: a type with no runtime write channel is read-only for the operator
   // too, and its page says nothing about the wall.
   const walledDeciding = walled && typeWritable;
-  // Packages load only for the package scope; the environment scope and the
-  // area never wait on them.
-  const packagesPending = !envScope && !host && projectPackages === null;
-
   // Localise a console column's header through `engine.list.col.<key>`. A
   // served header is already in the reader's locale and is shown as served.
   const localizeColumnLabel = (col: { key: string; label: string; labelLocalized?: boolean }) => {
@@ -919,7 +924,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
   const studioNewButton = (
     <Button
       size="sm"
-      onClick={handleCreate}
+      onClick={() => void handleCreate()}
+      disabled={packagesPending}
       data-testid="metadata-list-create"
       aria-describedby={pairCreateHint ? 'metadata-list-create-pair-hint' : undefined}
     >
@@ -931,7 +937,8 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
     <Button
       size="sm"
       variant={config.createFields ? 'default' : 'outline'}
-      onClick={handleCreate}
+      onClick={() => void handleCreate()}
+      disabled={packagesPending}
       data-testid="metadata-list-create"
       title={
         config.createFields
@@ -1135,7 +1142,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
           else out.set(LIST_PAGE_PARAM, String(next));
           return out;
         },
-        { replace: true },
+        { replace: true, state: routeLocationStateRef.current },
       );
     },
     [setSearchParams],
@@ -1505,11 +1512,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             }}
           />
         )}
-        <CreatePackageDialog
-          open={showCreateBase}
-          onOpenChange={setShowCreateBase}
-          onCreated={(id) => navigate(`./new?package=${encodeURIComponent(id)}`)}
-        />
+        {packageAskDialog}
         {/* Filter row */}
         {!studioList && (
         <div className="flex items-center gap-3 flex-wrap">
@@ -1728,7 +1731,7 @@ function DefaultMetadataList({ type, appName }: { type: string; appName?: string
             {emptyHint !== null && <EmptyDescription data-testid="metadata-list-empty-hint">{emptyHint}</EmptyDescription>}
             {scopedItems.length === 0 && canCreate && (
               <div className="mt-4">
-                <Button onClick={handleCreate}>
+                <Button onClick={() => void handleCreate()}>
                   <Plus className="h-4 w-4 mr-1" />
                   {studioList ? tFormat('engine.list.createNamed', locale, { type: typeLabel }) : t('engine.list.create', locale)}
                 </Button>

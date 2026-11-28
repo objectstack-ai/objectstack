@@ -8,7 +8,7 @@
  * component reads the returned handlers.
  */
 
-import { useCallback, useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type Dispatch, type ReactElement, type SetStateAction } from 'react';
 import { useParams, type useNavigate } from 'react-router-dom';
 import { formatMetadataError } from '@object-ui/data-objectstack';
 import { viewSaveRefusalText } from './viewSaveRefusal.js';
@@ -20,7 +20,9 @@ import type { usePreviewDrafts } from '../preview/PreviewModeContext.js';
 import { isSavedViewId } from '../utils/viewIdentity.js';
 import type { useConsoleActionRuntime } from '../hooks/useConsoleActionRuntime.js';
 import type { useMetadataClient } from './metadata-admin/useMetadata.js';
-import { persistRuntimeMetadata, createRuntimeMetadata, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { persistRuntimeMetadata, createRuntimeMetadata, isRuntimeCreateNotSaved, saveAndPublishRuntimeMetadata, viewEnvelope } from './runtime-metadata-persistence.js';
+import { runtimeCreateRefusalText, usePackageCreateAsk } from './metadata-admin/PackageCreateAsk.js';
+import { useMetadataLocale } from './metadata-admin/i18n.js';
 import type { RuntimeCreateApp, SaveAndPublishOutcome } from './runtime-metadata-persistence.js';
 import type { DraftVersionGuard } from './metadata-admin/draftVersionGuard.js';
 import { draftBarPackageOf } from '../preview/DraftPreviewBar.js';
@@ -37,26 +39,36 @@ import { FILTER_FOLD_REFUSAL_KEYS } from './viewFilterFold.js';
  * objectstack#35624 — the app a view created here is saved into
  * (`RuntimePersistCtx.app`): the routed app's package by the draft preview
  * bar's own rule (`draftBarPackageOf`), so the bar counts and publishes the
- * view the create wrote. When the create could not be saved into the app, the
- * author is told where it went instead.
+ * view the create wrote. objectstack#38149 — when no package of the app can
+ * be had, the author is asked to pick or create one (`askPackage`); the
+ * caller renders `askDialog`.
  */
-export function useRuntimeCreateApp(t: ReturnType<typeof useObjectTranslation>['t']): RuntimeCreateApp {
+export function useRuntimeCreateApp(): RuntimeCreateApp & { askDialog: ReactElement } {
     const { appName } = useParams();
     const { apps } = useMetadata();
     const packageId = draftBarPackageOf(appName, apps as Parameters<typeof draftBarPackageOf>[1]);
-    // Memoised for cost only: the create reads the two fields, never the identity.
+    const { ask, dialog } = usePackageCreateAsk();
+    // Memoised for cost only: the create reads the fields, never the identity.
     return useMemo(
         () => ({
             packageId,
-            onSavedOutsideApp: () => {
-                toast.info(t('view.savedOutsideApp', {
-                    defaultValue:
-                        'This view was saved as a draft outside this app, because the app’s customization package cannot be used here. This app’s draft bar does not count or publish it: publish it from Home.',
-                }));
-            },
+            askPackage: ({ preselect }) => ask({ preselect }),
+            askDialog: dialog,
         }),
-        [packageId, t],
+        [packageId, ask, dialog],
     );
+}
+
+/**
+ * objectstack#38149 — a view create that was not saved: a cancelled ask says
+ * nothing and keeps the dialog open; a refused one says why and where to go.
+ * `true` when `err` was such a create (the caller answers "not saved").
+ */
+export function reportViewNotSaved(err: unknown, locale: string): boolean {
+    if (!isRuntimeCreateNotSaved(err)) return false;
+    const text = runtimeCreateRefusalText(err, 'view', locale);
+    if (text) toast.error(text);
+    return true;
 }
 
 export function useObjectViewViewCrud({
@@ -100,7 +112,8 @@ export function useObjectViewViewCrud({
     activeViewId: string | undefined;
     baseView: ReturnType<typeof buildViewTabs>[number];
 }) {
-    const createApp = useRuntimeCreateApp(t);
+    const createApp = useRuntimeCreateApp();
+    const locale = useMetadataLocale();
     // objectui#12504 — no toolbar control writes the shared view. The sort and
     // the columns are the list's draft (`./listDraftStore.ts`), the widths and
     // the density the reader's layout in this browser (`listLayout`), and
@@ -302,6 +315,8 @@ export function useObjectViewViewCrud({
             }
             return true;
         } catch (err) {
+            // objectstack#38149 — no package took it: nothing was written.
+            if (reportViewNotSaved(err, locale)) return false;
             console.error('[ViewConfigPanel] Failed to create view:', err);
             // objectui#11578: a refused save is SAID, with the door's own
             // message (the field-anchored issues of a 422, or the refusal's
@@ -312,7 +327,7 @@ export function useObjectViewViewCrud({
             });
             return false;
         }
-    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t, createApp]);
+    }, [dataSource, objectName, objects, navigate, viewId, metadataClient, previewDrafts, t, createApp, locale]);
 
     /** Real-time draft field update — propagates each toggle/input change immediately */
     const handleViewUpdate = useCallback((field: string, value: any) => {
@@ -560,6 +575,8 @@ export function useObjectViewViewCrud({
         handleReorderViews,
         handleConfigView,
         handleAddView,
+        // objectstack#38149 — the package ask a view create opens; the component renders it.
+        packageAskDialog: createApp.askDialog,
     };
 }
 

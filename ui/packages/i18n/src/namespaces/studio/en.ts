@@ -4062,6 +4062,23 @@ const STUDIO_EN: Record<string, string> = {
   'engine.list.create': 'New',
   'engine.list.createNamed': 'New {type}',
   'engine.list.createInPairHint': '{package} is read-only. A new {type} is created in its customization package, {pair}.',
+  // objectstack#38149 — the create ask: a create that names no package asks
+  // the person to pick a package or create one (`PackageCreateAsk.tsx`).
+  'engine.packageAsk.title': 'Choose a package',
+  'engine.packageAsk.titleNamed': 'Which package should this {type} go in?',
+  'engine.packageAsk.description': 'Everything you create belongs to a package, so you can find it there and export or delete it with the package. Choose one of your packages, or create a new one.',
+  'engine.packageAsk.loading': 'Loading packages…',
+  'engine.packageAsk.loadFailed': 'The package list could not be read: {error}',
+  'engine.packageAsk.none': 'No package can hold it yet. Create a new package to continue.',
+  'engine.packageAsk.listLabel': 'Your packages',
+  'engine.packageAsk.createNew': 'New package…',
+  'engine.packageAsk.cancel': 'Cancel',
+  'engine.packageAsk.continue': 'Continue',
+  // objectstack#38149 — a create in an app that no package can take, said
+  // instead of saving it outside every package.
+  'engine.packageAsk.systemApp.view': 'A shared view can’t be saved in a system app: it ships with the platform and has no package for your changes. Save it to My views instead, or add the view in one of your business apps.',
+  'engine.packageAsk.systemApp.report': 'A report can’t be saved in a system app: it ships with the platform and has no package for your changes. Create the report in one of your business apps instead.',
+  'engine.packageAsk.callerRefused': 'This can’t be saved in the app’s package for you: {reason}',
   'engine.list.refresh': 'Refresh',
   'engine.list.search': 'Search name, label, description…',
   'engine.list.empty': 'No items yet.',

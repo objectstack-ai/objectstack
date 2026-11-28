@@ -58,7 +58,7 @@ export { Minimap } from './components/Minimap';
 // preferred routes. Each page expects an active app/adapter context from
 // @object-ui/app-shell and uses react-router-dom hooks
 // (useParams/useNavigate) for navigation.
-export { CreateAppPage } from './pages/CreateAppPage';
+export { CreateAppPage, type CreateAppPageProps } from './pages/CreateAppPage';
 export { EditAppPage } from './pages/EditAppPage';
 export { DashboardDesignPage } from './pages/DashboardDesignPage';
 
