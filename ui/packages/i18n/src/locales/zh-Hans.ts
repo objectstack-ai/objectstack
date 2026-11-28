@@ -4742,6 +4742,8 @@ const zh = {
     statusExecuted: '已执行',
     statusFailed: '失败',
     statusRejected: '已拒绝',
+    statusExpired: '已过期',
+    expiredDetail: '没有在期限内处理，或发起人已失去访问权限。',
     colTool: '工具',
     colAction: '动作',
     colObject: '对象',

@@ -184,10 +184,17 @@ test('record inline-edit polish (#2572) — showcase Project end-to-end', async 
   //    carries the step's `lockRecord` policy.) ──
   /** The approvals API's request row, as far as this test reads it. */
   type ApprovalRequestRow = { id: string; status: string; flow_node_id?: string; lock_record?: boolean };
+  // The first read comes after the UI steps above, on the socket the create
+  // kept alive. On a contended nightly runner that idle gap came to about 6 s,
+  // the backend's idle-socket close (Node: keep-alive 5 s plus a 1 s buffer),
+  // and this read answered `read ECONNRESET`. A throw inside `expect.poll` is not
+  // retried, so one reset ended the test. `maxRetries` resends this
+  // idempotent GET on a fresh connection, for ECONNRESET only; a status is
+  // never retried and every assertion on the answer is unchanged.
   const pendingRequests = async () => {
     const res = await request.get(
       `${API}/api/v1/approvals/requests?object=showcase_project&recordId=${recordId}`,
-      { headers: authHeader },
+      { headers: authHeader, maxRetries: 2 },
     );
     expect(res.ok(), await res.text()).toBeTruthy();
     const body = await res.json();
