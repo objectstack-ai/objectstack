@@ -3677,18 +3677,26 @@ export async function patchTranslationBundlesOf(
  * `objects.<name>._relatedLists` subtree is handed on, per locale: every other
  * string of the object keeps the ranking it has without a pair (D10), and an
  * empty answer is `undefined`, never a catalog that answers nothing.
+ *
+ * The pair is asked only when `served` carries a tab title that diverges from
+ * the packaged base ({@link hasRelatedListTitleOffBase}), the one case its
+ * catalog decides: a title equal to the base's reads the deployment catalog,
+ * which already holds the pair's share. So an object list whose tab titles no
+ * arrangement changed pays no translation read (ADR-0090 D10's statement
+ * budget, `mcp-list-objects-statements.pin.test.ts` in `@objectstack/runtime`).
  */
 async function objectPairRelatedListsBundleOf(
     protocol: unknown,
     type: string,
-    name: unknown,
+    served: unknown,
     packagedBase: unknown,
     memo?: Map<string, Promise<unknown>>,
 ): Promise<unknown> {
+    const name = (served as Record<string, unknown> | null | undefined)?.name;
     if (type !== 'object' || typeof name !== 'string' || name === '') return undefined;
-    const base = packagedBase && typeof packagedBase === 'object'
-        ? (packagedBase as Record<string, unknown>)._packageId
-        : undefined;
+    if (!packagedBase || typeof packagedBase !== 'object') return undefined;
+    if (!hasRelatedListTitleOffBase(served, packagedBase as Record<string, unknown>)) return undefined;
+    const base = (packagedBase as Record<string, unknown>)._packageId;
     const pair = await pairTranslationBundleOfBase(protocol, base, memo);
     if (!pair || typeof pair !== 'object') return undefined;
     const slice: Record<string, unknown> = {};
@@ -3698,6 +3706,29 @@ async function objectPairRelatedListsBundleOf(
         slice[locale] = { objects: { [name]: { _relatedLists: lists } } };
     }
     return Object.keys(slice).length > 0 ? slice : undefined;
+}
+
+/**
+ * Whether `served` carries an object-form `relatedLists` entry whose non-empty
+ * `label` the packaged base's entry for the same `list` does not carry — the
+ * divergence `translateObjectRelatedLists` (`@objectstack/spec/system`) judges
+ * a title by, where an entry the base does not name counts as diverged.
+ */
+function hasRelatedListTitleOffBase(served: unknown, packagedBase: Record<string, unknown>): boolean {
+    const lists = (served as Record<string, unknown> | null | undefined)?.relatedLists;
+    if (!Array.isArray(lists)) return false;
+    const baseLabels = new Map<string, unknown>();
+    for (const raw of Array.isArray(packagedBase.relatedLists) ? packagedBase.relatedLists : []) {
+        if (raw && typeof raw === 'object' && typeof (raw as any).list === 'string' && !baseLabels.has((raw as any).list)) {
+            baseLabels.set((raw as any).list, (raw as any).label);
+        }
+    }
+    return lists.some((raw) => {
+        if (!raw || typeof raw !== 'object') return false;
+        const { list, label } = raw as Record<string, unknown>;
+        return typeof list === 'string' && list !== '' && typeof label === 'string' && label !== ''
+            && baseLabels.get(list) !== label;
+    });
 }
 
 /** A non-empty string, or `undefined`. */
@@ -3883,7 +3914,7 @@ export async function translateMetaList(
         const pairBundle = p === undefined
             ? undefined
             : (await pairTranslationBundleOf(p, metaType, item, pairBundles))
-                ?? (await objectPairRelatedListsBundleOf(p, metaType, item?.name, packagedBase, pairBundles));
+                ?? (await objectPairRelatedListsBundleOf(p, metaType, item, packagedBase, pairBundles));
         const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, item?.name, packageBundles);
         const out = translateMetadataDocument(metaType, item, bundle, {
             ...metaTranslateOptions(i18n, locale),
@@ -3963,7 +3994,7 @@ export async function translateMetaDocument(
     const pairBundle = p === undefined
         ? undefined
         : (await pairTranslationBundleOf(p, metaType, document))
-            ?? (await objectPairRelatedListsBundleOf(p, metaType, (document as any)?.name, packagedBase));
+            ?? (await objectPairRelatedListsBundleOf(p, metaType, document, packagedBase));
     // [#33952] Each patching package's own translations: a patched field slot's second rank.
     const patchBundles = p === undefined ? undefined : await patchTranslationBundlesOf(p, metaType, (document as any)?.name);
     const translated = translateMetadataDocument(metaType, document as any, bundle, {

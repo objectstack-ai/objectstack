@@ -127,6 +127,10 @@ function boot(opts: Boot = {}) {
         },
     };
     const protocol = new ObjectStackProtocolImplementation(engine as never, undefined, 'env_test');
+    // Every question the reads put to the pair's catalog, for the statement-budget pin.
+    let pairAsks = 0;
+    const askPair = protocol.getPairTranslationBundle.bind(protocol);
+    (protocol as unknown as { getPairTranslationBundle: typeof askPair }).getPairTranslationBundle = (base) => { pairAsks++; return askPair(base); };
 
     const catalog = (locale: string) => overlay(BASE_CATALOG[locale], opts.pairObjects?.[locale] && { objects: opts.pairObjects[locale] });
     const i18nService = {
@@ -165,12 +169,13 @@ function boot(opts: Boot = {}) {
         .map((entry: any) => (typeof entry === 'string' ? entry : entry?.label ?? entry?.list));
 
     /** `crm_account` on the by-name read and on the list read: its label and its tab titles. */
-    return async (locale: string) => {
+    const readAt = async (locale: string) => {
         const byName = (await run('/api/v1/meta/:type/:name', { type: 'object', name: 'crm_account' }, locale))?.item;
         const listBody = await run('/api/v1/meta/:type', { type: 'object' }, locale);
         const listed = (Array.isArray(listBody) ? listBody : listBody?.items ?? []).find((o: any) => o?.name === 'crm_account');
         return [byName, listed].map((doc) => ({ label: doc?.label, tabs: titles(doc) }));
     };
+    return Object.assign(readAt, { pairAsks: () => pairAsks });
 }
 
 /** The arrangement: relabels the owner's labelled tab and titles its bare one. */
@@ -222,5 +227,16 @@ describe('#37622 — controls', () => {
             pairObjects: { 'zh-CN': { crm_account: { _relatedLists: { crm_contact: { label: '人员' } } } } },
         });
         for (const served of await pairFirst('zh-CN')) expect(served.tabs).toEqual(['人员', 'crm_case']);
+    });
+
+    it('asks the pair\'s catalog only for an object whose tab titles an arrangement changed (ADR-0090 D10 budget)', async () => {
+        for (const extension of [undefined, { relatedLists: [{ list: 'crm_contact', label: 'Contacts' }, 'crm_case'] }]) {
+            const read = boot({ extension, pairObjects: { 'zh-CN': { crm_account: { _relatedLists: { crm_contact: { label: '人员' } } } } } });
+            await read('zh-CN');
+            expect(read.pairAsks()).toBe(0);
+        }
+        const changed = boot({ extension: ARRANGEMENT });
+        await changed('zh-CN');
+        expect(changed.pairAsks()).toBeGreaterThan(0);
     });
 });
