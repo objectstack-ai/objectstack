@@ -492,7 +492,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'The #13080 category: `type-surface-only`': 29,
   'TSO-6048: THE REGRESSION PIN -- the founding case must never admit': 8,
   'TSO-N: the predicate set is pinned BY NAME, never by count': 3,
-  'TSO-U: unit pins on predicate 4\'s readers': 45,
+  'TSO-U: unit pins on predicate 4\'s readers': 49,
   'TSO-D (#15627): a DOTTED member path resolves through the object-literal nesting': 27,
   'TSO-C (#17279): a DOTTED member path resolves through a CLASS body': 17,
   'TSO-I (#37445): a DOTTED member path resolves through an INTERFACE or type-literal alias body': 25,
@@ -3693,7 +3693,7 @@ function sitsInTypePosition(masked, pos) {
 function braceOpensTypeBody(masked, open) {
   const header = braceHeader(masked, open);
   if (/(?:^|[^\w$.])(?:interface|class)\b/.test(header)) return true;
-  if (/^(?:export\s+)?(?:declare\s+)?type\s+[\w$]/.test(header) && header.endsWith('=')) return true;
+  if (/^(?:export\s+)?(?:declare\s+)?type\s+[\w$]/.test(headerStatement(header)) && header.endsWith('=')) return true;
   if (/(?:^|[^|&])[|&]$/.test(header) || header.endsWith('<')) return true;
   if (header.endsWith(':')) return sitsInTypePosition(masked, open);
   return false;
@@ -3739,6 +3739,33 @@ function braceHeader(masked, open) {
     i = groupOpen - 1;
   }
   return header.trim();
+}
+
+/**
+ * The LAST statement a `braceHeader` header holds: the header from its last line that
+ * opens a new top-level statement (`NEXT_STATEMENT_RE`, the keyword ending at a word
+ * boundary) after text that does not continue onto it (`RHS_CONTINUES_RE`) -- the
+ * same ASI boundary `aliasRhsEnd` reads. The whole header when no such line exists.
+ *
+ * ⚠️ A header runs back to the previous `;`, `{` or `}`, so after a statement with no
+ * `;` it starts at THAT statement: `} from "./tooltip"` + `const N = "b"` + `type P =`
+ * is one header, and a test anchored at its start never sees the `type` alias. Its
+ * body then read as a VALUE, and an annotated `f: (...) => void` in it as UNANNOTATED
+ * -- a concrete surface called erased, which predicate 4 admits (the permissive
+ * direction). Only the alias test reads this: the boundary can only move the start
+ * LATER, so a value literal after a `type X = …` with no `;` (`const o: S = {`) keeps
+ * `const` as its statement and stays a value.
+ */
+function headerStatement(header) {
+  const lines = header.split('\n');
+  for (let k = lines.length - 1; k > 0; k--) {
+    // The keyword must end at a word boundary: `typeof x` or `constructor` is no start.
+    if (!NEXT_STATEMENT_RE.test(lines[k]) || !/^[ \t]*(?:@|[A-Za-z]+(?![\w$]))/.test(lines[k])) continue;
+    const before = lines.slice(0, k).join('\n').trimEnd();
+    if (before === '' || RHS_CONTINUES_RE.test(before)) continue;
+    return lines.slice(k).join('\n').trim();
+  }
+  return header;
 }
 
 /**
@@ -8042,6 +8069,27 @@ function selfTest() {
   }
   assert(memberReturnAnnotation('type C<T> = T extends { a: 1 } ? A : B\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null &&
     memberReturnAnnotation('type U = A | { a: 1 }\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null, 'TSO-U45: the same statement boundary behind an `extends` (a conditional type) and a `|` (a union) with no `;` -- neither leaks its `type X =` header into the value literal after it');
+
+  // U46-U49: a `type X = {` alias AFTER a statement with no `;`. The header
+  // `braceHeader` returns runs back to the previous `;`, `{` or `}`, so it starts at
+  // that earlier statement (`from "b"`), and a `type` test anchored at the header's
+  // start read the alias body as a VALUE: its annotated `f: () => void` read as
+  // UNANNOTATED (erased: the permissive direction for predicate 4).
+  // `headerStatement` finds the last statement start inside the header first. U48 is
+  // the lit control (the same alias after a `;`), U49 the value-direction control.
+  {
+    const SIDEBAR_HEAD = 'import * as React from "react"\nimport {\n  Tooltip,\n  TooltipContent,\n} from "./tooltip"\n\n' +
+      'const SIDEBAR_COOKIE_NAME = "sidebar_state"\nconst SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7\nconst SIDEBAR_KEYBOARD_SHORTCUT = "b"\n\n';
+    const SIDEBAR_ALIAS = 'type SidebarContextProps = {\n  state: "expanded" | "collapsed"\n  open: boolean\n  setOpen: (open: boolean) => void\n' +
+      '  openMobile: boolean\n  setOpenMobile: (open: boolean) => void\n  isMobile: boolean\n  toggleSidebar: () => void\n}\n\n';
+    assert(memberReturnAnnotation('import { a } from "b"\n\ntype T = {\n  f: () => void\n}\n', 'f')?.annotation === 'void', 'TSO-U46: THE MINIMAL REPRO -- a `type T = {` alias after an import with no `;` keeps its body a type body: the function-typed member reads its return type, as the same text with `export interface T {` does');
+    assert(['setOpen', 'setOpenMobile', 'toggleSidebar'].every((s) => memberReturnAnnotation(SIDEBAR_HEAD + SIDEBAR_ALIAS, s)?.annotation === 'void'), 'TSO-U47: THE sidebar.tsx SHAPE (`SidebarContextProps`) -- a multi-line import and three `const` lines, none ending in `;`, before the alias: `setOpen`, `setOpenMobile` and `toggleSidebar` all read `void`');
+    assert(memberReturnAnnotation('import { a } from "b";\n\ntype T = {\n  f: () => void\n}\n', 'f')?.annotation === 'void' &&
+      memberReturnAnnotation('const k = 1;\nexport type T = {\n  f: () => void\n}\n', 'f')?.annotation === 'void', 'TSO-U48: LIT CONTROL -- the same alias after a `;` reads its annotation (`void`), as it always did');
+    assert(memberReturnAnnotation(SIDEBAR_HEAD + SIDEBAR_ALIAS.replace('setOpen: (open: boolean) => void', 'other: string') + 'const fallback: SidebarContextProps = {\n  setOpen: () => null,\n}\n', 'setOpen')?.annotation === null &&
+      memberReturnAnnotation('type S = A\nconst o: S = {\n  f: () => null,\n}\n', 'f')?.annotation === null &&
+      memberReturnAnnotation('type S = typeof x\nconst o = {\n  f: () => null,\n}\n', 'f')?.annotation === null, 'TSO-U49: VALUE-DIRECTION CONTROL -- a value literal after a `;`-less `type X = …` keeps `const` as its own statement: its arrow stays an unannotated VALUE, in the sidebar head as after a one-line alias');
+  }
 
   // ---- TSO-D (#15627): a DOTTED member path, resolved through the nesting ---
   //
