@@ -232,6 +232,38 @@
  * JSON, no `tasks` map, and no generic `test` task. The self-test pins the task
  * pair against the real job's command.
  *
+ * ## The fifth subject: Test UI and the root ADR files ui tests read (#37935)
+ *
+ * `studioMenuPlacement.test.ts` (Test UI) holds ADR-0084's type-to-group table
+ * equal to the Studio menu code, and it reads the ADR from the ROOT
+ * `docs/adr/`, outside `ui/`. The `ui:` list named no such file, so a diff
+ * confined to the ADR started no ui job on the PR, nor in the merge queue,
+ * where the `ui` output reads the queue diff through the same list: the pin
+ * first ran on the next ui PR, red on a change that PR did not make.
+ *
+ * `uiRootReadsOf` DERIVES the population from the ui tests themselves: every
+ * tracked `ui/**` test file is read by `scanPathExpressions`, the walker
+ * `check:cross-package-test-inputs` and the ui test selector already use, so
+ * this is not a recognizer of its own and holds no list. Each read under
+ * UI_READ_ROOTS must be covered, by the same pure-string rule, by a list the
+ * `test-ui` job's `if:` ORs (read back out of it; `ui` must be among them),
+ * and a `ui` row under those roots that no ui test reads is a leftover, since
+ * it starts every ui job for an edit nothing there reads. The remedy is the
+ * file VERBATIM, never `docs/adr/**`, which would start the ui battery on every
+ * ADR edit for the one file a ui test reads.
+ *
+ * Known bounds: the population is the root `docs/adr/` alone, as ruled. Other
+ * reads outside `ui/` that the walker sees and no ui list covers (measured on
+ * the commit this subject landed on: a root markdown file, two server sources
+ * and a root script) are a family of their own, each a scheduling trade-off
+ * rather than a missing row, and are not judged here. A ui test whose read the
+ * walker cannot resolve (an unread argument, a manifest-name `findUp`, which is
+ * judged with no package name) is not in the population, exactly as the
+ * walker's other callers do not see it. The walker reads each test file's own
+ * text, so a read made inside a module the test IMPORTS is not seen either: a
+ * `ui` row whose only reader is such a helper is reported as reader-less, and
+ * the leftover direction therefore says check, then delete, never delete.
+ *
  * ## Wiring
  *
  * Invoked from `.github/workflows/lint.yml` through its root alias, which runs
@@ -241,7 +273,8 @@
  * same dormant shape from the other side.
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -251,6 +284,7 @@ import { requireDependency } from './import-prerequisite.mjs';
 const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 import { collectInvocations } from './check-self-test-wired.mjs';
+import { scanPathExpressions } from './check-cross-package-test-inputs.mjs';
 import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
 import { firstPartyModuleClosure } from './first-party-closure.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -284,11 +318,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '(9) Build Core and the build inputs turbo.json declares': 42,
   '(10) Build Core and the scripts its own steps run': 30,
   '(11) Test Core and the generic test tasks\' root inputs': 18,
+  '(12) Test UI and the root ADR files ui tests read': 16,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 10;
+const SELF_TEST_BATTERY_FLOOR = 11;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -870,6 +905,166 @@ function reportTestInputs(verdict) {
   return 0;
 }
 
+// ── The fifth subject: Test UI and the root ADR files ui tests read (#37935) ──
+
+/** The job that runs the ui tree's vitest suites, by id. */
+export const UI_TEST_JOB = 'test-ui';
+/** The filter outputs its `if:` may OR; `ui` must be among the ones it names. */
+export const UI_SCHEDULING_FILTERS = Object.freeze(['ui', 'ui_consumers']);
+/** Where an uncovered read belongs, and the list whose rows under the roots are judged for leftovers. */
+export const UI_REMEDY_FILTER = 'ui';
+/** The tree whose tests are read. */
+export const UI_TREE = 'ui';
+/**
+ * The repo-root roots this subject judges. The ruled population is the root
+ * `docs/adr/` (see the header for why it is not every read outside `ui/`).
+ */
+export const UI_READ_ROOTS = Object.freeze(['docs/adr']);
+
+const UI_TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
+
+const underRoots = (path) => UI_READ_ROOTS.some((r) => path === r || path.startsWith(`${r}/`));
+
+/**
+ * Every path under UI_READ_ROOTS that a tracked ui test file reads, each with
+ * its readers, or `{ refusal }`. The reads come from `scanPathExpressions`, the
+ * walker `check:cross-package-test-inputs` and the ui test selector already use
+ * -- not a recognizer of this gate's own. `files` (a bound name) and relative
+ * `imports` are file candidates, `dirs` (a listing) directory candidates, and
+ * each counts only as what it really is on disk, the filter
+ * `check:cross-package-test-inputs` applies to the same walker's answer: the
+ * walker puts every BOUND name in `files`, so a directory bound to a name and
+ * then listed sits in both sets, and only the disk says it is a directory. A
+ * candidate naming nothing on disk is a synthetic fixture path, not a read. A
+ * directory read is covered only by its subtree.
+ *
+ * @param {string} root   the repository root
+ * @param {string[] | null} [listed]  repo-relative tracked files (git's answer when absent)
+ */
+export function uiRootReadsOf(root, listed = null) {
+  let tracked = listed;
+  if (!tracked) {
+    const out = spawnSync('git', ['ls-files', '-z', '--', UI_TREE], { cwd: root, encoding: 'utf8', maxBuffer: 1 << 28 });
+    if (out.status !== 0) return { refusal: `git could not list the tracked files under \`${UI_TREE}/\`: ${(out.stderr || out.error?.message || '').trim()}` };
+    tracked = out.stdout.split('\0').filter(Boolean);
+  }
+  const tests = tracked.filter((f) => f.startsWith(`${UI_TREE}/`) && UI_TEST_FILE.test(f) && !f.split('/').includes('node_modules'));
+  if (tests.length === 0) {
+    return { refusal: `no tracked test file under \`${UI_TREE}/\` -- a parity check over ui tests nobody read is not a pass.` };
+  }
+  const byPath = new Map();
+  for (const rel of tests) {
+    let source;
+    try {
+      source = readFileSync(join(root, rel), 'utf8');
+    } catch (err) {
+      return { refusal: `the tracked ui test ${rel} could not be read: ${err?.code ?? err?.message ?? err}` };
+    }
+    const segs = rel.split('/');
+    const scan = scanPathExpressions(source, segs.length - 1, segs, null);
+    const candidates = [...[...scan.files, ...scan.imports].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
+    for (const name of new Set(candidates.map(([p]) => p))) {
+      if (!underRoots(name)) continue;
+      const kind = realKindOf(root, name);
+      if (!kind || !candidates.some(([p, k]) => p === name && k === kind)) continue;
+      const row = byPath.get(name) ?? { path: name, kind, from: [] };
+      if (!row.from.includes(rel)) row.from.push(rel);
+      byPath.set(name, row);
+    }
+  }
+  return { tests: tests.length, rows: [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path)) };
+}
+
+/** `'file'`, `'dir'`, or null when `rel` names nothing on disk under `root`. */
+function realKindOf(root, rel) {
+  try {
+    const st = statSync(join(root, rel));
+    return st.isDirectory() ? 'dir' : st.isFile() ? 'file' : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A directory read must be covered by its subtree; a file read, by the file or a subtree above it. */
+const uiCoverage = (row, entries) =>
+  row.kind === 'dir' ? coverageVerdict(`${row.path}/x`, entries) : coverageVerdict(row.path, entries);
+
+/**
+ * The verdict on Test UI's scheduling against the root ADR files ui tests read.
+ * Takes ci.yml's SOURCE STRING and the reads (`uiRootReadsOf`'s answer);
+ * `{ refusal }` for every state in which the subject was not read.
+ */
+export function judgeUiReads(source, reads) {
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  if (!reads || reads.refusal) return { refusal: reads?.refusal ?? 'the ui tests\' reads were not supplied.' };
+  const job = read.jobs[UI_TEST_JOB];
+  if (!job) return { refusal: `${CI_WORKFLOW} has no \`${UI_TEST_JOB}\` job -- the job that runs the ui tests has moved.` };
+  const condition = typeof job.if === 'string' ? job.if : '';
+  // `ui` is a prefix of `ui_consumers` and `ui_tree`, so a name is matched whole.
+  const named = UI_SCHEDULING_FILTERS.filter((n) => new RegExp(`needs\\.filter\\.outputs\\.${n}(?![\\w])`).test(condition));
+  if (!named.includes(UI_REMEDY_FILTER)) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${UI_TEST_JOB}\` job no longer names \`${UI_REMEDY_FILTER}\` in its \`if:\`, so that filter does not ` +
+        `schedule it any more and parity against it means nothing.\n    if: ${condition || '(absent)'}`,
+    };
+  }
+  for (const name of named) {
+    if (!(name in read.filters)) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
+  }
+  const entries = named.flatMap((n) => read.filters[n]);
+  const covered = [];
+  const uncovered = [];
+  for (const row of reads.rows) {
+    const verdict = uiCoverage(row, entries);
+    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+  }
+  // The other direction: a `ui` row under the judged roots that no ui test
+  // reads any more starts the whole ui battery for nothing.
+  const stale = read.filters[UI_REMEDY_FILTER].filter(
+    (entry) => underRoots(entry.replace(/\/\*\*$/, '')) && !reads.rows.some((row) => uiCoverage(row, [entry]).covered),
+  );
+  return { condition, named, tests: reads.tests, rows: reads.rows, covered, uncovered, stale };
+}
+
+function reportUiReads(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge Test UI's reads under ${UI_READ_ROOTS.join(', ')}.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  if (verdict.uncovered.length > 0) {
+    problems.push(
+      `${verdict.uncovered.length} path(s) under ${UI_READ_ROOTS.map((r) => `\`${r}/\``).join(', ')} that a ui test reads are covered by ` +
+        `none of ${verdict.named.map((n) => `\`${n}\``).join(', ')} in ${CI_WORKFLOW}. A diff confined to one starts no\n` +
+        `    \`${UI_TEST_JOB}\` job, on the PR or in the merge queue, so the test that reads it first runs on the next ui PR:\n` +
+        verdict.uncovered.map((r) => `      ${r.path}${r.kind === 'dir' ? '/**' : ''}   (read by ${r.from.join(', ')})`).join('\n') +
+        `\n    Add each one VERBATIM to the \`${UI_REMEDY_FILTER}:\` filter in ${CI_WORKFLOW} (a directory read as \`<dir>/**\`).`,
+    );
+  }
+  if (verdict.stale.length > 0) {
+    problems.push(
+      `${CI_WORKFLOW}'s \`${UI_REMEDY_FILTER}:\` filter carries entr(ies) under ${UI_READ_ROOTS.join(', ')} that no ui test reads any more:\n` +
+        verdict.stale.map((e) => `      ${e}`).join('\n') +
+        `\n    Check each, then delete it: it starts every ui job for an edit no ui test file reads. This gate sees only\n` +
+        `    the reads a ui test file spells itself, not one made inside a module the test imports, so first confirm\n` +
+        `    no imported helper reads it.`,
+    );
+  }
+  if (problems.length > 0) {
+    console.error(`FAIL: ci.yml's \`${UI_REMEDY_FILTER}\` filter is out of step with the root files the ui tests read.\n`);
+    for (const p of problems) console.error(`  - ${p}\n`);
+    return 1;
+  }
+  console.log(
+    `OK: all ${verdict.rows.length} path(s) under ${UI_READ_ROOTS.join(', ')} read by the ${verdict.tests} tracked ui test file(s) are ` +
+      `covered by ${verdict.named.map((n) => `\`${n}\``).join(' or ')}, which the \`${UI_TEST_JOB}\` job's \`if:\` reads, and every ` +
+      `\`${UI_REMEDY_FILTER}\` row under those roots still has a reader.`,
+  );
+  return 0;
+}
+
 function report(verdict) {
   if (verdict.refusal) {
     console.error(`FAIL: check-ci-filter-parity could not judge the scheduling filters.\n\n  - ${verdict.refusal}\n`);
@@ -924,7 +1119,7 @@ function report(verdict) {
   return 0;
 }
 
-export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
+export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS, uiReads = null) {
   let source;
   try {
     source = readFileSync(join(root, CI_WORKFLOW), 'utf8');
@@ -938,7 +1133,10 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     judgeBuildInputs(source, readOrNull(root, TURBO_CONFIG), readOrNull(root, ROOT_MANIFEST), closureIn(root)),
   );
   const testCode = reportTestInputs(judgeTestInputs(source, readOrNull(root, TURBO_CONFIG)));
-  return crosspkg === 0 && buildCode === 0 && testCode === 0 ? 0 : 1;
+  // `uiReads` is injectable only so the self-test can judge a scratch ci.yml
+  // against the real tree's reads; a real run always reads `root`'s ui tests.
+  const uiCode = reportUiReads(judgeUiReads(source, uiReads ?? uiRootReadsOf(root)));
+  return crosspkg === 0 && buildCode === 0 && testCode === 0 && uiCode === 0 ? 0 : 1;
 }
 
 /** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
@@ -996,11 +1194,23 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
   for (const row of [...test.covered, ...test.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
     console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
   }
+  const ui = judgeUiReads(readFileSync(join(root, CI_WORKFLOW), 'utf8'), uiRootReadsOf(root));
+  if (ui.refusal) {
+    console.error(`FAIL: ${ui.refusal}`);
+    return 1;
+  }
+  console.log(`\nreads under ${UI_READ_ROOTS.join(', ')} by the ${ui.tests} ui test file(s), against ${ui.named.join(' + ')} (${UI_TEST_JOB}):`);
+  for (const row of [...ui.covered, ...ui.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind === 'dir' ? 'subtree' : row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  }
+  for (const entry of ui.stale) console.log(`FAIL ${entry}   stale: no ui test reads it`);
   return verdict.uncovered.length > 0 ||
     build.uncovered.length > 0 ||
     build.guardsUncovered.length > 0 ||
     build.stale.length > 0 ||
-    test.uncovered.length > 0
+    test.uncovered.length > 0 ||
+    ui.uncovered.length > 0 ||
+    ui.stale.length > 0
     ? 1
     : 0;
 }
@@ -1423,6 +1633,9 @@ export async function selfTest() {
   const realGuardPaths = (
     judgeBuildInputs(realSource, readFileSync(join(REPO_ROOT, TURBO_CONFIG), 'utf8'), readFileSync(join(REPO_ROOT, ROOT_MANIFEST), 'utf8')).guards ?? []
   ).map((r) => r.path);
+  // The scratch root carries no ui tree, so every `main()` over one judges the
+  // fifth subject against the real tree's reads, read once here.
+  const realUiReads = uiRootReadsOf(REPO_ROOT);
   const inScratchTree = (ciSource, fn) => {
     const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-'));
     try {
@@ -1583,8 +1796,8 @@ export async function selfTest() {
       'scripts/invoked-as.mjs',
     'the checked-in ci.yml with one build input dropped from `core:` reports exactly that input',
   );
-  assert(inScratchTree(realSource, (root) => quietly(() => main(root))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
-  assert(inScratchTree(droppedReal, (root) => quietly(() => main(root))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
+  assert(inScratchTree(realSource, (root) => quietly(() => main(root, undefined, realUiReads))) === 0, 'main() returns 0 over the scratch copy of the real tree -- the scratch root is complete');
+  assert(inScratchTree(droppedReal, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and 1 with that one build input dropped: the report path, not only `judgeBuildInputs`');
 
   // ── (10) Build Core and the scripts its own steps run (#21341) ──────────
   battery('(10) Build Core and the scripts its own steps run');
@@ -1751,7 +1964,7 @@ export async function selfTest() {
     uncoveredGuards(droppedGuardVerdict) === 'scripts/check-lean-entry-closure.mjs' && findingsOfBuild(droppedGuardVerdict).length === 0,
     'the checked-in ci.yml with the lean-entry guard row dropped reports exactly that guard, and nothing else',
   );
-  assert(inScratchTree(droppedGuardReal, (root) => quietly(() => main(root))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeBuildInputs`');
+  assert(inScratchTree(droppedGuardReal, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeBuildInputs`');
 
   // The two recognizer bounds the header states, pinned against the real job
   // so a change that makes either one bite reds here rather than going quiet.
@@ -1855,7 +2068,7 @@ export async function selfTest() {
     uncoveredTestPaths(judgeTestInputs(testRowsDropped, realTurbo)).sort().join(',') === [...TEST_ROWS].sort().join(','),
     'the checked-in ci.yml with the five #27961 rows dropped reports exactly those five, and nothing else',
   );
-  assert(inScratchTree(testRowsDropped, (root) => quietly(() => main(root))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeTestInputs`');
+  assert(inScratchTree(testRowsDropped, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeTestInputs`');
 
   // The bound the header states: TEST_TASKS is the pair the real job runs.
   const realTestRuns = (parse(realSource)?.jobs?.[SCHEDULED_JOB]?.steps ?? []).map((s) => String(s?.run ?? ''));
@@ -1864,6 +2077,133 @@ export async function selfTest() {
     turboTaskLists.length > 0 && turboTaskLists.every((t) => t === TEST_TASKS.join(' ')),
     `bound: every whole-package test \`turbo run\` the real \`${SCHEDULED_JOB}\` job makes names exactly ${TEST_TASKS.join(' ')} -- got ${JSON.stringify(turboTaskLists)}`,
   );
+
+  // ── (12) Test UI and the root ADR files ui tests read (#37935) ──────────
+  battery('(12) Test UI and the root ADR files ui tests read');
+  const UI_IF =
+    "${{ !cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') }}";
+  const uiWorkflow = ({ ui = ['ui/**'], consumers = ['packages/spec/**'], condition = UI_IF, job = 'test-ui' } = {}) => {
+    const list = (xs) => xs.map((e) => `              - '${e}'`).join('\n');
+    return [
+      'name: CI',
+      'jobs:',
+      '  filter:',
+      '    steps:',
+      '      - uses: dorny/paths-filter@v4',
+      '        id: changes',
+      '        with:',
+      '          filters: |',
+      '            ui:',
+      list(ui),
+      '            ui_consumers:',
+      list(consumers),
+      `  ${job}:`,
+      `    if: ${JSON.stringify(condition)}`,
+      '    steps:',
+      '      - run: echo test',
+    ].join('\n');
+  };
+  // A scratch tree of ui tests, read by the real collector: the walker, not a
+  // hand-built row, is what turns each spelling into a path.
+  const ADR_A = ['docs', 'adr', '0001-a.md'].join('/');
+  const uiScratch = (files, fn) => {
+    const scratch = mkdtempSync(join(tmpdir(), 'ci-filter-parity-ui-'));
+    try {
+      for (const [rel, text] of Object.entries(files)) {
+        mkdirSync(dirname(join(scratch, rel)), { recursive: true });
+        writeFileSync(join(scratch, rel), text);
+      }
+      return fn(uiRootReadsOf(scratch, Object.keys(files)));
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  };
+  const UI_SEED = "import { readFileSync, readdirSync } from 'node:fs';\nimport { dirname, resolve } from 'node:path';\nimport { fileURLToPath } from 'node:url';\nconst HERE = dirname(fileURLToPath(import.meta.url));\n";
+  const fileReader = `${UI_SEED}const ADR = resolve(HERE, '../../../../${ADR_A}');\nreadFileSync(ADR, 'utf8');\n`;
+  const dirReader = `${UI_SEED}readdirSync(resolve(HERE, '../../../../docs/adr'));\n`;
+  const ownAdrReader = `${UI_SEED}readFileSync(resolve(HERE, '../../docs/adr/0002-own.md'), 'utf8');\n`;
+  const uiPaths = (rows) => (rows ?? ['(no verdict)']).map((r) => r.path ?? r);
+
+  const ADR_ON_DISK = { [ADR_A]: '# 0001\n' };
+  const uiReadsFx = uiScratch(
+    {
+      ...ADR_ON_DISK,
+      'ui/packages/p/src/a.test.ts': fileReader,
+      'ui/packages/p/src/own.test.ts': ownAdrReader,
+      'ui/packages/p/src/plain.ts': fileReader,
+    },
+    (r) => r,
+  );
+  assert(
+    !uiReadsFx.refusal && uiReadsFx.tests === 2 && uiPaths(uiReadsFx.rows).join(',') === ADR_A && uiReadsFx.rows[0].from.join(',') === 'ui/packages/p/src/a.test.ts',
+    `the collector finds a ui test's root ADR read through the shared walker, and neither the ui tree's own ADR nor a non-test file -- got ${uiReadsFx.refusal ?? JSON.stringify(uiReadsFx.rows)}`,
+  );
+  const uiCovered = judgeUiReads(uiWorkflow({ ui: ['ui/**', ADR_A] }), uiReadsFx);
+  assert(!uiCovered.refusal && uiCovered.uncovered.length === 0 && uiCovered.stale.length === 0, `positive control: the read named verbatim in \`ui\` is covered -- ${uiCovered.refusal ?? uiPaths(uiCovered.uncovered).join(', ')}`);
+  assert(judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr/**'] }), uiReadsFx).uncovered?.length === 0, '-- and so is it by the `docs/adr/**` subtree');
+  assert(judgeUiReads(uiWorkflow({ consumers: [ADR_A] }), uiReadsFx).uncovered?.length === 0, '-- and by `ui_consumers`, which the job ORs');
+
+  // THE HOLE the card reads: the ADR a ui test reads, in no list.
+  const uiHole = judgeUiReads(uiWorkflow(), uiReadsFx);
+  assert(uiPaths(uiHole.uncovered).join(',') === ADR_A, `a ui test's root ADR read no list covers is reported by path -- got ${uiPaths(uiHole.uncovered).join(', ')}`);
+  assert(judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/**/0001-a.md'] }), uiReadsFx).uncovered?.length === 1, '-- and a wildcard row covers nothing by the pure-string rule, the bound the first subject states');
+  assert(quietly(() => reportUiReads(uiHole)) === 1 && quietly(() => reportUiReads(uiCovered)) === 0, '-- and the report path returns 1 over the hole and 0 over the clean tree');
+
+  // A directory read needs the subtree: a sibling file row is not coverage.
+  const uiDirReads = uiScratch({ ...ADR_ON_DISK, 'ui/packages/p/src/d.test.ts': dirReader }, (r) => r);
+  assert(
+    uiPaths(uiDirReads.rows).join(',') === 'docs/adr' &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', ADR_A] }), uiDirReads).uncovered?.length === 1 &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr/**'] }), uiDirReads).uncovered?.length === 0,
+    `a ui test listing \`docs/adr\` is covered by \`docs/adr/**\` alone -- got ${JSON.stringify(uiDirReads.rows)}`,
+  );
+
+  // A directory BOUND to a name and then listed: the walker puts every bound
+  // name in `files`, so the name sits in both sets and only the disk says it is
+  // a directory. Read as a file row, a literal `docs/adr` row would pass while
+  // matching no changed file.
+  const boundDirReader = `${UI_SEED}const ADR_DIR = resolve(HERE, '../../../../docs/adr');\nreaddirSync(ADR_DIR);\n`;
+  const uiBoundDir = uiScratch({ ...ADR_ON_DISK, 'ui/packages/p/src/b.test.ts': boundDirReader }, (r) => r);
+  assert(
+    uiPaths(uiBoundDir.rows).join(',') === 'docs/adr' && uiBoundDir.rows[0].kind === 'dir' &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr'] }), uiBoundDir).uncovered?.length === 1 &&
+      judgeUiReads(uiWorkflow({ ui: ['ui/**', 'docs/adr/**'] }), uiBoundDir).uncovered?.length === 0,
+    `a bound-then-listed directory read is classified as a directory, covered by \`docs/adr/**\` and not by a literal \`docs/adr\` row -- got ${JSON.stringify(uiBoundDir.rows)}`,
+  );
+  // A spelled path naming nothing on disk is a synthetic fixture path, not a read.
+  const uiSynthetic = uiScratch({ 'ui/packages/p/src/a.test.ts': fileReader }, (r) => r);
+  assert(!uiSynthetic.refusal && uiSynthetic.rows.length === 0, `a ui test naming an ADR that is not on disk reads nothing -- got ${JSON.stringify(uiSynthetic.rows)}`);
+
+  // The reverse direction: a `ui` row under the root whose reader is gone.
+  const uiStale = judgeUiReads(uiWorkflow({ ui: ['ui/**', ADR_A, 'docs/adr/0009-gone.md'] }), uiReadsFx);
+  assert((uiStale.stale ?? []).join(',') === 'docs/adr/0009-gone.md', `a \`ui\` row under docs/adr that no ui test reads is a leftover -- got ${(uiStale.stale ?? []).join(', ')}`);
+  assert(quietly(() => reportUiReads(uiStale)) === 1, '-- and the report path returns 1 over it');
+
+  // Refusals: never a clean zero over a subject that was not read.
+  const uiRefusal = (v) => typeof v.refusal === 'string' && v.refusal.length > 0;
+  assert(uiRefusal(uiScratch({ 'ui/packages/p/src/plain.ts': fileReader }, (r) => r)), 'refuses when no ui test file is tracked');
+  assert(uiRefusal(judgeUiReads(uiWorkflow({ job: 'test-ui-renamed' }), uiReadsFx)), 'refuses when ci.yml has no `test-ui` job');
+  assert(
+    uiRefusal(judgeUiReads(uiWorkflow({ condition: "${{ !cancelled() && needs.filter.outputs.ui_consumers != 'false' && needs.filter.outputs.ui_tree != 'false' }}" }), uiReadsFx)),
+    'refuses when the `test-ui` job\'s `if:` stops naming `ui` -- `ui_consumers` and `ui_tree` do not count as it',
+  );
+  assert(uiRefusal(judgeUiReads(uiWorkflow(), null)) && uiRefusal(judgeUiReads(uiWorkflow(), { refusal: 'x' })), 'refuses when the reads were not supplied or were refused');
+
+  // The real tree: clean, and the #37935 row is what makes it so.
+  const ADR_0084_ROW = "              - 'docs/adr/0084-application-builder-information-architecture.md'\n";
+  const realUi = judgeUiReads(realSource, realUiReads);
+  assert(
+    !realUi.refusal && realUi.uncovered.length === 0 && realUi.stale.length === 0 &&
+      (realUi.named ?? []).join(',') === UI_SCHEDULING_FILTERS.join(','),
+    `the checked-in tree's root ADR reads by ui tests are all covered, against both lists the real \`if:\` ORs -- ${realUi.refusal ?? uiPaths(realUi.uncovered).join(', ')}`,
+  );
+  const uiRowDropped = realSource.replace(ADR_0084_ROW, '');
+  assert(realSource.includes(ADR_0084_ROW) && !uiRowDropped.includes(ADR_0084_ROW), 'the real-tree rollback found the #37935 row in the checked-in ci.yml and removed it');
+  assert(
+    uiPaths(judgeUiReads(uiRowDropped, realUiReads).uncovered).join(',') === 'docs/adr/0084-application-builder-information-architecture.md',
+    'the checked-in ci.yml with the #37935 row dropped reports exactly ADR-0084, and nothing else',
+  );
+  assert(inScratchTree(uiRowDropped, (root) => quietly(() => main(root, undefined, realUiReads))) === 1, '-- and main() returns 1 over it: the report path, not only `judgeUiReads`');
 
   // ── The floor: every declared battery RAN, and ran its cases (#13489) ───
   //
@@ -1935,7 +2275,11 @@ export async function selfTest() {
       `and Test Core's generic test inputs: a \`test\` and a \`test:repo\` root input each observed red by path and task, ` +
       `one covered only by \`crosspkg\`, package-task and negated inputs left out, five refusals, a test input keeping a ` +
       `\`core\` row beside a build input from reading as a leftover, the checked-in tree green with the five #27961 rows ` +
-      `dropped observed red through the report path, and the task pair pinned to the real job.`,
+      `dropped observed red through the report path, and the task pair pinned to the real job; ` +
+      `and Test UI's root ADR reads: a ui test's ADR read found through the shared walker and observed red by path, ` +
+      `covered verbatim, by its subtree and by \`ui_consumers\`, a directory read needing its subtree, a bound-then-listed directory classified as one, a path not on disk read as nothing, a wildcard row ` +
+      `covering nothing, a reader-less row reported as a leftover, five refusals, and the checked-in tree green with ` +
+      `the #37935 row dropped observed red through the report path.`,
   );
   selfTestReachedVerdict = true;
   return 0;

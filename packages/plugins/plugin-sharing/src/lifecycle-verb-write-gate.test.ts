@@ -22,6 +22,8 @@ function makeService(admits: boolean) {
   return {
     admitsByIdWrite: vi.fn(async () => admits),
     buildWriteFilter: vi.fn(async () => ({ owner_id: 'u_member' })),
+    // [#37535] The bulk branch asks the authored scope too; none here.
+    probeAuthoredRowWriteFilter: vi.fn(async () => null),
   };
 }
 

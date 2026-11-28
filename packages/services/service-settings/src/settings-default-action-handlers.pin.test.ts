@@ -112,9 +112,10 @@ describe('[#24769] the default composition answers every declared settings actio
     expect(declared).toEqual(
       expect.arrayContaining(['ai/test', 'ai/reset', 'mail/test', 'sms/test', 'storage/test']),
     );
-    // #33933: `ai/test_embedder` and `knowledge/test` arrive with the knowledge
-    // service, which registers their handlers; its suite drives both at the
-    // HTTP door (`knowledge-settings-contribution.test.ts`).
+    // #33933: `ai/test_embedder` arrives with the knowledge service, which
+    // registers its handler (`knowledge-settings-contribution.test.ts` drives
+    // it at the HTTP door); `knowledge/test` arrives with the Turso fields it
+    // checks, from `@objectstack/knowledge-turso`, which pins both its cases.
     expect(declared).not.toContain('ai/test_embedder');
     expect(declared).not.toContain('knowledge/test');
   });

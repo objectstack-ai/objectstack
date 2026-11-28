@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { validateTranslationReferences, TRANSLATION_TARGET_UNKNOWN } from './validate-translation-references.js';
+import { collectExpectedEntries } from './i18n-walk.js';
 
 const ACCOUNT = {
   name: 'account',
@@ -50,7 +51,7 @@ describe('validateTranslationReferences — _relatedLists under a `.custom` arra
       const findings = judge([{ extend: 'account', relatedLists: [restated] }], { contact: { label: '联系人' } });
       expect(findings.map((f) => f.path), JSON.stringify(restated)).toEqual([KEY('contact')]);
       expect(findings[0].message, JSON.stringify(restated)).toContain('carries no `label` in the `.custom` arrangement');
-      expect(findings[0].hint, JSON.stringify(restated)).toContain("owner's `label`");
+      expect(findings[0].hint, JSON.stringify(restated)).toContain("{ list: 'contact', label }");
       expect(findings[0].message.length).toBeLessThanOrEqual(200);
       expect(findings[0].hint.length).toBeLessThanOrEqual(200);
     }
@@ -75,9 +76,22 @@ describe('validateTranslationReferences — _relatedLists under a `.custom` arra
       expect(judge([{ extend: 'account', relatedLists: arrangement }], { 'event.related_to': { label: '会议' } }), JSON.stringify(arrangement))
         .toEqual([]);
     }
-    // A sibling that would cancel a `hidden` entry is a list both shown and
-    // hidden in one arrangement, which the object schema refuses at save
-    // (`refuseContradictoryRelatedListEntries`), so it has no pin here.
+  });
+
+  it('a dotted list one entry hides stays hidden beside the bare child a sibling entry names (#37622)', () => {
+    // The object schema refuses a cancelling sibling only when both entries
+    // name the SAME list (`refuseContradictoryRelatedListEntries`), so this
+    // shape parses: the bare child drops the dotted list's label in the first
+    // pass, and the hidden entry hides it in the second, in either order.
+    for (const arrangement of [
+      [{ list: 'event.related_to', hidden: true }, 'event'],
+      ['event', { list: 'event.related_to', hidden: true }],
+    ]) {
+      const findings = judge([{ extend: 'account', relatedLists: arrangement }], { 'event.related_to': { label: '会议' } });
+      expect(findings.map((f) => [f.severity, f.path]), JSON.stringify(arrangement)).toEqual([['error', KEY('event.related_to')]]);
+      expect(findings[0].message, JSON.stringify(arrangement)).toContain('hidden');
+      expect(findings[0].hint, JSON.stringify(arrangement)).toContain("{ list: 'event.related_to', label }");
+    }
   });
 
   it('applies the arrangement after every placement, whatever the extensions\' order', () => {
@@ -113,5 +127,57 @@ describe('validateTranslationReferences — _relatedLists under a `.custom` arra
       [{ extend: 'account', place: [{ list: 'quote', after: 'contact', label: 'Quotes' }] }],
       { contact: { label: '联系人' }, quote: { label: '报价' } },
     )).toEqual([]);
+  });
+});
+
+// [#37622] `os i18n extract` and `os i18n check` read the expected keys from
+// `collectExpectedEntries`, which folds the owner's tab list with the same
+// arrangement the rule above folds: every key the extractor scaffolds is one
+// `os validate` accepts, and a list the arrangement labels is scaffolded.
+describe('collectExpectedEntries — _relatedLists agree with the rule under a `.custom` arrangement (#37622)', () => {
+  const expected = (objectExtensions: unknown[]) =>
+    collectExpectedEntries({ objects: [ACCOUNT], objectExtensions } as never)
+      .filter((entry) => entry.path[2] === '_relatedLists')
+      .map((entry) => [entry.path[3], entry.sourceValue]);
+
+  /** The keys the extractor scaffolds, translated, judged by the rule. */
+  const scaffoldedJudged = (objectExtensions: unknown[]) => {
+    const keys = Object.fromEntries(expected(objectExtensions).map(([list]) => [list, { label: '译文' }]));
+    return judge(objectExtensions, keys);
+  };
+
+  const ARRANGEMENTS: Array<[string, unknown[]]> = [
+    ['none', []],
+    ['hides contact', [{ extend: 'account', relatedLists: [{ list: 'contact', hidden: true }] }]],
+    ['names contact bare', [{ extend: 'account', relatedLists: ['contact'] }]],
+    ['re-states contact with no label', [{ extend: 'account', relatedLists: [{ list: 'contact' }] }]],
+    ['relabels contact', [{ extend: 'account', relatedLists: [{ list: 'contact', label: 'Clients' }] }]],
+    ['labels a list the owner names bare', [{ extend: 'account', relatedLists: [{ list: 'case', label: 'Tickets' }] }]],
+    ['hides every event list through the bare child', [{ extend: 'account', relatedLists: [{ list: 'event', hidden: true }] }]],
+    ['labels the bare child', [{ extend: 'account', relatedLists: [{ list: 'event', label: 'Activity' }] }]],
+    ['keeps the dotted label beside the bare child', [{ extend: 'account', relatedLists: ['event', { list: 'event.related_to', label: 'Meetings' }] }]],
+  ];
+
+  it('every scaffolded key is accepted by `os validate`, for every arrangement', () => {
+    for (const [name, objectExtensions] of ARRANGEMENTS) {
+      expect(scaffoldedJudged(objectExtensions), name).toEqual([]);
+    }
+  });
+
+  it('scaffolds the tab titles the served object carries, with the text it serves', () => {
+    expect(expected([])).toEqual([['contact', 'People'], ['event.related_to', 'Meetings']]);
+    expect(expected(ARRANGEMENTS[1][1])).toEqual([['event.related_to', 'Meetings']]);
+    expect(expected(ARRANGEMENTS[2][1])).toEqual([['event.related_to', 'Meetings']]);
+    expect(expected(ARRANGEMENTS[4][1])).toEqual([['event.related_to', 'Meetings'], ['contact', 'Clients']]);
+    expect(expected(ARRANGEMENTS[5][1])).toEqual([['contact', 'People'], ['event.related_to', 'Meetings'], ['case', 'Tickets']]);
+    expect(expected(ARRANGEMENTS[6][1])).toEqual([['contact', 'People']]);
+    expect(expected(ARRANGEMENTS[7][1])).toEqual([['contact', 'People'], ['event', 'Activity']]);
+    expect(expected(ARRANGEMENTS[8][1])).toEqual([['contact', 'People'], ['event.related_to', 'Meetings']]);
+  });
+
+  it('asks for no title a code extender\'s placement alone gives, which the rule still accepts', () => {
+    const placed = [{ extend: 'account', place: [{ list: 'quote', after: 'contact', label: 'Quotes' }] }];
+    expect(expected(placed)).toEqual([['contact', 'People'], ['event.related_to', 'Meetings']]);
+    expect(judge(placed, { quote: { label: '报价' } })).toEqual([]);
   });
 });

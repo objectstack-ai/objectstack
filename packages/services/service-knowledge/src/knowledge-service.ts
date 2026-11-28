@@ -53,7 +53,14 @@ import {
   type KnowledgeSourceAdmission,
   type ObjectAdmission,
 } from './knowledge-source-admission.js';
-import { readSearchScope, scopeCheck, scopeTermsFor, type SearchScopeEntry } from './knowledge-search-scope.js';
+import {
+  narrowToVisible,
+  readSearchScope,
+  scopeCheck,
+  scopeTermsFor,
+  SEARCH_VISIBLE_IDS_MAX,
+  type SearchScopeEntry,
+} from './knowledge-search-scope.js';
 import {
   BUILD_LEASE_MS,
   BUILD_PROGRESS_LOG_INTERVAL_MS,
@@ -1809,6 +1816,18 @@ export class KnowledgeService implements IKnowledgeService {
    * The system identity gets one round of `topK`. A caller the service cannot
    * re-check (no context, no engine) is served no source at all.
    *
+   * ## Ranking only what the caller may read
+   *
+   * The refill is a cap: a caller whose readable rows all rank below
+   * `topK × SEARCH_REFILL_FACTOR` would get none of them. So before the first
+   * round, each source of a caller who is re-checked is narrowed to the records
+   * that caller may read ({@link sourcesNarrowedToVisible}): when they number
+   * no more than `SEARCH_VISIBLE_IDS_MAX`, their ids become the source's
+   * `record` term — intersected with the caller's own scope, never added to
+   * it — and the adapter ranks only those rows. More than that, a parent term
+   * in the caller's scope, or a read that fails, and the source is searched as
+   * above. The rounds, the refill and the re-check are the same either way.
+   *
    * ## Records, not chunks (`granularity: 'record'`, `groupBy`)
    *
    * Several passages of one record would fill `topK` with one record, so
@@ -1906,6 +1925,11 @@ export class KnowledgeService implements IKnowledgeService {
       await this.admitSources(this.resolveSearchTargets(opts.sourceIds), ctx);
     if (scope !== undefined) admitted = this.sourcesInScope(admitted, scope);
     if (groupBy !== undefined) admitted = this.sourcesGroupableBy(admitted, groupBy);
+    const engine = this.options.dataEngine;
+    const filtered = ctx !== undefined && ctx.isSystem !== true && engine !== undefined;
+    // A caller the re-check can remove hits for: each source ranks only the
+    // records they may read, when those are few enough to name.
+    if (filtered && admitted.length > 0) admitted = await this.sourcesNarrowedToVisible(admitted, ctx, engine);
     if (admitted.length === 0) return { hits: [], refused: [] };
     const refused: KnowledgeSearchRefusal[] = [];
     const sources = await this.planSearches(admitted, refused);
@@ -1915,7 +1939,6 @@ export class KnowledgeService implements IKnowledgeService {
     const served = async (hits: KnowledgeHit[]): Promise<KnowledgeHit[]> =>
       verified.size === 0 ? hits : this.dropUnverifiedHits(hits, verified);
 
-    const filtered = ctx !== undefined && ctx.isSystem !== true && this.options.dataEngine !== undefined;
     const widened = byRecord || filtered;
     const firstAsk = (_source: KnowledgeSource): number =>
       widened ? topK * SEARCH_FIRST_ROUND_FACTOR : topK;
@@ -2576,6 +2599,97 @@ export class KnowledgeService implements IKnowledgeService {
   }
 
   /**
+   * Narrow each source's search to the records a non-system caller may read
+   * ({@link narrowToVisible}). Per source, the ids of the records it indexes
+   * that the caller may read are read first — as the caller, under the
+   * source's `where`, ids only, at most {@link SEARCH_VISIBLE_IDS_MAX} + 1 —
+   * once per object and `where` the search asks. When the caller may read no
+   * more than {@link SEARCH_VISIBLE_IDS_MAX}, the source is handed them as a
+   * `record` term, intersected with the caller's own scope, so its adapter
+   * ranks only those rows and a narrow caller's answers are not crowded out of
+   * the refill cap by rows they could never be served.
+   *
+   * A source is searched as before — on the caller's own scope, its hits
+   * re-checked within the refill cap — when the caller may read more than
+   * that, when the caller's scope holds a parent (`metadata`) term, when the
+   * narrowing names no record (the caller may read none of what the source
+   * could answer: answered as before, no hit or the source's refusal, never a
+   * new kind of empty), or when the read fails (logged at `warn`). Nothing here decides access: every hit is
+   * still re-checked as the caller ({@link applyPermissionFilter}), and the
+   * organization filter each source carries is not touched.
+   */
+  private async sourcesNarrowedToVisible<T extends { source: KnowledgeSource; scope?: AdapterScopeTerm[] }>(
+    sources: T[],
+    ctx: ExecutionContext,
+    engine: IDataEngine,
+  ): Promise<T[]> {
+    const reads = new Map<string, Promise<string[] | undefined>>();
+    const visibleOf = (objSource: ObjectKnowledgeSource): Promise<string[] | undefined> => {
+      const key = JSON.stringify([objSource.object, objSource.where ?? null]);
+      let read = reads.get(key);
+      if (read === undefined) {
+        read = this.readVisibleIds(objSource, ctx, engine);
+        reads.set(key, read);
+      }
+      return read;
+    };
+    const visible = sources.map((entry) =>
+      entry.scope?.some((term) => term.kind !== 'record') === true
+        ? Promise.resolve(undefined)
+        : visibleOf(entry.source.source));
+    const out: T[] = [];
+    for (const [i, entry] of sources.entries()) {
+      const ids = await visible[i];
+      const narrowed = ids === undefined ? undefined : narrowToVisible(entry.scope, ids);
+      // A narrowing that names no record is not applied: the source is
+      // searched as before, so a caller who may read none of its records is
+      // answered as before too — no hit, or the source's refusal.
+      if (narrowed === undefined || narrowed.every((term) => term.ids.length === 0)) {
+        out.push(entry);
+        continue;
+      }
+      out.push({ ...entry, scope: narrowed });
+    }
+    return out;
+  }
+
+  /**
+   * The ids of the records of `objSource` the caller may read, read as the
+   * caller under the source's `where`; `undefined` when there are more than
+   * {@link SEARCH_VISIBLE_IDS_MAX} or the read fails.
+   */
+  private async readVisibleIds(
+    objSource: ObjectKnowledgeSource,
+    ctx: ExecutionContext,
+    engine: IDataEngine,
+  ): Promise<string[] | undefined> {
+    let rows: unknown;
+    try {
+      // As the caller, in the query, as the permission re-read asks.
+      rows = await engine.find(objSource.object, {
+        ...(objSource.where === undefined ? {} : { where: objSource.where }),
+        fields: ['id'],
+        limit: SEARCH_VISIBLE_IDS_MAX + 1,
+        context: ctx,
+      } as never);
+      if (!Array.isArray(rows)) throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
+    } catch (err) {
+      this.options.logger?.warn?.(
+        `[knowledge] the caller's readable records of object='${objSource.object}' could not be read ` +
+          `(${errorText(err)}); its sources are searched unnarrowed, every hit re-checked.`,
+      );
+      return undefined;
+    }
+    if (rows.length > SEARCH_VISIBLE_IDS_MAX) return undefined;
+    const ids: string[] = [];
+    for (const row of rows as Array<{ id?: unknown } | null | undefined>) {
+      const id = row?.id;
+      if ((typeof id === 'string' && id.length > 0) || typeof id === 'number') ids.push(String(id));
+    }
+    return ids;
+  }
+
+  /**
    * The hits of `source` that some scope term holds for ({@link scopeCheck});
    * the rest are dropped, and the first time an adapter's answer loses a hit
    * here it is reported once, at `warn` ({@link searchRound}).
@@ -3116,7 +3230,14 @@ export class KnowledgeService implements IKnowledgeService {
    * the protocol's parse refuses it with the schema's own prescription.
    *
    * A refusal is coded (ADR-0112) and names the object, and the field for the
-   * field gate: `403 PERMISSION_DENIED`. Fails closed: with no data engine, a
+   * field gate: `403 PERMISSION_DENIED`. A source whose `adapter` names no
+   * adapter this deployment mounts is refused `400 VALIDATION_ERROR`, naming
+   * the source, the adapter and the mounted ones; an omitted `adapter` is not
+   * (it is placed by {@link adapterIdFor}). That check is this door's only:
+   * a package install (`isSystem`), a source registered in code and
+   * `os validate` are not judged here, and for them the boot's reading
+   * ({@link reportUnmountedAdapters}) and the `503` at index and search stay
+   * the signal. Fails closed: with no data engine, a
    * gate that throws, or a security service that answers neither field
    * question, the save is refused `503 SERVICE_UNAVAILABLE`. The system
    * context is admitted, as it bypasses the gates at search.
@@ -3165,6 +3286,13 @@ export class KnowledgeService implements IKnowledgeService {
     if (authoredAdapter === undefined && this.options.deploymentAdapter === undefined && registeredAdapters.length > 1) {
       return refuse(400, 'VALIDATION_ERROR', `${named}: it ${unplacedSourceText(registeredAdapters)}`);
     }
+    // [ADR-0161 K4] A source that names an adapter this deployment does not
+    // mount is refused at its save, so the author hears it there and not from
+    // the boot log or a search's 503. A save is served after every store's
+    // `start()`, so the adapters registered now are the deployment's.
+    if (typeof authoredAdapter === 'string' && !registeredAdapters.includes(authoredAdapter)) {
+      return refuse(400, 'VALIDATION_ERROR', `${named}: ${this.unmountedAdapterSaveText(authoredAdapter, registeredAdapters)}`);
+    }
     const engine = this.options.dataEngine;
     if (!engine) return unavailable('the knowledge service has no data engine');
 
@@ -3191,9 +3319,11 @@ export class KnowledgeService implements IKnowledgeService {
         return refuse(
           403,
           'PERMISSION_DENIED',
-          `${named}: the API does not serve object '${object}' for \`search\` (\`enable.apiEnabled\` is false, or ` +
-            "its `enable.apiMethods` list does not include `search`), and a knowledge search is a search over the " +
-            "object's records. Serve the object for `search`, or index another object.",
+          `${named}: the API does not serve object '${object}' for \`search\` (\`enable.apiEnabled\` is false, its ` +
+            '`enable.apiMethods` list does not grant `list`, from which search derives, or it grants `list` beside ' +
+            "`enable.searchable: false`), and a knowledge search is a search over the object's records. " +
+            `Serve '${object}' for search: keep \`enable.apiEnabled\` true and, where it declares ` +
+            '`enable.apiMethods`, include `list` with `enable.searchable` not false; or index another object.',
         );
       case 'system-object-not-ai-readable':
         return refuse(
@@ -3230,6 +3360,27 @@ export class KnowledgeService implements IKnowledgeService {
       default:
         return unavailable(`the security service did not answer which fields of '${object}' you may read`);
     }
+  }
+
+  /**
+   * Why a saved source naming `adapter`, which `mounted` does not hold, is
+   * refused, and what to write: the rule, then the remedies this deployment
+   * can take. Leaving `adapter` out is offered only where an omitted adapter
+   * would be placed ({@link adapterIdFor}).
+   */
+  private unmountedAdapterSaveText(adapter: string, mounted: readonly string[]): string {
+    const deployment = this.options.deploymentAdapter;
+    const placeable = (deployment !== undefined && mounted.includes(deployment)) || mounted.length === 1;
+    const remedies = [
+      ...(mounted.length === 0 ? [] : [`name one of ${mounted.map((id) => `'${id}'`).join(', ')} as its \`adapter\``]),
+      ...(placeable ? ["leave `adapter` out, and the deployment's store holds it"] : []),
+      `mount the '${adapter}' store and save it again`,
+    ];
+    return (
+      `it names adapter '${adapter}', which this deployment does not mount ` +
+      `(mounted: ${mounted.length === 0 ? 'none' : mounted.join(', ')}), and a source's \`adapter\` must name a ` +
+      `mounted store. ${remedies.join(', or ').replace(/^./, (c) => c.toUpperCase())}.`
+    );
   }
 
   /** A gate lookup threw: every source over `object` is refused (fail-closed), reported once at `error`, `warn` as the fallback. */

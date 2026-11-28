@@ -343,21 +343,37 @@ describe('ADR-0161 K4 — dispatcher PUT asks the knowledge service to admit the
         expect(stack.saveMetaItem).not.toHaveBeenCalled();
     });
 
-    it('CONTROL: on the same kernel with no knowledge service registered, the save goes on', async () => {
+    /**
+     * Ruled D: on a deployment that registers no knowledge service, nothing
+     * loads, indexes or searches a source, and nothing mounts the service while
+     * the server runs. So an author's save is refused at the door, naming the
+     * reason and the remedy, instead of being kept and never served.
+     */
+    it('on the same kernel with no knowledge service registered, an author\'s save is refused 503 SERVICE_UNAVAILABLE with the remedy, and nothing is saved', async () => {
         const stack = bootOnKernel('never-registered');
         const res = await stack.dispatcher.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE));
-        expect(res.response?.status).toBe(200);
-        expect(stack.saveMetaItem).toHaveBeenCalledTimes(1);
+        expect(res.response?.status).toBe(503);
+        expect(res.response?.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(res.response?.body?.error?.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+        expect(res.response?.body?.error?.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+        expect(stack.saveMetaItem).not.toHaveBeenCalled();
+
+        // The double whose registry answers nothing for the name: the same refusal.
+        const none = bootWith();
+        expect((await put(none, AUTHOR)).response?.status).toBe(503);
+        expect(none.saveMetaItem).not.toHaveBeenCalled();
     });
 
-    it('CONTROL: an admitted source is saved; with no knowledge service the save goes on', async () => {
+    it('CONTROL: an admitted source is saved; a registered knowledge service that is not the platform\'s (no admitAuthoredSource) lets the save go on', async () => {
         const admitted = bootWith(() => ({ admitted: true }));
         expect((await put(admitted, AUTHOR)).response?.status).toBe(200);
         expect(admitted.saveMetaItem).toHaveBeenCalledTimes(1);
 
-        const none = bootWith();
-        expect((await put(none, AUTHOR)).response?.status).toBe(200);
-        expect(none.saveMetaItem).toHaveBeenCalledTimes(1);
+        const saveMetaItem = vi.fn(async ({ name }: any) => ({ success: true, name }));
+        const services: Record<string, unknown> = { protocol: { saveMetaItem }, knowledge: { search: async () => [] } };
+        const hostMounted = new HttpDispatcher({ context: { getService: (n: string) => services[n] ?? null } } as any);
+        expect((await hostMounted.handleMetadata('/knowledge_source/faq', ctx(AUTHOR), 'PUT', copy(SOURCE))).response?.status).toBe(200);
+        expect(saveMetaItem).toHaveBeenCalledTimes(1);
     });
 
     it('the gate is behind the capability gates, and is not asked for another type', async () => {

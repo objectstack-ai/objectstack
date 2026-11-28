@@ -79,6 +79,12 @@ function warnUnmatchedGroupValues(
  * tested directly — see index.bucket.test.ts. Records whose group value maps
  * to no declared column land in a trailing `KANBAN_UNCOLUMNED_ID` lane
  * instead of being dropped (#2792).
+ *
+ * `keepUncolumned` draws that trailing lane even when no card of `data` lands
+ * in it: the host knows the lane holds records the page did not load
+ * (objectstack#37516 — a board handed one page of its query, whose grouped
+ * lane read counts records with an empty lane value past the page). Off, the
+ * lane is drawn by the cards it holds, as before.
  */
 export function bucketCardsIntoColumns(
   columns: Array<any>,
@@ -86,6 +92,7 @@ export function bucketCardsIntoColumns(
   groupBy: string | undefined,
   coverImageField: string | undefined,
   uncolumnedTitle: string,
+  keepUncolumned = false,
 ): Array<any> {
   const mapCoverImage = (item: any) => {
     if (!coverImageField) return item;
@@ -183,7 +190,7 @@ export function bucketCardsIntoColumns(
   const unmatchedKeys = Object.keys(groups).filter((key) => !knownIds.has(key));
   const uncolumnedCards = unmatchedKeys.flatMap((key) => groups[key]);
   warnUnmatchedGroupValues(unmatchedKeys, groups, columns, groupBy);
-  if (uncolumnedCards.length > 0) {
+  if (uncolumnedCards.length > 0 || keepUncolumned) {
     mapped.push({ id: KANBAN_UNCOLUMNED_ID, title: uncolumnedTitle, cards: uncolumnedCards });
   }
   return mapped;

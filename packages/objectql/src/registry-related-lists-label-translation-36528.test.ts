@@ -11,6 +11,12 @@
  * asks the engine's registry). A code extender's placed entry is part of that
  * base (#36528), so its title reads the deployment catalog; a `.custom` title
  * diverges from the base and reads the pair's translations (`pairBundle`).
+ * An object answers no `servedOverrideBaseOf` (ADR-0146 D10), so the REST
+ * read hands the pair's `objects.<object>._relatedLists` translations alone,
+ * read for the pair of the base `packagedObjectBaseOf` names
+ * (`objectPairRelatedListsBundleOf`, #37622); this file passes that bundle by
+ * hand, and `meta-object-related-list-pair-i18n.test.ts` in `@objectstack/rest`
+ * pins the read that builds it.
  */
 
 import { describe, it, expect } from 'vitest';
