@@ -11,7 +11,7 @@
 | Type | Lifecycle | Required | Sharing | Roll-ups | Use Case |
 |:-----|:----------|:---------|:--------|:---------|:---------|
 | `lookup` | Independent | Optional by default | Independent | Via `summary` | "Related to" |
-| `master_detail` | Coupled (cascade delete) | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; read-on-master opt-ins (below) | Via `summary` | "Owned by" |
+| `master_detail` | Coupled | Forced only under `controlled_by_parent`, unless the optional master (below); else lint-warned | Inherits parent; read-on-master opt-ins (below) | Via `summary` | "Owned by" |
 | `tree` | Self-reference | Optional — and so is `reference`, which when written must name this object itself; any other object is refused at parse, not lint-warned | N/A | Not available | Hierarchical |
 
 ## Patterns
@@ -188,7 +188,7 @@ transaction.
 }
 ```
 
-`object` is the child object to aggregate, `field` its field (ignored for
+`object` is the child object, `field` its field (ignored for
 `count`), `function` one of `count` / `sum` / `min` / `max` / `avg`. Optional:
 `filter` (below) and `relationshipField` (omitted: the child's `lookup` /
 `master_detail` referencing this parent). Refused at publish when omitted and the
@@ -289,7 +289,7 @@ editable fields, else `grid`.
 **Modeling a `'grid'` line item for the full editor:**
 
 ```typescript
-// Parent (a field group names invoice_line, as above)
+// Parent
 Invoice = {
   fields: {
     tax_rate: Field.number({ label: 'Tax Rate (%)' }),          // → live Subtotal/Tax/Total stack
@@ -360,7 +360,8 @@ audit_ref: { type: 'master_detail', reference: 'invoice', relatedList: false },
   arrangement re-stating the entry with no `label`, or hiding it, leaves none (a
   bare child's name, labelled or not, covers each of its `child.field` lists too) and
   `os validate` refuses the key: drop it, or re-state the entry, shown, with the
-  owner's `label`. A child in the stack with no inbound FK
+  owner's `label`, or its own, translated at that key in the `.custom`
+  package's bundle. A child in the stack with no inbound FK
   is refused everywhere; one that exists nowhere is refused by `os validate` /
   `os build` (bar a platform or sibling-artifact name) and by a metadata
   write naming no package (one into a package is stored, placing nothing).

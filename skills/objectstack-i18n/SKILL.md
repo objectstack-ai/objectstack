@@ -57,7 +57,7 @@ The canonical authoring path: one `TranslationData` per locale, assembled with
 
 <!-- os:check -->
 ```typescript
-// src/translations/en.ts — one TranslationData per locale
+// src/translations/en.ts
 import { defineStack, defineTranslationBundle } from '@objectstack/spec';
 import type { TranslationData } from '@objectstack/spec/system';
 
@@ -153,10 +153,10 @@ All translatable content for a single object is aggregated under
 | `label` / `pluralLabel` / `description` | Object-level text (every key optional) |
 | `fields.{field_name}` | `label`, `help`, `placeholder`, `options` (option value → label), `inlineTitle` (the heading of the inline child grid a `master_detail` field draws on its parent's form — the field lives on the child object, so the key is the child's; untranslated it keeps its authored text, never the child's plural label), `relatedListTitle` (likewise, the title of the related list a `lookup` or `master_detail` field draws on its parent's record page) per field |
 | `_views.{view_name}` | `label`, `description`, `title` (a form view's own heading — only a form that authors one is translated; a list view has none), `submitBehavior.title` / `submitBehavior.message` (the thank-you panel of a form whose `submitBehavior` is `kind: 'thank-you'`; only the copy the form authors is translated, and the other kinds carry none), `emptyState.title` / `emptyState.message`, `bulkActions.{def_name}` (`label`, `confirmText`, `confirmLabel`, `params`) |
-| `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
+| `_actions.{action_name}` | `label`, `description`, `confirmText`, `submitText` (the param dialog's button verb — only under an action that declares a non-empty `params`), `cancelText` (the dismiss button of the confirm or param dialog — only under an action that declares `confirmText` or a non-empty `params`), `successMessage`, `disabledReason` (the sentence a greyed action shows; absent keeps the console's default), `params.{param_name}` (and `.options.{value}` beneath it — an option's stored `value` in that param's inline `options`), `outcomeMessages.{outcome}` (an outcome the action's own `outcomeMessages` declares), `resultDialog.title` / `.description` / `.acknowledge` (only under an action that declares a `resultDialog`), `resultDialog.fields.{path}` (the literal `path` of a field in `resultDialog.fields[]`, dots included — `client.secret` is one key), `preflight.fields.{path}` (only under an action that declares `preflight`: a field's literal `path` in its `preflight.fields[]`, its value a plain string as under `resultDialog.fields`), `resultDialog.columns.{path}.{column_path}` / `preflight.columns.{path}.{column_path}` (a table's column headers, beside `fields`: the literal `path` of a `format: 'table'` field, then of one of its `columns[]`, each a plain string; `defineTranslationBundle` refuses any other key under `preflight`, a `title` included); the same keys hold under `globalActions.{action_name}` |
 | `_sections.{section_name}` | Form section `label`, `description`; `fields.{field_name}` — the `label`, `placeholder`, `helpText` an entry overrides for that form alone (`helpText` here, `help` under `fields.{field_name}` above: each spells what its source does) |
 | `_tabs.{tab_name}` | Filter-preset tab `label` (`ViewTabSchema.name`) |
-| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Where the paired `.custom` package's `relatedLists` (**objectstack-data**) re-states the entry without a `label`, or hides it, `os validate` refuses the key: drop it, or re-state the entry, shown, with the owner's own `label`. Spelled `relatedLists`, the group is refused, naming this one |
+| `_relatedLists.{list}` | `label` of an object-form `relatedLists` entry on this (parent) object, by its literal `list` (`event.related_to` is one key); an entry with no `label` has no key and keeps the child field's `relatedListTitle`, else the child's plural label. Where the paired `.custom` package's `relatedLists` (**objectstack-data**) re-states the entry without a `label`, or hides it, `os validate` refuses the key: drop it, or re-state the entry, shown, with a `label`: the owner's own keeps its translation, any other reads this key from the `.custom` package's own bundle (`os i18n check` expects it). Spelled `relatedLists`, the group is refused, naming this one |
 | `_milestones.{field}.{value}` | `summary`, the timeline sentence of the `activityMilestones` entry firing on that field and value, same `{field}` tokens: composed at read time in the reader's language (a select token as its option label), stored row unchanged, redacted as the stored sentence is |
 | `_validations.{rule_name}` | `message` only — the sentence a rejected write returns (replaces the retired `validationMessages`) |
 | `_actions.{action_name}.refusals.{CODE}` | `message`, and `reasons.{reason}.message` per declared reason — the sentences of the action's `refusals` catalogue (**objectstack-ui** → Actions), for a code and reason it declares (any other is `translation-target-unknown`); the same under `globalActions.{action_name}` |
@@ -171,7 +171,10 @@ spine, by `Book.name`: `books.{book}.label` / `.description`, and `groups.{group
 each group's stable `key`, never its position — `books.crm_manual.groups.getting_started.label`;
 the pages themselves localize through `doc.translations`, and the inline `translations` map a
 book once carried stays retired), `mappings` (an import mapping's `label` by its `name`:
-`mappings.{mapping}.label`), `metadataForms`, `settingsCommon`; `reports`, `positions` and
+`mappings.{mapping}.label`), `packages` (`name` / `description` by `manifest.id`, the dotted id one
+key: `packages: { 'com.acme.crm': { name: '客户关系' } }`; a locale with no row shows
+`manifest.name`, and `os i18n check` warns `i18n/missing-package` until that package's own
+bundle carries it), `metadataForms`, `settingsCommon`; `reports`, `positions` and
 `permissions` hold `label` + `description` by name, so do `datasets` and each dataset member at
 `datasets.{dataset}.{dimensions,measures}.{member}` (a member's `synonyms` have no key: one
 authored list carries every language), and a joined report's block headings sit at
@@ -225,14 +228,9 @@ parse, ship, and resolve to nothing.
 is an **error** and fails the run; `translation-option-key-unknown` is a warning.
 A key naming an object, field, view, tab, action, param, section, validation rule, app,
 nav item, dashboard, widget or flow screen that does not exist is listed alongside the names
-that do. Six more shapes under an action entry are the error: an outcome the action does
-not declare in `outcomeMessages`; a `resultDialog.fields` or `preflight.fields` path it does
-not declare; a `columns` key whose field path is no declared `format: 'table'` field, or
-whose column path that field's `columns[]` does not list;
-`resultDialog` `title` / `description` / `acknowledge` under an action that declares no
-`resultDialog`; `submitText` under an action with no non-empty `params`; and `cancelText`
-under an action that declares neither `confirmText` nor a non-empty `params` — a bundle
-translates a dialog the action declares and cannot add one. A
+that do. The same error: a key the `_actions` row above ties to something the action does not declare
+(an outcome, a dialog field or column path, `resultDialog` copy, `submitText`, `cancelText`) —
+a bundle translates a dialog the action declares and cannot add one. A
 param's inline option keys share the option warning with a field's `options`; a param that
 references a `field` and declares no inline `options` is not judged.
 

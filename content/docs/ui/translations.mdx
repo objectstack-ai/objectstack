@@ -102,6 +102,7 @@ export default defineStack({
 | Permission-set label / description | `permissions.<name>.label` / `description` — the group is spelled as the stack spells the collection (`permissions[]`), keyed by the set's `name` |
 | Doc book title, description and section titles | `books.<name>.label` / `description` / `groups.<key>.label` — keyed by the book's `name` and each group's `key`; overlaid on every served book and on the book tree, which is what the docs sidebar draws. A doc's own title and body localize through `doc.translations` instead |
 | Import mapping label | `mappings.<name>.label` — keyed by the mapping's `name`; overlaid on every served mapping, which is the list the import wizard offers by name. A mapping's `fieldMapping` holds column and field names, not copy: a target field's label is translated under `objects.<object>.fields.<field>.label` |
+| Package name / description | `packages.<manifest id>.name` / `description` — keyed by the package's `manifest.id` (reverse-domain, such as `com.acme.crm`; the dotted id is one key), never by its namespace or display name, which the parse refuses. Overlaid where the console lists packages: Setup's package list and Studio's package switcher, where a package that publishes an app is still named by the app's label. With no row for the reader's locale, a package shows its `manifest.name`. Each package ships the row for its own id in its own bundle |
 | Global actions, messages | `globalActions`, `messages` |
 | Settings UI shell copy (the source badge on a settings row) | `settingsCommon.sourceLabels.<layer>` — the per-namespace settings copy under `settings` is **platform-only**: an app bundle carrying it is refused by name, and the platform's own strings are translated in `@objectstack/service-settings`'s bundle |
 | A label written as an inline locale map (`label: { en: 'Members', 'zh-CN': '成员' }`) | Nowhere — it is written on the metadata and resolved at render time; see **Current boundaries** below |
@@ -359,6 +360,18 @@ npx os i18n extract --locales zh-CN --fill todo --out src/translations --check
 A missing string in the **default** locale is an error; missing strings in
 other locales are warnings until you set `--strict` / `--threshold`. The Todo
 example ships a completeness test alongside its bundles — worth copying.
+
+A package's own display name is part of that report. `os i18n extract` scaffolds
+`packages.<manifest id>.name` / `.description` for the stack's manifest and
+every composed package, and `os i18n check` / `os lint` report a missing one as
+the warning `i18n/missing-package`. Clear it by adding the row to that package's
+own bundle for the locale; the source locale needs one only when the displayed
+name should differ from `manifest.name`:
+
+```typescript
+// one locale of the package's own bundle (zh-CN)
+packages: { 'com.acme.crm': { name: '客户关系管理', description: '销售与客户管理' } },
+```
 
 ### What counts as *your* coverage
 

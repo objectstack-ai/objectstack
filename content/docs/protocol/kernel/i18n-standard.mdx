@@ -378,10 +378,22 @@ const zh: TranslationData = {
   apps: { crm: { label: '客户关系管理', navigation: { home: { label: '首页' } } } },
   dashboards: { sales_overview: { label: '销售概览' } },
   pages: { landing: { title: '欢迎' } },
+  packages: { 'com.acme.crm': { name: '客户关系管理', description: '销售与客户管理' } },   // keyed by manifest.id
   globalActions: { export_csv: { label: '导出 CSV' } },
   messages: { commonSave: '保存' },
 };
 ```
+
+`packages` is keyed by the package's `manifest.id`, and the dotted id is **one**
+key: a client reads the row by direct property access, never as a dot path. A
+key that is not a manifest id (a namespace like `crm`, a display name) is
+refused at parse, as are `package` and the leaf spellings `label`, `title` and
+`displayName`, each answered with the declared spelling. A row overlays the
+manifest's own `name` / `description` where the console lists packages (Setup's
+package list and Studio's package switcher); a package with no row for the
+reader's locale shows its `manifest.name`, which stays the authored value on
+every wire and in every editor. Each package ships the row for its own id in
+the bundle it already carries.
 
 **Key benefits:**
 - ✅ All translatable content for one object in one place
@@ -1220,6 +1232,13 @@ options: { direct_mail: '直邮' }    // ✅ keyed by value
 options: { 'Direct Mail': '直邮' }  // ❌ keyed by the label — never resolves
 options: { 'direct-mail': '直邮' }  // ❌ a variant spelling of the value
 ```
+
+`packages` keys are held to the manifest id grammar at parse and are not
+resolved against the artifact's manifests here. Their coverage is a separate
+report: `os i18n extract` scaffolds `packages.{id}.name` / `.description` for
+the stack's manifest and every composed package, and `os i18n check` and
+`os lint` report a missing one as the warning `i18n/missing-package`, cleared
+by adding the row to that package's own bundle for the locale.
 
 `messages`, `settingsCommon` and `metadataForms` are **not** checked: their
 keys are owned by application code, plugins, and the platform's own
