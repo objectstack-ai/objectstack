@@ -768,6 +768,25 @@ export function runKnowledgeAdapterContract(opts: KnowledgeAdapterContractOption
         }
       });
 
+      it('a caller who may read only the two clauses every other outranks is answered from them, past the refill cap', async () => {
+        const source = clauseSource('scope_readable');
+        const readable = new Set(['c03', 'c07']);
+        const h = await serviceOver(make, clauseRows(), source, {
+          schemas: { article: CLAUSE_SCHEMA },
+          wall: (row) => readable.has(String(row.id)),
+        });
+        await h.svc.reindexSource(source.name);
+        // topK 1: the refill reaches 20 passages, and the eighteen better clauses hold more than that.
+        const hits = await h.svc.search(SCOPE_QUERY, { topK: 1, executionContext: READER });
+        expect(h.searched[0]?.scope).toEqual([{ kind: 'record', ids: ['c03', 'c07'] }]);
+        for (const hit of hits) expect(readable.has(String(hit.sourceRecordId))).toBe(true);
+        if (opts.implements.scope) expect(hits).toHaveLength(1);
+        // A caller scope of one of them stays that one.
+        const one = await h.svc.search(SCOPE_QUERY, { topK: 5, scope: [{ object: 'article', ids: ['c07'] }], executionContext: READER });
+        expect(lastOf(h.searched)?.scope).toEqual([{ kind: 'record', ids: ['c07'] }]);
+        for (const hit of one) expect(hit.sourceRecordId).toBe('c07');
+      });
+
       it('a parent scope: only the clauses whose listed lookup holds one of the policy ids', async () => {
         const source = clauseSource('scope_parent');
         const h = await serviceOver(make, clauseRows(), source, { schemas: { article: CLAUSE_SCHEMA } });
