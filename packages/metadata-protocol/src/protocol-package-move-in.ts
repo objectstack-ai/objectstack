@@ -30,17 +30,23 @@
  *
  *  0. Judge, write nothing: every item is loose; the target is installed and
  *     writable; an object's name carries the target's prefix and does not clash
- *     with a namespace; and the selection as a set — a moved item that names a
- *     loose item the selection leaves behind would be read from a package caller
- *     that never resolves a bare name to an environment item (ADR-0150 D3 (a)),
- *     so it is refused naming what it leaves behind.
- *  1. Every delete and save inside ONE `engine.transaction()`, the package
- *     commit recorded inside it too. Any refusal rolls the whole move back. A
- *     dry run runs the same writes and always rolls back.
- *  2. On a runtime that cannot roll back (`engineCanRollBack`), a refusal in
- *     phase 1 undoes every step already taken, newest first; a dry run there
- *     answers phase 0's judgement alone, because only a rollback makes a write
- *     invisible.
+ *     with a namespace, no other package owns it, and its fields keep the `__c`
+ *     reservation; and the selection as a set — a moved item that names a loose
+ *     item the selection leaves behind would be read from a package caller that
+ *     never resolves a bare name to an environment item (ADR-0150 D3 (a)), so it
+ *     is refused naming what it leaves behind.
+ *  1. Objects, each through the delete door (storage kept) and the save door,
+ *     OUTSIDE the transaction: an object's save runs its storage sync, which is
+ *     DDL, and DDL inside the driver transaction waits forever on the lock the
+ *     transaction holds (measured on SQLite; `publishPackageDrafts` defers the
+ *     same DDL past its transaction for the same reason). A later refusal undoes
+ *     them, newest first. A dry run judges objects in phase 0 alone.
+ *  2. Every other item's delete and save inside ONE `engine.transaction()`, the
+ *     package commit recorded inside it too. Any refusal rolls them back and
+ *     undoes phase 1. A dry run runs the same writes and always rolls back.
+ *  3. On a runtime that cannot roll back (`engineCanRollBack`), a refusal undoes
+ *     every step already taken, newest first; a dry run there answers phase 0's
+ *     judgement alone, because only a rollback makes a write invisible.
  *
  * After any rollback the registry is put back from the restored rows: the save
  * and delete doors mutate the in-memory registry as they go, and that cannot
@@ -61,6 +67,7 @@ import { collectReferenceHits } from './protocol-reference-hits.js';
 import { REFERENCE_SITES } from './reference-sites.js';
 import { resolveCallerPackageAddress } from './protocol-exact-qualifier.js';
 import { retireOverlayCacheOnRollback } from './meta-overlay-cache.js';
+import { extensionFieldSuffixRefusalError, judgeExtensionFieldSuffix } from './protocol-extension-field-suffix.js';
 import type { ProtocolHost } from './protocol-host.js';
 
 /** What the door is asked, after the route parsed the body. */
@@ -74,14 +81,17 @@ export interface MoveIntoPackageRequest {
 
 type MoveHost = Pick<ProtocolHost,
     | 'applyRegistryWriteThrough'
+    | 'classifyObjectContribution'
     | 'deleteMetaItem'
     | 'engine'
+    | 'ensureOverlayIndex'
     | 'findEnvironmentRows'
     | 'getOverlayRepo'
     | 'isArtifactBacked'
     | 'isWritablePackage'
     | 'objectNamespaceObjectNameClash'
     | 'objectNamespacePrefixViolation'
+    | 'overlayPackageMismatchError'
     | 'recordPackageCommit'
     | 'refuseOrganizationScopedWrite'
     | 'saveMetaItem'
@@ -193,6 +203,11 @@ export class ProtocolPackageMoveInFacet {
     static async moveIntoPackage(host: MoveHost, request: MoveIntoPackageRequest): Promise<MoveIntoPackageResponseParsed> {
         const target = request.targetPackageId;
         host.refuseOrganizationScopedWrite(`Package '${target}'`, request);
+        // The store's lazy DDL, BEFORE the transaction, as `publishPackageDrafts`
+        // runs it: the first save of a process would otherwise run it inside
+        // the driver transaction, where DDL waits on the lock the transaction
+        // holds (measured: a move as a fresh boot's first write never answered).
+        await host.ensureOverlayIndex();
         const refused: MoveIntoPackageRefusedItemParsed[] = [];
         const refuse = (r: MoveIntoPackageRefusedItemParsed) => { refused.push(r); };
         const answerRefused = (): MoveIntoPackageResponseParsed => ({
@@ -254,13 +269,30 @@ export class ProtocolPackageMoveInFacet {
             return answerRefused();
         }
 
-        // An object's literal name and the target's namespace (A2, child K).
+        // An object, by the save door's own object judges, against the target:
+        // its literal name and the target's namespace (A2, child K), the
+        // package that owns the name, and the `__c` reservation. Objects are
+        // judged here because phase 1 writes them before the transaction, and a
+        // dry run writes none of them.
         for (const item of items) {
             if (item.type !== 'object') continue;
-            const err = host.objectNamespacePrefixViolation(item.name, target) ?? host.objectNamespaceObjectNameClash(item.name, target);
-            if (err) {
-                const code = host.objectNamespacePrefixViolation(item.name, target) ? 'NAMESPACE_PREFIX' : 'NAMESPACE_CONFLICT';
-                refuse({ type: item.type, name: item.name, code, error: err });
+            const prefix = host.objectNamespacePrefixViolation(item.name, target);
+            const clash = prefix ? null : host.objectNamespaceObjectNameClash(item.name, target);
+            if (prefix || clash) {
+                refuse({ type: item.type, name: item.name, code: prefix ? 'NAMESPACE_PREFIX' : 'NAMESPACE_CONFLICT', error: (prefix ?? clash)! });
+                continue;
+            }
+            // The object's own loose registration is the `'sys_metadata'` owner
+            // this move hands over; any other owner refuses it.
+            const layer = host.classifyObjectContribution(item.name, target);
+            if (layer.kind === 'mismatch' && layer.ownerPackageId !== 'sys_metadata') {
+                refuse(refusalOf(item, host.overlayPackageMismatchError(item.name, target, layer.ownerPackageId)));
+                continue;
+            }
+            const body = bodyOf(item.active ?? item.draft);
+            if (body) {
+                const suffix = judgeExtensionFieldSuffix({ packageId: target, objects: { [item.name]: { ...body, name: item.name } } });
+                if (suffix.length > 0) refuse(refusalOf(item, extensionFieldSuffixRefusalError(suffix)));
             }
         }
 
@@ -319,48 +351,49 @@ export class ProtocolPackageMoveInFacet {
             return { outcome: 'would_move', targetPackageId: target, moved, refused: [] };
         }
 
-        // ── Phase 1: every delete and save in one transaction ─────────────
-        // Objects first, so an item of another type that names one meets it
-        // already moved; the rest in the order asked.
-        const ordered = [...items.filter((i) => i.type === 'object'), ...items.filter((i) => i.type !== 'object')];
+        const objects = items.filter((i) => i.type === 'object');
+        const others = items.filter((i) => i.type !== 'object');
         const landed: Array<{ item: LooseItem; state: 'active' | 'draft' }> = [];
         let commitId: string | undefined;
         let current: LooseItem | undefined;
-        const run = async () => {
-            for (const item of ordered) {
-                current = item;
-                for (const state of ['active', 'draft'] as const) {
-                    const row = state === 'active' ? item.active : item.draft;
-                    const body = bodyOf(row);
-                    if (!row || !body) continue;
-                    await host.deleteMetaItem({
-                        type: item.type,
-                        name: item.name,
-                        state,
-                        packageId: null,
-                        dropStorage: false,
-                        ...(item.member ? { member: item.member } : {}),
-                        ...(request.actor ? { actor: request.actor } : {}),
-                    });
-                    landed.push({ item, state });
-                    await host.saveMetaItem({
-                        type: item.type,
-                        name: item.name,
-                        item: body,
-                        mode: state === 'active' ? 'publish' : 'draft',
-                        packageId: target,
-                        ...(item.member ? { member: item.member } : {}),
-                        ...(request.actor ? { actor: request.actor } : {}),
-                    } as Parameters<MoveHost['saveMetaItem']>[0]);
-                }
+        /** One item: its loose row out through the delete door (storage kept), its body into the target through the save door. */
+        const moveItem = async (item: LooseItem) => {
+            current = item;
+            for (const state of ['active', 'draft'] as const) {
+                const row = state === 'active' ? item.active : item.draft;
+                const body = bodyOf(row);
+                if (!row || !body) continue;
+                await host.deleteMetaItem({
+                    type: item.type,
+                    name: item.name,
+                    state,
+                    packageId: null,
+                    dropStorage: false,
+                    ...(item.member ? { member: item.member } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                });
+                landed.push({ item, state });
+                await host.saveMetaItem({
+                    type: item.type,
+                    name: item.name,
+                    item: body,
+                    mode: state === 'active' ? 'publish' : 'draft',
+                    packageId: target,
+                    ...(item.member ? { member: item.member } : {}),
+                    ...(request.actor ? { actor: request.actor } : {}),
+                } as Parameters<MoveHost['saveMetaItem']>[0]);
             }
             current = undefined;
+        };
+        // ── Phase 2's body: every other item, then the package commit ─────
+        const run = async () => {
+            for (const item of others) await moveItem(item);
             const commit = await host.recordPackageCommit({
                 packageId: target,
                 operation: 'apply',
                 message: `Move ${items.length} loose item(s) into package '${target}'`,
                 ...(request.actor ? { actor: request.actor } : {}),
-                items: ordered.filter((i) => i.active).map((i) => ({
+                items: [...objects, ...others].filter((i) => i.active).map((i) => ({
                     type: i.type, name: i.name, existedBefore: false, prevVersion: null,
                     ...(i.member ? { member: i.member } : {}),
                 })),
@@ -368,16 +401,32 @@ export class ProtocolPackageMoveInFacet {
             commitId = commit?.commitId;
             if (request.dryRun) throw DRY_RUN_ROLLBACK;
         };
+        const landedObjects = () => landed.filter((l) => l.item.type === 'object');
+        let transacted = false;
         try {
+            // ── Phase 1: objects, outside the transaction (their storage sync is DDL) ──
+            if (!request.dryRun) {
+                for (const item of objects) await moveItem(item);
+            }
+            const objectSteps = landed.length;
+            // ── Phase 2: the rest, in one transaction ─────────────────────
+            transacted = true;
             const engine = host.engine;
             if (engineCanRollBack(engine)) {
-                await retireOverlayCacheOnRollback(engine, () => engine.transaction(() => run()));
+                try {
+                    await retireOverlayCacheOnRollback(engine, () => engine.transaction(() => run()));
+                } catch (e: unknown) {
+                    // Rolled back in storage: what the transaction wrote is gone.
+                    landed.splice(objectSteps);
+                    throw e;
+                }
             } else {
                 await run();
             }
         } catch (e: unknown) {
             if (canRollBack) {
-                await ProtocolPackageMoveInFacet.restoreRegistry(host, items, target);
+                if (transacted) await ProtocolPackageMoveInFacet.restoreRegistry(host, others, target);
+                await ProtocolPackageMoveInFacet.undoLanded(host, landedObjects(), target, request.actor);
             } else {
                 await ProtocolPackageMoveInFacet.undoLanded(host, landed, target, request.actor);
             }
@@ -422,9 +471,10 @@ export class ProtocolPackageMoveInFacet {
     }
 
     /**
-     * On a runtime that cannot roll back: undo each step already taken, newest
-     * first — remove the row written into the target, then put the loose row
-     * back as it was stored.
+     * Undo each step no transaction covered, newest first — every step on a
+     * runtime that cannot roll back, the objects' steps on one that can:
+     * remove the row written into the target, put the loose row back as it was
+     * stored, then put the registry back at the package-less address.
      */
     private static async undoLanded(
         host: MoveHost,
@@ -446,22 +496,30 @@ export class ProtocolPackageMoveInFacet {
                 } catch {
                     // The save never wrote it: nothing to remove.
                 }
+                // `runtime-only`: the loose row is an item no package ships, put
+                // back where it was. The default intent (`override-artifact`) is
+                // refused on a type with no overlay channel, an object among them
+                // (measured: refused as a sealed managed item).
                 await repo.put({ type: item.type, name: item.name, org: 'env' } as never, body, {
                     state,
+                    // The delete above left no head at the package-less address.
+                    parentVersion: null,
                     source: 'protocol.moveIntoPackage',
                     actor: actor ?? null,
                     message: `undo the move of ${item.type}/${item.name}: the move into '${target}' was refused`,
+                    intent: 'runtime-only',
+                    packageId: null,
                     ...(item.member ? { member: item.member } : {}),
                 } as never);
+                if (state === 'active') await ProtocolPackageMoveInFacet.restoreRegistry(host, [item], target);
             } catch (err: any) {
                 console.error(
                     `[Protocol] moveIntoPackage: the refused move of ${item.type}/${item.name} into '${target}' could `
-                    + `not be undone on this runtime, which cannot roll back: ${err?.message ?? err}. The item may now be `
+                    + `not be undone (a write no transaction covered): ${err?.message ?? err}. The item may now be `
                     + 'stored in neither place, or in the target, although the answer says nothing moved. Fix: '
                     + `re-save ${item.type}/${item.name} from its history (GET /meta/${item.type}/${item.name}/history).`,
                 );
             }
         }
-        await ProtocolPackageMoveInFacet.restoreRegistry(host, landed.map((l) => l.item), target);
     }
 }

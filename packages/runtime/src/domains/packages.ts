@@ -4060,25 +4060,7 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                 const result = await protocol.reassignOrphanedMetadata({
                     targetPackageId: id,
                     ...(actor !== undefined ? { actor } : {}),
-                }) as { outcome?: string; refused?: ReadonlyArray<{ type: string; name: string; code: string; error: string }> };
-                // A refused move wrote nothing, and answers as the save door
-                // answers the same refusal: 422 with the first item's own code
-                // in `error.code`. `error.details` is the whole move answer
-                // (`MoveIntoPackageResponseSchema`, `outcome: 'refused'`), so a
-                // caller reads every item's refusal, not only the first.
-                if (result?.outcome === 'refused' && result.refused && result.refused.length > 0) {
-                    const first = result.refused[0];
-                    const others = result.refused.length - 1;
-                    return {
-                        handled: true,
-                        response: deps.error(
-                            `Nothing was moved into package "${id}": ${first.type} '${first.name}' — ${first.error}`
-                            + (others > 0 ? ` (and ${others} more refusal${others === 1 ? '' : 's'} in error.details.refused)` : ''),
-                            422,
-                            { ...result, code: first.code },
-                        ),
-                    };
-                }
+                });
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
@@ -4135,7 +4117,25 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     items: declared.data.items,
                     ...(declared.data.dryRun ? { dryRun: true } : {}),
                     ...(actor !== undefined ? { actor } : {}),
-                });
+                }) as { outcome?: string; refused?: ReadonlyArray<{ type: string; name: string; code: string; error: string }> };
+                // A refused move wrote nothing, and answers as the save door
+                // answers the same refusal: 422 with the first item's own code
+                // in `error.code`. `error.details` is the whole move answer
+                // (`MoveIntoPackageResponseSchema`, `outcome: 'refused'`), so a
+                // caller reads every item's refusal, not only the first.
+                if (result?.outcome === 'refused' && result.refused && result.refused.length > 0) {
+                    const first = result.refused[0];
+                    const others = result.refused.length - 1;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": ${first.type} '${first.name}' — ${first.error}`
+                            + (others > 0 ? ` (and ${others} more refusal${others === 1 ? '' : 's'} in error.details.refused)` : ''),
+                            422,
+                            { ...result, code: first.code },
+                        ),
+                    };
+                }
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };
