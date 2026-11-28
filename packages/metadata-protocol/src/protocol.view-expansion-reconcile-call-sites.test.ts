@@ -178,6 +178,9 @@ const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; re
     { member: 'undoLandedPromotions', verb: 'repo.restoreVersion(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'undoLandedPromotions', verb: 'repo.put(', route: { sameMember: 'restoreArtifactRegistryView' } },
+    // [#38150] A refused move into a package puts back each loose row no transaction covered (the
+    // objects; every row on a runtime that cannot roll back), and writes the registry back through.
+    { member: 'undoLanded', verb: 'repo.put(', route: { sameMember: 'applyRegistryWriteThrough' } },
     // [ADR-0159 D5] A `form` save, publish or delete removes (or re-saves) the old-shape `view` row of
     // its name in the same transaction; each door heals the registry from the rows handed back.
     { member: 'applyOldShapeFormRowRemovals', verb: 'repo.delete(', route: { handedTo: 'module callers', then: 'healOldShapeFormRowRemovals' } },
@@ -287,6 +290,7 @@ describe('[#29985] the census reads the modules the split moved bodies to', () =
                 'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
                 'protocol-form-writes.ts: applyOldShapeFormRowRemovals',
                 'protocol-form-writes.ts: restoreOldShapeFormRowRemovals',
+                'protocol-package-move-in.ts: undoLanded',
                 'protocol-packageless-overlay-migration.ts: migratePackagelessOverlays',
             ]);
     });

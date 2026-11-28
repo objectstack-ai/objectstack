@@ -38,7 +38,7 @@
 // The trace, measured on `origin/main` — all four routes fold at the producer
 // ---------------------------------------------------------------------------
 // `applyObjectRegistryMutation` has exactly ONE caller
-// (`applyRegistryWriteThrough`), which has exactly EIGHT:
+// (`applyRegistryWriteThrough`), which has exactly TEN:
 //
 //   1. `saveMetaItem`            passes `singularTypeForRepo`, and the method
 //                                already ran `canonicalizeMetaRequestType`.
@@ -78,6 +78,14 @@
 //                                `'view'`: it heals the old-shape `view` row a
 //                                `form` save, publish or delete re-saved, so no
 //                                stored spelling reaches it.
+//   9. `restoreAfterRollback` (#38150) passes the item's type as the move-in
+//                                door folded it through `canonicalMetaType`
+//                                when it judged the selection: it puts each
+//                                moved item back at its package-less address
+//                                after a rolled-back move.
+//  10. `undoLanded` (#38150) passes the same folded type: it writes back
+//                                through each loose row a refused move put
+//                                back with no transaction to cover it.
 //
 // Both fold maps resolve the plural — `PLURAL_TO_SINGULAR.objects === 'object'`
 // and `canonicalMetaUrlType('objects') === 'object'` — so no route can deliver
@@ -610,9 +618,9 @@ describe('[#8862] the `applyRegistryWriteThrough` caller set stays closed', () =
     const sources = [source, ...SPLIT_MODULES.map((file) => readFileSync(fileURLToPath(new URL(`./${file}`, import.meta.url)), 'utf8'))];
     const sitesOf = (pattern: RegExp) => sources.flatMap((text) => text.match(pattern) ?? []);
 
-    it('has exactly eight call sites, all traced in this file’s header', () => {
+    it('has exactly ten call sites, all traced in this file’s header', () => {
         const callSites = sitesOf(/\b(?:this|host)\.applyRegistryWriteThrough\(/g);
-        expect(callSites).toHaveLength(8);
+        expect(callSites).toHaveLength(10);
     });
 
     it('`applyObjectRegistryMutation` is reached only through the write-through', () => {

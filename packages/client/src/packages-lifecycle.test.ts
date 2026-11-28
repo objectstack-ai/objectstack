@@ -43,6 +43,7 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
         ['discardDrafts', (c: ObjectStackClient) => c.packages.discardDrafts('p1', { actor: 'admin' }), 'POST', `${BASE}/p1/discard-drafts`, { actor: 'admin' }],
         ['revert',        (c: ObjectStackClient) => c.packages.revert('p1'),                  'POST', `${BASE}/p1/revert`, undefined],
         ['adoptOrphans',  (c: ObjectStackClient) => c.packages.adoptOrphans('p1'),            'POST', `${BASE}/p1/adopt-orphans`, {}],
+        ['moveIn',        (c: ObjectStackClient) => c.packages.moveIn('p1', { items: [{ type: 'flow', name: 'f' }], dryRun: true }), 'POST', `${BASE}/p1/move-in`, { items: [{ type: 'flow', name: 'f' }], dryRun: true }],
     ] as const)('%s hits its lifecycle route', async (_name, call, method, url, expectedBody) => {
         const { client, fetchMock } = createMockClient({ success: true, data: { ok: true } });
         await call(client);
@@ -98,6 +99,25 @@ describe('client.packages lifecycle (#3563 PR-4)', () => {
             targetName: 'Copy',
             targetNamespace: 'copy',
         });
+    });
+
+    it('moveIn rejects a refused move with the first item\'s code and the whole answer in details', async () => {
+        const answer = {
+            outcome: 'refused',
+            targetPackageId: 'p1',
+            moved: [],
+            refused: [{ type: 'flow', name: 'f', code: 'NOT_LOOSE', error: "flow 'f' is not loose." }],
+        };
+        const { client } = createMockClient({
+            success: false,
+            error: { code: 'NOT_LOOSE', message: "flow 'f' is not loose.", httpStatus: 422, details: answer },
+        }, 422);
+        const err: any = await client.packages
+            .moveIn('p1', { items: [{ type: 'flow', name: 'f' }] })
+            .then(() => { throw new Error('expected the refused move to reject'); }, (e) => e);
+        expect(err.code).toBe('NOT_LOOSE');
+        expect(err.httpStatus).toBe(422);
+        expect(err.details).toEqual(answer);
     });
 
     it('ensureCustomization POSTs to the ensure door with no body, URL-encoding the base id, and returns the answer', async () => {

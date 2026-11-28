@@ -51,6 +51,7 @@ import { walledCatalogWriteVerdict } from '@objectstack/metadata-core';
 // duplicate would copy (`refuseDuplicatedKnowledgeSources`).
 import { authoredKnowledgeSourceRefusal } from '@objectstack/metadata-core';
 import { resolveKnowledgeServiceForSave } from '../knowledge-service-lookup.js';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { isMissingTableError } from '@objectstack/types';
 import { readEffectiveTenancyPosture } from './activation-gate.js';
 // [#21727] ADR-0087 D1's protocol handshake and the brand predicate for its
@@ -189,6 +190,7 @@ import {
     PackageInstallManifestSchema,
     PackageInstallRequestSchema,
     PublishPackageDraftsRequestSchema,
+    MoveIntoPackageRequestSchema,
 } from '@objectstack/spec/api';
 // [#28640 ruling ③A] The export names each connector map the served read
 // withheld: the declaration of that list, and the redactor that decided it.
@@ -298,6 +300,7 @@ export type PackagesDomainProtocol =
         revertCommit?(request: any): Promise<any>;
         rollbackToPackageCommit?(request: any): Promise<any>;
         reassignOrphanedMetadata?(request: any): Promise<any>;
+        moveIntoPackage?(request: { targetPackageId: string; items: ReadonlyArray<{ type: string; name: string; member?: string }>; dryRun?: boolean; actor?: string }): Promise<unknown>;
         duplicatePackage?(request: any): Promise<any>;
         updatePackage?(request: any): Promise<any>;
         /**
@@ -4064,6 +4067,145 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     targetPackageId: id,
                     ...(actor !== undefined ? { actor } : {}),
                 });
+                return { handled: true, response: deps.success(result) };
+            } catch (e: any) {
+                return { handled: true, response: deps.errorFromThrown(e, 500) };
+            }
+        }
+
+        // POST /packages/:id/move-in → move a SELECTION of loose items into
+        // this package (ADR-0084 amendment of 2026-11-26, "Loose items stay
+        // where they are, and one door moves them"). Body
+        // `MoveIntoPackageRequestSchema`: `{ items: [{ type, name, member? }],
+        // dryRun? }`. The door's gates are the package write doors'; what each
+        // item is judged by is the save door's, inside the protocol.
+        if (parts.length === 2 && parts[1] === 'move-in' && m === 'POST') {
+            const denied = requireManageMetadata(deps, _context); if (denied) return denied;
+            const id = decodeURIComponent(parts[0]);
+            // [ADR-0131 D12 items 7–8] Under a wall, the platform operator's.
+            const walled = await refuseWalledCatalogPackageWrite(deps, _context, `Moving loose metadata into package "${id}"`);
+            if (walled) return walled;
+            // [ADR-0161 K4, guard one] A package that holds a knowledge source
+            // asks `manage_knowledge_sources` too.
+            const sourceGate = await refuseKnowledgeSourcePackageWrite(deps, _context, {
+                packageId: id, action: `Moving loose metadata into package "${id}"`, reach: ['drafts', 'items'],
+            });
+            if (sourceGate) return sourceGate;
+            const queryRefused = refusePackageWriteDoorQuery(deps, query, PACKAGE_WRITE_NO_QUERY_PARAMS); if (queryRefused) return queryRefused;
+            // A package the deployment ships is not a target, answered as every
+            // package write door answers it. An id nothing installed passes
+            // this predicate; the protocol refuses it with the save door's own
+            // named-base judge (`422 WRITABLE_PACKAGE_REQUIRED`), never by
+            // moving anything into it.
+            const readOnly = requireWritablePackage(deps, qlService, id, 'move items into'); if (readOnly) return readOnly;
+            const declared = MoveIntoPackageRequestSchema.safeParse(body);
+            if (!declared.success) {
+                const located = declared.error.issues
+                    .map((issue) => `${issue.path.map(String).join('.') || '(body)'}: ${issue.message}`)
+                    .join('; ');
+                return {
+                    handled: true,
+                    response: deps.error(
+                        `Invalid move-in body — ${located}. Nothing was moved: the body is { "items": [{ "type": string, `
+                        + '"name": string, "member"?: string }, …], "dryRun"?: boolean }, naming at least one loose item.',
+                        400,
+                    ),
+                };
+            }
+            // [ADR-0161 K4] What the door writes is the selection, so each
+            // selected item's type is admitted as a `/meta` write of it is: a
+            // `knowledge_source` asks `manage_knowledge_sources` and a
+            // `datasource` asks `manage_platform_settings`
+            // (`metaTypeWriteRefusal`, the one decision), before anything is
+            // read or written. The engine's own call is answered without it.
+            const moveCaller: any = _context?.executionContext;
+            if (!moveCaller?.isSystem) {
+                for (const item of declared.data.items) {
+                    const typeRefusal = metaTypeWriteRefusal('POST', item.type, moveCaller);
+                    if (!typeRefusal) continue;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": moving ${item.type} '${item.name}' removes it from `
+                            + `its package-less address and saves it into the package. ${typeRefusal.message}`,
+                            typeRefusal.status,
+                            { code: typeRefusal.code },
+                        ),
+                    };
+                }
+            }
+            const protocol = await resolveProtocol(deps, _context);
+            if (!protocol || typeof protocol.moveIntoPackage !== 'function') {
+                return catalogNotImplemented(deps, _context, 'packages_move_in_unsupported');
+            }
+            // [ADR-0161 K4, guard two] A knowledge source is saved again under
+            // the package with the caller as its author, so the author is
+            // admitted as the `/meta` save admits one: may they search what it
+            // indexes (`authoredKnowledgeSourceRefusal`, read off the stored body).
+            for (const item of declared.data.items) {
+                if (canonicalMetaUrlType(item.type) !== KNOWLEDGE_SOURCE_PACKAGE_TYPE || moveCaller?.isSystem || typeof protocol.getMetaItem !== 'function') continue;
+                let stored: unknown;
+                try {
+                    stored = await protocol.getMetaItem({ type: item.type, name: item.name, ...(item.member ? { member: item.member } : {}) });
+                } catch (e: any) {
+                    // No such item: the protocol answers it `NOT_LOOSE`, and
+                    // there is no body to admit. Any other failure refuses the
+                    // move, as the duplicate door refuses an unreadable source.
+                    if (e?.status === 404) continue;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": knowledge_source '${item.name}' could not be read `
+                            + `(${clientFacingFailureText(e, 'the read failed')}), and a knowledge source is admitted for `
+                            + 'the caller before it moves. Try again.',
+                            503,
+                        ),
+                    };
+                }
+                const body = (stored as { item?: unknown } | undefined)?.item ?? stored;
+                const refused = await authoredKnowledgeSourceRefusal({
+                    type: item.type,
+                    item: body,
+                    executionContext: moveCaller,
+                    resolveKnowledgeService: () => resolveKnowledgeServiceForSave(deps, _context),
+                });
+                if (refused) {
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": knowledge_source '${item.name}' — ${refused.message}`,
+                            refused.status,
+                            { code: refused.code },
+                        ),
+                    };
+                }
+            }
+            try {
+                const actor = resolvePackageWriteActor(_context);
+                const result = await protocol.moveIntoPackage({
+                    targetPackageId: id,
+                    items: declared.data.items,
+                    ...(declared.data.dryRun ? { dryRun: true } : {}),
+                    ...(actor !== undefined ? { actor } : {}),
+                }) as { outcome?: string; refused?: ReadonlyArray<{ type: string; name: string; code: string; error: string }> };
+                // A refused move left every item loose (what had moved was
+                // moved back), and answers as the save door answers the same refusal: 422 with the first item's own code
+                // in `error.code`. `error.details` is the whole move answer
+                // (`MoveIntoPackageResponseSchema`, `outcome: 'refused'`), so a
+                // caller reads every item's refusal, not only the first.
+                if (result?.outcome === 'refused' && result.refused && result.refused.length > 0) {
+                    const first = result.refused[0];
+                    const others = result.refused.length - 1;
+                    return {
+                        handled: true,
+                        response: deps.error(
+                            `Nothing was moved into package "${id}": ${first.type} '${first.name}' — ${first.error}`
+                            + (others > 0 ? ` (and ${others} more refusal${others === 1 ? '' : 's'} in error.details.refused)` : ''),
+                            422,
+                            { ...result, code: first.code },
+                        ),
+                    };
+                }
                 return { handled: true, response: deps.success(result) };
             } catch (e: any) {
                 return { handled: true, response: deps.errorFromThrown(e, 500) };

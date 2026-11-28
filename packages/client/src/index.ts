@@ -136,6 +136,8 @@ import {
   PackageExportManifest,
   PackageExportBundle,
   ReassignOrphanedMetadataResponse,
+  MoveIntoPackageRequest,
+  MoveIntoPackageResponse,
   DuplicatePackageResponse,
   EnsureCustomizationPackageResponse,
   CloneFlowRequest,
@@ -3625,6 +3627,28 @@ export class ObjectStackClient {
             body: JSON.stringify(opts ?? {}),
         });
         return this.unwrapResponse<ReassignOrphanedMetadataResponse>(res);
+    },
+
+    /**
+     * Move a selection of loose (package-less) items into this package — one
+     * item, several, or every loose item of a type, across types. Whole or
+     * nothing. A move resolves with `outcome: 'moved'`; `dryRun: true`
+     * resolves with `outcome: 'would_move'` and calls no write, so a confirm
+     * step can show what each item's addresses become (the judgement is the
+     * door's own, so a save-door refusal can still meet the real move).
+     *
+     * A refusal is THROWN, never resolved: the server answers it 422, and the
+     * error carries the first refused item's code as its `code` and the whole
+     * answer (`outcome: 'refused'`, every item's refusal) in its `details`.
+     * A refused dry run throws the same way.
+     */
+    moveIn: async (id: string, request: MoveIntoPackageRequest): Promise<MoveIntoPackageResponse> => {
+        const route = this.getRoute('packages');
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/move-in`, {
+            method: 'POST',
+            body: JSON.stringify(request),
+        });
+        return this.unwrapResponse<MoveIntoPackageResponse>(res);
     },
 
     /**

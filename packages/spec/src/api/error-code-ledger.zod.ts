@@ -752,6 +752,9 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_REQUEST',
     'ITEM_LOCKED',                // _lock refuses the write/delete (ADR-0010 §3.3)
     'METADATA_CONFLICT',
+    // [#38150] The move-in door's per-item code for a refusal the save or
+    // delete door threw without a code of its own; nothing moves, 422.
+    'MOVE_FAILED',
     // The metadata doors' half of "one name, one holder" for a permission set
     // (maintainer rulings Q4 = A, record 6050490870, and A, record
     // 6063176077): the save door, the draft promotion and the restore doors
@@ -765,6 +768,11 @@ export const ERROR_CODE_LEDGER = {
     'NO_DRAFT',
     'NOT_ATTEMPTED',              // data-batch row never ran — an earlier row's failure stopped the batch, to roll back (atomic, #4793) or because continueOnError was unset (#7539)
     'NOT_CREATABLE',
+    // [#38150] The move-in door (`moveIntoPackage`,
+    // protocol-package-move-in.ts, `POST /api/v1/packages/:id/move-in`): a
+    // selected item that is not loose (an overlay of a shipped item, a
+    // `.custom` pair item) is refused per item, and nothing moves, 422.
+    'NOT_LOOSE',
     'NOT_OVERRIDABLE',
     // [#22737] The data door's two exposure codes, stamped by `findData`'s
     // nested-relation walk (`refuseUnservedRelationTarget`) when a condition's
@@ -780,6 +788,10 @@ export const ERROR_CODE_LEDGER = {
     // and `/packages` serve protocol throws through `errorFromThrown`.
     // Reported by the #8087 dispatcher-vocabulary gate.
     'QUERY_OBJECT_MISMATCH',
+    // [#38150] The move-in door's set rule (ADR-0150 D3 (a)): a moved item
+    // names a loose item of a package-scoped type that the selection leaves
+    // behind, listed in `references`; nothing moves, 422.
+    'REFERENCE_LEFT_BEHIND',
     'REGISTRY_TYPE_NOT_CANONICAL',  // [#9111] a SchemaRegistry overlay entry was offered a non-canonical metadata `type` — the mint door asserts, the caller folds
     'ROLLED_BACK',             // atomic data-batch row was written, then undone by the batch rollback (#4793)
     'STORED_TYPE_NOT_CANONICAL',  // [#8908] a package draft is stored under a non-canonical metadata type (pre-#7894 second-namespace residue) — refused at the publish pre-flight, batch-atomic; [#9174] also refused on `revertCommit`'s restore limb, per-item on `failed[]`, NOT batch-atomic

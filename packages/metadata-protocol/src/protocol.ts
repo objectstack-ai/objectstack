@@ -626,6 +626,7 @@ import { ProtocolHistoryAndPublishFacet } from './protocol-history-and-publish.j
 import type { RegistryQuestion } from './registry-question.js';
 // [#29985 codemod] Package revert, duplicate, import, orphans, commits, revertCommit, rollback: the members below delegate to its facet, `ProtocolPackageCommitsFacet`.
 import { ProtocolPackageCommitsFacet } from './protocol-package-commits.js';
+import { ProtocolPackageMoveInFacet, type MoveIntoPackageRequest } from './protocol-package-move-in.js';
 // [#29985 codemod] Diff, deleteMetaItem, loadMetaFromDb, load reports, findReferencesToMeta: the members below delegate to its facet, `ProtocolDiffDeleteLoadFacet`.
 import { ProtocolDiffDeleteLoadFacet } from './protocol-diff-delete-load.js';
 
@@ -10670,11 +10671,7 @@ export class ObjectStackProtocolImplementation implements
      *    target is refused with {@link permissionSetOwnerBindingRefusal}
      *    (`VALIDATION_ERROR` / 400, the save door's words).
      *
-     * The namespace-prefix judge is deliberately NOT asked here: every
-     * installed package declares a namespace, so it would refuse nearly every
-     * real orphan object, and whether an adoption refuses, renames or leaves
-     * the prefix unjudged is the maintainer's question (#28776's ruling). A
-     * draft is judged by both owner judges when it is promoted.
+     * The namespace-prefix judge is not asked here ({@link moveIntoPackage}, this door's replacement, asks it); a draft meets both owner judges when promoted.
      *
      * ## [#37604] The platform's own record is no orphan
      *
@@ -10695,6 +10692,10 @@ export class ObjectStackProtocolImplementation implements
     }> {
         // [#29985 codemod] The body moved to `protocol-package-commits.ts`; it reaches this class through `protocol-host.ts`.
         return ProtocolPackageCommitsFacet.reassignOrphanedMetadata(protocolHost(this), request);
+    }
+
+    async moveIntoPackage(request: MoveIntoPackageRequest) {
+        return ProtocolPackageMoveInFacet.moveIntoPackage(protocolHost(this), request);
     }
 
     /**
@@ -11343,7 +11344,6 @@ export class ObjectStackProtocolImplementation implements
         // [#25467 cut 33] The body moved to `protocol-sdui-manifest.ts`; it reads no member.
         return reportPageRequiresAbsentAtLoad(name, body, sduiManifest);
     }
-
 
     /**
      * [ADR-0131 D6, triage ruling Q1 → C] Say out loud which stored

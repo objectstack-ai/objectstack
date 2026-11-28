@@ -18,6 +18,8 @@ import {
   PackageExportManifestSchema,
   PackageExportBundleSchema,
   ReassignOrphanedMetadataResponseSchema,
+  MoveIntoPackageRequestSchema,
+  MoveIntoPackageResponseSchema,
   DuplicatePackageResponseSchema,
   PackagePublishResultSchema,
   EnsureCustomizationPackageRequestSchema,
@@ -425,6 +427,69 @@ describe('ReassignOrphanedMetadataResponseSchema declares the adopt-orphans body
   it('the honest-empty report parses — no orphans to adopt is a declared, legal body', () => {
     const empty = { success: true, reassignedCount: 0, reassigned: [], targetPackageId: 'com.example.crm' };
     expect(ReassignOrphanedMetadataResponseSchema.safeParse(empty).success).toBe(true);
+  });
+});
+
+describe('MoveIntoPackageRequestSchema declares the move door\'s body (#38150)', () => {
+  it('takes a selection of one or more items, each with an optional member, and an optional dryRun', () => {
+    const body = {
+      items: [
+        { type: 'flow', name: 'probe_loose_flow' },
+        { type: 'permission', name: 'probe_set', member: 'admin' },
+      ],
+      dryRun: true,
+    };
+    expect(MoveIntoPackageRequestSchema.parse(body)).toEqual(body);
+  });
+
+  it('refuses an empty selection, an unknown key and an item without a name — nothing is moved by a body it cannot read', () => {
+    expect(MoveIntoPackageRequestSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(MoveIntoPackageRequestSchema.safeParse({ items: [{ type: 'flow', name: 'f' }], all: true }).success).toBe(false);
+    expect(MoveIntoPackageRequestSchema.safeParse({ items: [{ type: 'flow' }] }).success).toBe(false);
+    expect(MoveIntoPackageRequestSchema.safeParse({ items: [{ type: 'flow', name: 'f', packageId: 'x' }] }).success).toBe(false);
+  });
+});
+
+describe('MoveIntoPackageResponseSchema declares the move door\'s answer (#38150)', () => {
+  /** Verbatim-shaped captures of the door's three answers, from its dogfood run. */
+  const moved = {
+    outcome: 'moved',
+    targetPackageId: 'com.probe.zeta',
+    moved: [
+      { type: 'flow', name: 'probe_loose_flow', states: ['active'], environmentAddress: '_env/probe_loose_flow', qualifiedAddress: 'zeta/probe_loose_flow' },
+      { type: 'object', name: 'zeta_deal', states: ['active'] },
+      { type: 'tool', name: 'lookup', states: ['active', 'draft'], environmentAddress: '_env/lookup', qualifiedAddress: 'zeta/lookup', aiFaceName: { before: 'lookup', after: 'zeta-lookup' } },
+    ],
+    refused: [],
+    commitId: 'cmt_7752a3d8-4518-4c3e-9b37-df0c15966a4a',
+  };
+  const refused = {
+    outcome: 'refused',
+    targetPackageId: 'com.probe.zeta',
+    moved: [],
+    refused: [{
+      type: 'report', name: 'probe_env_report', code: 'REFERENCE_LEFT_BEHIND',
+      error: "The report 'probe_env_report' names dataset 'probe_env_ds', which is a loose item this move leaves behind.",
+      references: [{ type: 'dataset', name: 'probe_env_ds' }],
+    }],
+  };
+
+  it('parses a moved answer and PRESERVES every member', () => {
+    expect(MoveIntoPackageResponseSchema.parse(moved)).toEqual(moved);
+  });
+
+  it('parses a refused answer with the references it names, and a dry run\'s would_move answer', () => {
+    expect(MoveIntoPackageResponseSchema.parse(refused)).toEqual(refused);
+    const wouldMove = { ...moved, outcome: 'would_move' };
+    delete (wouldMove as { commitId?: string }).commitId;
+    expect(MoveIntoPackageResponseSchema.parse(wouldMove)).toEqual(wouldMove);
+  });
+
+  it('refuses an outcome it does not declare and a moved item with no state', () => {
+    expect(MoveIntoPackageResponseSchema.safeParse({ ...moved, outcome: 'partial' }).success).toBe(false);
+    expect(MoveIntoPackageResponseSchema.safeParse({
+      ...moved, moved: [{ type: 'flow', name: 'f', states: [] }],
+    }).success).toBe(false);
   });
 });
 
