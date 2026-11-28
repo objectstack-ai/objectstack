@@ -148,9 +148,8 @@ never its label ([Actions](./rules/actions.md)):
 | `flow` | Launch a screen/auto-launched flow by name; a multi-step operation is this, with a flow you also author |
 | `api` | Call a registered API endpoint |
 | `form` | Open a FormView by name (routed to `/_console/forms/:name`) |
-| `ask_ai` | Open the in-app assistant focused on the one record the action runs on; no `target`, never `ai.exposed: true` |
 
-Every type but `script` and `ask_ai` requires `target`.
+Every type but `script` requires `target`.
 
 ## Report Types
 
