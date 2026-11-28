@@ -1,0 +1,56 @@
+{
+  "about": "The ui scheduling pin of scripts/check-ci-filter-parity.mjs (objectstack#38132): the least that .github/workflows/ci.yml may schedule the ui jobs. An edit to ci.yml that schedules less than this reds the gate; one that schedules more is free, and raising a pin here is how it is held. See the gate header, sixth subject.",
+  "inputs": [
+    "filters"
+  ],
+  "outputs": {
+    "core": "github.event_name != 'merge_group' && steps.changes.outputs.core || 'true'",
+    "ui": "steps.changes.outputs.ui || 'true'",
+    "ui_consumers": "steps.changes.outputs.ui_consumers || 'true'",
+    "ui_tree": "steps.ui-tree.outputs.present || 'true'"
+  },
+  "rows": {
+    "ui": [
+      "ui/**",
+      "pnpm-lock.yaml",
+      "pnpm-workspace.yaml",
+      "turbo.json",
+      ".github/workflows/**",
+      ".github/prompts/**",
+      "skills/objectui/**",
+      "content/docs/frontend/**",
+      "content/docs/ui/pages.mdx",
+      "tsconfig.json",
+      "tsconfig.base.json",
+      "tsconfig.test.base.json",
+      "tsup.config.ts",
+      "sdui.manifest.json",
+      "scripts/sdui-manifest.record.json",
+      "scripts/gen-sdui-manifest-node.mjs",
+      "scripts/check-sdui-manifest.mjs",
+      ".nvmrc",
+      ".github/actions/setup-pnpm/**",
+      "package.json"
+    ],
+    "ui_consumers": [
+      "packages/spec/**",
+      "packages/client/**",
+      "packages/core/**",
+      "packages/formula/**",
+      "packages/lint/**",
+      "packages/sdui-parser/**",
+      "packages/types/**"
+    ]
+  },
+  "conditions": {
+    "ui-deps": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false')",
+    "type-check-ui": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false')",
+    "test-ui-plan": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.borrowed-verdict.outputs.test_ui != 'skip'",
+    "test-ui": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.borrowed-verdict.outputs.test_ui != 'skip' && needs.test-ui-plan.outputs.shards != '[]'",
+    "test-ui-gate": "always() && needs.queue-verdict.outputs.covered != 'true'",
+    "lint-ui": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && needs.filter.outputs.ui != 'false'",
+    "build-e2e-ui": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && needs.queue-verdict.outputs.covered != 'true'",
+    "live-e2e-ui": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false' || needs.filter.outputs.core != 'false') && needs.queue-verdict.outputs.covered != 'true'",
+    "ui-published-artifacts": "!cancelled() && needs.filter.outputs.ui_tree != 'false' && (needs.filter.outputs.ui != 'false' || needs.filter.outputs.ui_consumers != 'false') && github.event_name != 'pull_request' && github.event_name != 'merge_group'"
+  }
+}

@@ -284,7 +284,7 @@ import { requireDependency } from './import-prerequisite.mjs';
 const { parse } = await requireDependency('yaml', () => import('yaml'), import.meta.url);
 
 import { collectInvocations } from './check-self-test-wired.mjs';
-import { scanPathExpressions } from './check-cross-package-test-inputs.mjs';
+import { resolveImportTarget, scanPathExpressions } from './check-cross-package-test-inputs.mjs';
 import { CROSS_PACKAGE_TEST_INPUTS } from './cross-package-test-inputs.mjs';
 import { firstPartyModuleClosure } from './first-party-closure.mjs';
 import { isEntrypoint } from './invoked-as.mjs';
@@ -474,7 +474,7 @@ function readFilterLists(source) {
       return { refusal: `${CI_WORKFLOW}'s \`${name}:\` filter is not a list of path strings.` };
     }
   }
-  return { jobs, filters };
+  return { jobs, filters, raw, step: pathsFilterSteps[0] };
 }
 
 /**
@@ -905,38 +905,43 @@ function reportTestInputs(verdict) {
   return 0;
 }
 
-// ── The fifth subject: Test UI and the root ADR files ui tests read (#37935) ──
+// ── The fifth subject: Test UI and the files outside ui/ that ui tests read (#37935, #38133) ──
 
 /** The job that runs the ui tree's vitest suites, by id. */
 export const UI_TEST_JOB = 'test-ui';
 /** The filter outputs its `if:` may OR; `ui` must be among the ones it names. */
 export const UI_SCHEDULING_FILTERS = Object.freeze(['ui', 'ui_consumers']);
-/** Where an uncovered read belongs, and the list whose rows under the roots are judged for leftovers. */
+/** Where an uncovered read belongs, and the list whose reads group is judged for leftovers. */
 export const UI_REMEDY_FILTER = 'ui';
-/** The tree whose tests are read. */
+/** The tree whose tests are read; every read outside it is this subject's population. */
 export const UI_TREE = 'ui';
 /**
- * The repo-root roots this subject judges. The ruled population is the root
- * `docs/adr/` (see the header for why it is not every read outside `ui/`).
+ * The heading comment that opens the reads group at the end of the `ui:` list.
+ * Every row below it must have a reader; rows above it are the ui jobs' own
+ * build and gate inputs, which no test read accounts for.
  */
-export const UI_READ_ROOTS = Object.freeze(['docs/adr']);
+export const UI_READS_GROUP_MARKER = 'UI TEST READS OUTSIDE ui/';
+/** A comment line in the reads group declaring a read left unscheduled on purpose: `<marker> <path> -- <reason>`. */
+export const UI_TRADE_OFF_MARKER = 'ui-read trade-off:';
 
 const UI_TEST_FILE = /\.(?:test|spec)\.[cm]?[jt]sx?$/;
 
-const underRoots = (path) => UI_READ_ROOTS.some((r) => path === r || path.startsWith(`${r}/`));
+const insideUiTree = (path) => path === UI_TREE || path.startsWith(`${UI_TREE}/`);
 
 /**
- * Every path under UI_READ_ROOTS that a tracked ui test file reads, each with
- * its readers, or `{ refusal }`. The reads come from `scanPathExpressions`, the
+ * Every path outside `ui/` that a tracked ui test file reads, each with its
+ * readers, or `{ refusal }`. The reads come from `scanPathExpressions`, the
  * walker `check:cross-package-test-inputs` and the ui test selector already use
  * -- not a recognizer of this gate's own. `files` (a bound name) and relative
  * `imports` are file candidates, `dirs` (a listing) directory candidates, and
  * each counts only as what it really is on disk, the filter
  * `check:cross-package-test-inputs` applies to the same walker's answer: the
  * walker puts every BOUND name in `files`, so a directory bound to a name and
- * then listed sits in both sets, and only the disk says it is a directory. A
- * candidate naming nothing on disk is a synthetic fixture path, not a read. A
- * directory read is covered only by its subtree.
+ * then listed sits in both sets, and only the disk says it is a directory. An
+ * import is resolved by that gate's own `resolveImportTarget` (an
+ * extensionless or `.js` specifier names the `.ts` source). A candidate naming
+ * nothing on disk is a synthetic fixture path, not a read. A directory read is
+ * covered only by its subtree.
  *
  * @param {string} root   the repository root
  * @param {string[] | null} [listed]  repo-relative tracked files (git's answer when absent)
@@ -962,9 +967,10 @@ export function uiRootReadsOf(root, listed = null) {
     }
     const segs = rel.split('/');
     const scan = scanPathExpressions(source, segs.length - 1, segs, null);
-    const candidates = [...[...scan.files, ...scan.imports].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
+    const imports = [...scan.imports].map((p) => resolveImportTarget(p, root) ?? p);
+    const candidates = [...[...scan.files, ...imports].map((p) => [p, 'file']), ...[...scan.dirs].map((p) => [p, 'dir'])];
     for (const name of new Set(candidates.map(([p]) => p))) {
-      if (!underRoots(name)) continue;
+      if (!name || insideUiTree(name) || name.startsWith('..') || name.startsWith('/') || name.split('/').includes('node_modules')) continue;
       const kind = realKindOf(root, name);
       if (!kind || !candidates.some(([p, k]) => p === name && k === kind)) continue;
       const row = byPath.get(name) ?? { path: name, kind, from: [] };
@@ -990,9 +996,67 @@ const uiCoverage = (row, entries) =>
   row.kind === 'dir' ? coverageVerdict(`${row.path}/x`, entries) : coverageVerdict(row.path, entries);
 
 /**
- * The verdict on Test UI's scheduling against the root ADR files ui tests read.
- * Takes ci.yml's SOURCE STRING and the reads (`uiRootReadsOf`'s answer);
- * `{ refusal }` for every state in which the subject was not read.
+ * The reads group of the `ui:` list, read out of the `filters:` input's TEXT,
+ * because YAML drops the comments that carry its heading and its trade-offs.
+ * Returns `{ rows, tradeOffs }` -- the list items below the heading and a Map
+ * of declared trade-off path to reason -- or `{ refusal }`.
+ */
+export function uiReadsGroupOf(raw) {
+  const lines = String(raw ?? '').split('\n');
+  const indentOf = (l) => l.match(/^\s*/)[0].length;
+  const keyAt = lines.findIndex((l) => new RegExp(`^\\s*${UI_REMEDY_FILTER}:\\s*$`).test(l));
+  if (keyAt < 0) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input has no \`${UI_REMEDY_FILTER}:\` list to read the reads group from.` };
+  const keyIndent = indentOf(lines[keyAt]);
+  let end = lines.length;
+  for (let i = keyAt + 1; i < lines.length; i++) {
+    const t = lines[i].trim();
+    if (t && indentOf(lines[i]) <= keyIndent && !t.startsWith('#') && !t.startsWith('-')) {
+      end = i;
+      break;
+    }
+  }
+  // Only lines indented under the key belong to it: a comment at the key's own
+  // column introduces the NEXT list.
+  const body = lines.slice(keyAt + 1, end).filter((l) => !l.trim() || indentOf(l) > keyIndent);
+  const headings = body.map((l, i) => [l, i]).filter(([l]) => l.trim().startsWith('#') && l.includes(UI_READS_GROUP_MARKER));
+  if (headings.length !== 1) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s \`${UI_REMEDY_FILTER}:\` list carries ${headings.length} \`${UI_READS_GROUP_MARKER}\` heading(s); this gate reads ` +
+        `exactly one, above the rows that schedule the ui tests' reads outside ${UI_TREE}/.`,
+    };
+  }
+  const rows = [];
+  const tradeOffs = new Map();
+  const malformed = [];
+  for (const line of body.slice(headings[0][1] + 1)) {
+    const t = line.trim();
+    const item = /^-\s*(['"]?)(.*)\1\s*$/.exec(t);
+    if (item) {
+      rows.push(item[2]);
+      continue;
+    }
+    // A trade-off line STARTS with the marker; prose that mentions it does not declare one.
+    const comment = /^#\s*(.*)$/.exec(t)?.[1] ?? '';
+    if (!comment.startsWith(UI_TRADE_OFF_MARKER)) continue;
+    const m = /^(\S+)\s+--\s+(\S.*)$/.exec(comment.slice(UI_TRADE_OFF_MARKER.length).trim());
+    if (m) tradeOffs.set(m[1], m[2]);
+    else malformed.push(t);
+  }
+  if (malformed.length > 0) {
+    return {
+      refusal:
+        `${CI_WORKFLOW}'s reads group carries a \`${UI_TRADE_OFF_MARKER}\` line this gate cannot read; spell it ` +
+        `\`# ${UI_TRADE_OFF_MARKER} PATH -- REASON\`:\n` + malformed.map((l) => `      ${l}`).join('\n'),
+    };
+  }
+  return { rows, tradeOffs };
+}
+
+/**
+ * The verdict on Test UI's scheduling against the files outside `ui/` that ui
+ * tests read. Takes ci.yml's SOURCE STRING and the reads (`uiRootReadsOf`'s
+ * answer); `{ refusal }` for every state in which the subject was not read.
  */
 export function judgeUiReads(source, reads) {
   const read = readFilterLists(source);
@@ -1013,56 +1077,288 @@ export function judgeUiReads(source, reads) {
   for (const name of named) {
     if (!(name in read.filters)) return { refusal: `${CI_WORKFLOW}'s \`filters:\` input declares no \`${name}:\` filter.` };
   }
+  const group = uiReadsGroupOf(read.raw);
+  if (group.refusal) return group;
   const entries = named.flatMap((n) => read.filters[n]);
   const covered = [];
+  const tradedOff = [];
   const uncovered = [];
   for (const row of reads.rows) {
     const verdict = uiCoverage(row, entries);
-    (verdict.covered ? covered : uncovered).push({ ...row, ...verdict });
+    if (verdict.covered) covered.push({ ...row, ...verdict });
+    else if (group.tradeOffs.has(row.path)) tradedOff.push({ ...row, reason: group.tradeOffs.get(row.path) });
+    else uncovered.push({ ...row, ...verdict });
   }
-  // The other direction: a `ui` row under the judged roots that no ui test
-  // reads any more starts the whole ui battery for nothing.
-  const stale = read.filters[UI_REMEDY_FILTER].filter(
-    (entry) => underRoots(entry.replace(/\/\*\*$/, '')) && !reads.rows.some((row) => uiCoverage(row, [entry]).covered),
+  // The other direction: a reads-group row that no ui test reads any more
+  // starts the whole ui battery for nothing, and a trade-off for a read that is
+  // gone, or that a row now schedules, declares a gap that is not there.
+  const stale = group.rows.filter((entry) => !reads.rows.some((row) => uiCoverage(row, [entry]).covered));
+  const staleTradeOffs = [...group.tradeOffs.keys()].filter(
+    (path) => !reads.rows.some((row) => row.path === path) || covered.some((row) => row.path === path),
   );
-  return { condition, named, tests: reads.tests, rows: reads.rows, covered, uncovered, stale };
+  return { condition, named, tests: reads.tests, rows: reads.rows, covered, tradedOff, uncovered, stale, staleTradeOffs };
 }
 
 function reportUiReads(verdict) {
   if (verdict.refusal) {
-    console.error(`FAIL: check-ci-filter-parity could not judge Test UI's reads under ${UI_READ_ROOTS.join(', ')}.\n\n  - ${verdict.refusal}\n`);
+    console.error(`FAIL: check-ci-filter-parity could not judge Test UI's reads outside ${UI_TREE}/.\n\n  - ${verdict.refusal}\n`);
     return 1;
   }
   const problems = [];
   if (verdict.uncovered.length > 0) {
     problems.push(
-      `${verdict.uncovered.length} path(s) under ${UI_READ_ROOTS.map((r) => `\`${r}/\``).join(', ')} that a ui test reads are covered by ` +
-        `none of ${verdict.named.map((n) => `\`${n}\``).join(', ')} in ${CI_WORKFLOW}. A diff confined to one starts no\n` +
-        `    \`${UI_TEST_JOB}\` job, on the PR or in the merge queue, so the test that reads it first runs on the next ui PR:\n` +
+      `${verdict.uncovered.length} path(s) outside ${UI_TREE}/ that a ui test reads are covered by none of ` +
+        `${verdict.named.map((n) => `\`${n}\``).join(', ')} in ${CI_WORKFLOW} and declared as no trade-off. A diff confined to one\n` +
+        `    starts no \`${UI_TEST_JOB}\` job, on the PR or in the merge queue, so the test that reads it first runs on the next ui PR:\n` +
         verdict.uncovered.map((r) => `      ${r.path}${r.kind === 'dir' ? '/**' : ''}   (read by ${r.from.join(', ')})`).join('\n') +
-        `\n    Add each one VERBATIM to the \`${UI_REMEDY_FILTER}:\` filter in ${CI_WORKFLOW} (a directory read as \`<dir>/**\`).`,
+        `\n    Add each one VERBATIM below the \`${UI_READS_GROUP_MARKER}\` heading of the \`${UI_REMEDY_FILTER}:\` filter in ${CI_WORKFLOW}\n` +
+        `    (a directory read as \`<dir>/**\`), or change the test so it does not read the file. A read left unscheduled on\n` +
+        `    purpose is a \`# ${UI_TRADE_OFF_MARKER} PATH -- REASON\` line in that group, naming what runs it instead.`,
     );
   }
   if (verdict.stale.length > 0) {
     problems.push(
-      `${CI_WORKFLOW}'s \`${UI_REMEDY_FILTER}:\` filter carries entr(ies) under ${UI_READ_ROOTS.join(', ')} that no ui test reads any more:\n` +
+      `${CI_WORKFLOW}'s \`${UI_REMEDY_FILTER}:\` reads group carries row(s) that no ui test reads any more:\n` +
         verdict.stale.map((e) => `      ${e}`).join('\n') +
         `\n    Check each, then delete it: it starts every ui job for an edit no ui test file reads. This gate sees only\n` +
         `    the reads a ui test file spells itself, not one made inside a module the test imports, so first confirm\n` +
-        `    no imported helper reads it.`,
+        `    no imported helper reads it; a row such a helper needs belongs above the heading, with its reason.`,
+    );
+  }
+  if (verdict.staleTradeOffs.length > 0) {
+    problems.push(
+      `${CI_WORKFLOW}'s reads group declares trade-off(s) for a read no ui test makes, or one a row already schedules:\n` +
+        verdict.staleTradeOffs.map((e) => `      ${e}`).join('\n') +
+        `\n    Delete the \`${UI_TRADE_OFF_MARKER}\` line: it declares a scheduling gap that is not there.`,
     );
   }
   if (problems.length > 0) {
-    console.error(`FAIL: ci.yml's \`${UI_REMEDY_FILTER}\` filter is out of step with the root files the ui tests read.\n`);
+    console.error(`FAIL: ci.yml's \`${UI_REMEDY_FILTER}\` filter is out of step with the files outside ${UI_TREE}/ the ui tests read.\n`);
     for (const p of problems) console.error(`  - ${p}\n`);
     return 1;
   }
   console.log(
-    `OK: all ${verdict.rows.length} path(s) under ${UI_READ_ROOTS.join(', ')} read by the ${verdict.tests} tracked ui test file(s) are ` +
-      `covered by ${verdict.named.map((n) => `\`${n}\``).join(' or ')}, which the \`${UI_TEST_JOB}\` job's \`if:\` reads, and every ` +
-      `\`${UI_REMEDY_FILTER}\` row under those roots still has a reader.`,
+    `OK: all ${verdict.rows.length} path(s) outside ${UI_TREE}/ read by the ${verdict.tests} tracked ui test file(s) are ` +
+      `covered by ${verdict.named.map((n) => `\`${n}\``).join(' or ')}, which the \`${UI_TEST_JOB}\` job's \`if:\` reads` +
+      (verdict.tradedOff.length > 0 ? `, or declared as a trade-off (${verdict.tradedOff.map((r) => r.path).join(', ')})` : '') +
+      `, and every row and trade-off of the reads group still has a reader.`,
   );
   return 0;
+}
+
+// ── The sixth subject: the ui scheduling pin (#38132) ──
+
+/** The pin record: the least ci.yml may schedule the ui jobs. Read, never copied here. */
+export const UI_PIN_FILE = 'scripts/ci-filter-parity.ui-pin.json';
+/** The `filter` job outputs the ui jobs are scheduled by; a job reading any of them is a ui job. */
+export const UI_OUTPUT_NAMES = Object.freeze(['ui', 'ui_consumers', 'ui_tree']);
+const UI_OUTPUT_READ = new RegExp(`needs\\.filter\\.outputs\\.(?:${UI_OUTPUT_NAMES.join('|')})(?![\\w])`);
+
+/** An expression without its `${{ }}` wrapper, whitespace collapsed. */
+export const normalizeExpression = (expr) =>
+  String(expr ?? '')
+    .trim()
+    .replace(/^\$\{\{\s*([\s\S]*?)\s*\}\}$/, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** Split `s` on `op` at paren depth 0, outside quoted strings. */
+function splitTopLevel(s, op) {
+  const parts = [];
+  let depth = 0;
+  let quote = null;
+  let start = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === quote) quote = null;
+      continue;
+    }
+    if (c === "'" || c === '"') quote = c;
+    else if (c === '(') depth += 1;
+    else if (c === ')') depth -= 1;
+    else if (depth === 0 && s.startsWith(op, i)) {
+      parts.push(s.slice(start, i));
+      start = i + op.length;
+      i += op.length - 1;
+    }
+  }
+  parts.push(s.slice(start));
+  return parts.map((p) => p.trim());
+}
+
+/** `( x )` → `x`, only when the outer parens enclose the whole expression. */
+function stripOuterParens(s) {
+  let t = s.trim();
+  while (t.startsWith('(') && t.endsWith(')')) {
+    let depth = 0;
+    let wraps = true;
+    for (let i = 0; i < t.length; i++) {
+      if (t[i] === '(') depth += 1;
+      else if (t[i] === ')') depth -= 1;
+      if (depth === 0 && i < t.length - 1) {
+        wraps = false;
+        break;
+      }
+    }
+    if (!wraps) break;
+    t = t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+/**
+ * A job condition as clauses of a conjunction, each clause the set of its
+ * disjuncts: `a && (b || c)` → `[[a], [b, c]]`. An atom is compared as its
+ * normalised text, so the comparison is syntactic. An absent `if:` is the one
+ * clause `(absent)`, GitHub's implicit `success()`.
+ */
+export function conditionClauses(expr) {
+  const text = normalizeExpression(expr);
+  if (!text) return [['(absent)']];
+  return splitTopLevel(text, '&&').map((conjunct) => [...new Set(splitTopLevel(stripOuterParens(conjunct), '||'))].sort());
+}
+
+/**
+ * Does `actual` run at least whenever `pinned` does? Sound and syntactic:
+ * every clause of `actual` must contain all the disjuncts of some clause of
+ * `pinned`, so each actual clause is implied by a pinned one. Dropping a
+ * clause or adding a disjunct passes; adding a clause, dropping a disjunct or
+ * changing an atom does not -- the conservative answer on a rewrite that is in
+ * fact wider is a red naming the clause, never a silent pass.
+ */
+export function conditionAtLeast(actual, pinned) {
+  const p = conditionClauses(pinned);
+  const narrower = conditionClauses(actual).filter((clause) => !p.some((pc) => pc.every((atom) => clause.includes(atom))));
+  return { holds: narrower.length === 0, narrower: narrower.map((c) => c.join(' || ')) };
+}
+
+/** The pin record's own shape, or the reason it cannot be read. */
+function pinRefusal(pin) {
+  if (!pin || typeof pin !== 'object' || Array.isArray(pin)) return `${UI_PIN_FILE} is missing or is not a JSON object.`;
+  const isStrings = (xs) => Array.isArray(xs) && xs.length > 0 && xs.every((x) => typeof x === 'string');
+  const isMap = (m) => m && typeof m === 'object' && !Array.isArray(m) && Object.keys(m).length > 0;
+  if (!isStrings(pin.inputs)) return `${UI_PIN_FILE} carries no \`inputs\` list of the paths-filter step's \`with:\` keys.`;
+  if (!isMap(pin.outputs) || !Object.values(pin.outputs).every((v) => typeof v === 'string')) return `${UI_PIN_FILE} carries no \`outputs\` map of filter output expressions.`;
+  if (!isMap(pin.rows) || !Object.values(pin.rows).every(isStrings)) return `${UI_PIN_FILE} carries no \`rows\` map of filter name to its pinned rows.`;
+  if (!isMap(pin.conditions) || !Object.values(pin.conditions).every((v) => typeof v === 'string')) return `${UI_PIN_FILE} carries no \`conditions\` map of ui job to its pinned \`if:\`.`;
+  for (const name of UI_OUTPUT_NAMES) if (!(name in pin.outputs)) return `${UI_PIN_FILE} pins no \`${name}\` output.`;
+  return null;
+}
+
+/**
+ * The verdict on ci.yml against the ui scheduling pin: the paths-filter step's
+ * whole `with:` input (its keys exactly, and a floor of rows for each filter
+ * the pin names), the `filter` job's output expressions the ui jobs read
+ * (exactly), and the `if:` of every job that reads a ui output (at least as
+ * wide as its pin, and every such job pinned). `{ refusal }` when either side
+ * could not be read.
+ */
+export function judgeUiScheduling(source, pin) {
+  const refusal = pinRefusal(pin);
+  if (refusal) return { refusal };
+  const read = readFilterLists(source);
+  if (read.refusal) return read;
+  const { jobs, filters, step } = read;
+
+  const withKeys = Object.keys(step.with ?? {});
+  const extraInputs = withKeys.filter((k) => !pin.inputs.includes(k));
+  const missingInputs = pin.inputs.filter((k) => !withKeys.includes(k));
+
+  const outputs = jobs.filter?.outputs ?? {};
+  const changedOutputs = Object.entries(pin.outputs)
+    .filter(([name, expr]) => normalizeExpression(outputs[name]) !== normalizeExpression(expr))
+    .map(([name, expr]) => ({ name, pinned: normalizeExpression(expr), actual: name in outputs ? normalizeExpression(outputs[name]) : '(absent)' }));
+
+  const missingRows = Object.entries(pin.rows).flatMap(([name, rows]) =>
+    rows.filter((row) => !(filters[name] ?? []).includes(row)).map((row) => ({ name, row })),
+  );
+
+  const uiJobs = Object.entries(jobs)
+    .filter(([id, job]) => id !== 'filter' && UI_OUTPUT_READ.test(JSON.stringify(job ?? {})))
+    .map(([id]) => id);
+  const unpinnedJobs = uiJobs.filter((id) => !(id in pin.conditions));
+  const vanishedJobs = Object.keys(pin.conditions).filter((id) => !(id in jobs));
+  const narrowedJobs = [];
+  const widenedJobs = [];
+  for (const [id, pinned] of Object.entries(pin.conditions)) {
+    if (!(id in jobs)) continue;
+    const actual = jobs[id]?.if;
+    const verdict = conditionAtLeast(actual, pinned);
+    if (!verdict.holds) narrowedJobs.push({ id, pinned: normalizeExpression(pinned), actual: normalizeExpression(actual) || '(absent)', clauses: verdict.narrower });
+    else if (normalizeExpression(actual) !== normalizeExpression(pinned)) widenedJobs.push(id);
+  }
+  return { uiJobs, pinnedInputs: pin.inputs, extraInputs, missingInputs, changedOutputs, missingRows, unpinnedJobs, vanishedJobs, narrowedJobs, widenedJobs };
+}
+
+function reportUiScheduling(verdict) {
+  if (verdict.refusal) {
+    console.error(`FAIL: check-ci-filter-parity could not judge the ui scheduling against ${UI_PIN_FILE}.\n\n  - ${verdict.refusal}\n`);
+    return 1;
+  }
+  const problems = [];
+  if (verdict.extraInputs.length > 0 || verdict.missingInputs.length > 0) {
+    problems.push(
+      `the \`dorny/paths-filter\` step's \`with:\` input is pinned to exactly the keys ${JSON.stringify(verdict.pinnedInputs)}` +
+        (verdict.extraInputs.length ? `; added: ${verdict.extraInputs.join(', ')}` : '') +
+        (verdict.missingInputs.length ? `; removed: ${verdict.missingInputs.join(', ')}` : '') +
+        `.\n    Every input of that action decides which diff is read or how a row matches it, so each one is pinned.`,
+    );
+  }
+  for (const o of verdict.changedOutputs) {
+    problems.push(
+      `the \`filter\` job's \`${o.name}\` output is pinned exactly, and it changed:\n      pinned: ${o.pinned}\n      actual: ${o.actual}`,
+    );
+  }
+  if (verdict.missingRows.length > 0) {
+    problems.push(
+      `pinned row(s) are gone from the filters the ui jobs read, so a diff they matched no longer starts those jobs:\n` +
+        verdict.missingRows.map((r) => `      ${r.name}: ${r.row}`).join('\n'),
+    );
+  }
+  for (const j of verdict.narrowedJobs) {
+    problems.push(
+      `the \`${j.id}\` job's \`if:\` is not provably at least as wide as its pin; these clauses are new or narrower:\n` +
+        j.clauses.map((c) => `      ${c}`).join('\n') +
+        `\n      pinned: ${j.pinned}\n      actual: ${j.actual}`,
+    );
+  }
+  if (verdict.unpinnedJobs.length > 0) {
+    problems.push(`job(s) that read a ui output carry no pinned condition: ${verdict.unpinnedJobs.join(', ')}.`);
+  }
+  if (verdict.vanishedJobs.length > 0) {
+    problems.push(`pinned ui job(s) are gone from ${CI_WORKFLOW}: ${verdict.vanishedJobs.join(', ')}.`);
+  }
+  if (problems.length > 0) {
+    console.error(`FAIL: ${CI_WORKFLOW} schedules the ui jobs differently from ${UI_PIN_FILE}.\n`);
+    for (const p of problems) console.error(`  - ${p}\n`);
+    console.error(
+      `What is pinned: the paths-filter step's \`with:\` keys and the \`filter\` outputs ${UI_OUTPUT_NAMES.join(', ')} (and any other\n` +
+        `output a ui job reads) exactly; the rows the pin lists for each filter as a floor; and every job reading a ui\n` +
+        `output, with its \`if:\` as a floor. An edit that schedules the ui jobs LESS is the failure this subject exists\n` +
+        `to catch. An edit that is deliberate -- a new ui job, a renamed one, an output or input rewritten -- updates\n` +
+        `${UI_PIN_FILE} in the same PR, so the change to what runs is read where it is made.\n`,
+    );
+    return 1;
+  }
+  console.log(
+    `OK: ${CI_WORKFLOW} schedules the ${verdict.uiJobs.length} ui job(s) at least as ${UI_PIN_FILE} pins: the paths-filter input, ` +
+      `the ui outputs, the pinned rows and every ui job's \`if:\`` +
+      (verdict.widenedJobs.length > 0 ? ` (wider than the pin, which holds only its floor: ${verdict.widenedJobs.join(', ')})` : '') +
+      '.',
+  );
+  return 0;
+}
+
+/** The pin record under `root`, parsed, or null when it cannot be read -- the judge refuses on null by name. */
+function readPin(root) {
+  const text = readOrNull(root, UI_PIN_FILE);
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function report(verdict) {
@@ -1119,7 +1415,7 @@ function report(verdict) {
   return 0;
 }
 
-export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS, uiReads = null) {
+export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS, uiReads = null, uiPin = undefined) {
   let source;
   try {
     source = readFileSync(join(root, CI_WORKFLOW), 'utf8');
@@ -1136,7 +1432,9 @@ export function main(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS, uiRead
   // `uiReads` is injectable only so the self-test can judge a scratch ci.yml
   // against the real tree's reads; a real run always reads `root`'s ui tests.
   const uiCode = reportUiReads(judgeUiReads(source, uiReads ?? uiRootReadsOf(root)));
-  return crosspkg === 0 && buildCode === 0 && testCode === 0 && uiCode === 0 ? 0 : 1;
+  // `uiPin` likewise: injectable for the self-test, read from `root` otherwise.
+  const pinCode = reportUiScheduling(judgeUiScheduling(source, uiPin === undefined ? readPin(root) : uiPin));
+  return crosspkg === 0 && buildCode === 0 && testCode === 0 && uiCode === 0 && pinCode === 0 ? 0 : 1;
 }
 
 /** A root file's text, or null when it cannot be read -- the judge refuses on null by name. */
@@ -1199,18 +1497,31 @@ function list(root = REPO_ROOT, table = CROSS_PACKAGE_TEST_INPUTS) {
     console.error(`FAIL: ${ui.refusal}`);
     return 1;
   }
-  console.log(`\nreads under ${UI_READ_ROOTS.join(', ')} by the ${ui.tests} ui test file(s), against ${ui.named.join(' + ')} (${UI_TEST_JOB}):`);
-  for (const row of [...ui.covered, ...ui.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
-    console.log(`${row.covered ? 'ok  ' : 'FAIL'} ${row.path}${row.covered ? `   via ${row.kind === 'dir' ? 'subtree' : row.kind} ${row.via}` : ''}   (${row.from.join(', ')})`);
+  console.log(`\nreads outside ${UI_TREE}/ by the ${ui.tests} ui test file(s), against ${ui.named.join(' + ')} (${UI_TEST_JOB}):`);
+  for (const row of [...ui.covered, ...ui.tradedOff, ...ui.uncovered].sort((a, b) => a.path.localeCompare(b.path))) {
+    const how = row.covered ? `   via ${row.kind === 'dir' ? 'subtree' : row.kind} ${row.via}` : row.reason ? '   trade-off' : '';
+    console.log(`${row.covered || row.reason ? 'ok  ' : 'FAIL'} ${row.path}${how}   (${row.from.join(', ')})`);
   }
   for (const entry of ui.stale) console.log(`FAIL ${entry}   stale: no ui test reads it`);
+  for (const entry of ui.staleTradeOffs) console.log(`FAIL ${entry}   stale trade-off: no ui test reads it, or a row covers it`);
+  const pin = judgeUiScheduling(readFileSync(join(root, CI_WORKFLOW), 'utf8'), readPin(root));
+  if (pin.refusal) {
+    console.error(`FAIL: ${pin.refusal}`);
+    return 1;
+  }
+  console.log(`\nui jobs against ${UI_PIN_FILE}: ${pin.uiJobs.join(', ')}`);
+  const pinRed = pin.extraInputs.length + pin.missingInputs.length + pin.changedOutputs.length + pin.missingRows.length +
+    pin.unpinnedJobs.length + pin.vanishedJobs.length + pin.narrowedJobs.length;
+  console.log(pinRed === 0 ? 'ok   the paths-filter input, the ui outputs, the pinned rows and every ui job condition hold' : `FAIL ${pinRed} pin finding(s); run without --list for each`);
   return verdict.uncovered.length > 0 ||
     build.uncovered.length > 0 ||
     build.guardsUncovered.length > 0 ||
     build.stale.length > 0 ||
     test.uncovered.length > 0 ||
     ui.uncovered.length > 0 ||
-    ui.stale.length > 0
+    ui.stale.length > 0 ||
+    ui.staleTradeOffs.length > 0 ||
+    pinRed > 0
     ? 1
     : 0;
 }
