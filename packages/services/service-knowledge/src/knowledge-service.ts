@@ -3945,18 +3945,19 @@ export interface PurgeDocumentsOutcome {
  * the first re-read or delete that throws (a re-read that answers no list
  * included), counting what it did before.
  *
- * KNOWN LIMIT — numeric record ids. The record id is recovered from the
- * document id as text, and the re-read asks for that text. A driver that does
- * not equate `'5'` with `5` (driver-mongodb, driver-memory) does not find a
- * row stored under a caller-supplied NUMERIC id, so if such a row's document
- * is a candidate while the row exists (it was restored, or came back into
- * `where`, after the walk read past it), the document is deleted. The row is
- * untouched; its document returns at the row's next event or the next complete
- * reindex. Asking again by the number is not done: on driver-sql the number
- * is bound against the text `id` column, which MySQL compares numerically
- * (`'05'` matches `5`) and SQL Server and Oracle reject outright, and the
- * object schema does not say which ids are numeric. Platform-minted ids are
- * text on every driver, so the limit needs a caller-supplied numeric id.
+ * Record ids are text. The knowledge service treats a record id as text: the
+ * record id is recovered from the document id as text, and the re-read asks
+ * for that text. A caller-supplied NUMERIC record id on driver-memory or
+ * driver-mongodb, which keep the id as given and do not equate `'5'` with
+ * `5`, is not supported. The re-read does not find such a row, so if its
+ * document is a candidate while the row exists (it was restored, or came back
+ * into `where`, after the walk read past it), the document is deleted; the row
+ * is untouched, and its document returns at the row's next event or the next
+ * complete reindex. Ids the platform mints are text on every driver. Asking
+ * again by the number is not done: on driver-sql the number is bound against
+ * the text `id` column, which MySQL compares numerically (`'05'` matches `5`)
+ * and SQL Server and Oracle reject outright, and the object schema does not
+ * say which ids are numeric.
  *
  * The caller decides when a purge may run at all (a complete reindex walk,
  * which is also what the reconcile runs) and computes the candidates.
