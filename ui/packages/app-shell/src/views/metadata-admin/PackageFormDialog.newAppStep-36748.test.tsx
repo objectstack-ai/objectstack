@@ -465,11 +465,13 @@ function mounts(component: string): string[] {
 }
 
 describe('every create-package door offers 「同时创建应用」 (objectstack#37134)', () => {
-  it('Setup → Packages (its button and the `?new=package` door), the resource list and Studio’s package switcher (objectstack#37456) mount CreatePackageDialog', () => {
+  // The resource list's door moved into the create ask's "New package…"
+  // (objectstack#38149), which the list, the editor and the app creates mount.
+  it('Setup → Packages (its button and the `?new=package` door), the create ask (objectstack#38149) and Studio’s package switcher (objectstack#37456) mount CreatePackageDialog', () => {
     const doors = mounts('CreatePackageDialog').map((m) => m.split(':')[0]);
     expect(doors.sort()).toEqual([
+      'views/metadata-admin/PackageCreateAsk.tsx',
       'views/metadata-admin/PackagesPage.tsx',
-      'views/metadata-admin/ResourceListPage.tsx',
       'views/studio-design/StudioPackageSwitcher.tsx',
     ]);
   });
