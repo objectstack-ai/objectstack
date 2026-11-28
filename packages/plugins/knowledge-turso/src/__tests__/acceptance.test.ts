@@ -1122,7 +1122,7 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 1, exact: 0 });
     });
 
-    it('a database that refuses the one-bit vectors or the index DDL keeps the exact scan, and the build completes', async () => {
+    it('a database that refuses the one-bit vectors or the index DDL keeps the exact scan, the build completes, and the health check names it', async () => {
       for (const [name, refused] of [
         // A host whose libSQL lacks the one-bit vectors: like SQLite, it creates a column of any type and a
         // trigger naming an unknown function, and refuses each statement that computes `vector1bit`.
@@ -1143,6 +1143,19 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
         const from = watched.sql.length;
         expect((await adapter.search('wzzx wyyx wxxx', { source: s, topK: 1 })).map((h) => h.sourceRecordId)).toEqual(['late']);
         expect(vectorLegs(watched.sql, from)).toEqual({ approximate: 0, exact: 1 });
+        // The refusal is named to the operator, through the health check the boot line and the health endpoint
+        // read; the store stays ready.
+        const health = await adapter.healthCheck();
+        expect(health.ok).toBe(true);
+        expect(health.message).toContain(`the approximate vector index of source '${s.name}' was not made`);
+        const noOneBit = 'this database does not compute one-bit vectors (vector1bit), so no source gets an approximate vector index';
+        if (name === 'ann_no_1bit') expect(health.message).toContain(noOneBit);
+        else expect(health.message).toContain('the database refused its DDL');
+        // A dropped source is no longer named.
+        await adapter.dropSource(ctx(s));
+        const after = await adapter.healthCheck();
+        expect(after.message).not.toContain(`source '${s.name}'`);
+        if (name === 'ann_no_ddl') expect(after).toEqual({ ok: true, message: 'libSQL vectors ready' });
       }
     });
 

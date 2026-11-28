@@ -341,6 +341,12 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
   private readonly keyed = new Set<string>();
   /** Passage tables whose vector side table is known to hold every passage (triggers keep it so). */
   private readonly vectorIndexed = new Set<string>();
+  /**
+   * Sources whose last complete build did not make their approximate vector
+   * index because the database refused it, with the reason: named by
+   * {@link healthCheck} until a later build of the source makes it.
+   */
+  private readonly vectorIndexRefused = new Map<string, string>();
   private readonly vectorIndexThreshold: number;
   private readonly vectorIndexOverfetch: number;
 
@@ -886,6 +892,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         return { commit: true, value: undefined };
       });
       if (legacy) this.noLegacy.add(sourceId);
+      this.vectorIndexRefused.delete(sourceId);
     });
   }
 
@@ -893,7 +900,19 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     try {
       this.requireClient();
       await this.ready();
-      return { ok: true, message: 'libSQL vectors ready' };
+      // A refused approximate vector index is a speed-up lost, never a fault:
+      // `ok` stays true, and the message names it for the operator.
+      const notes: string[] = [];
+      if (this.vectorIndexThreshold !== Infinity && !(await oneBitVectorsWork(this.requireClient()))) {
+        notes.push(
+          'this database does not compute one-bit vectors (vector1bit), so no source gets an approximate vector ' +
+            'index and every search reads every vector in scope',
+        );
+      }
+      for (const [sourceId, reason] of this.vectorIndexRefused) {
+        notes.push(`the approximate vector index of source '${sourceId}' was not made: ${reason}`);
+      }
+      return { ok: true, message: ['libSQL vectors ready', ...notes].join('; ') };
     } catch (err) {
       const remedy = remedyOf(err);
       return { ok: false, message: `${errorText(err)}${remedy === undefined ? '' : ` ${remedy}`}` };
@@ -1130,6 +1149,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
    */
   private async buildVectorIndex(sourceId: string, fingerprint: string): Promise<void> {
     const client = this.requireClient();
+    // Each complete build says anew whether the database refused the index.
+    this.vectorIndexRefused.delete(sourceId);
     const planned = await this.queued(client, async () => {
       const { active, building } = await this.generations(sourceId);
       const target =
@@ -1147,7 +1168,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         // completes: the index is a speed-up, never a condition of the build.
         // The probe comes first because a trigger naming an unknown function
         // is created without complaint and then fails every write of a passage.
-        if (!(await oneBitVectorsWork(client))) return undefined;
+        if (!(await oneBitVectorsWork(client))) {
+          this.vectorIndexRefused.set(sourceId, 'this database does not compute one-bit vectors (vector1bit)');
+          return undefined;
+        }
         try {
           await this.transaction(async (tx) => {
             await tx.execute(organizationIndexDdl(table));
@@ -1156,7 +1180,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
             for (const statement of vectorIndexDdl(table, target.dim)) await tx.execute(statement);
             return { commit: true, value: undefined };
           });
-        } catch {
+        } catch (err) {
+          this.vectorIndexRefused.set(sourceId, `the database refused its DDL (${errorText(err)})`);
           return undefined;
         }
         if ((await this.vectorShapeOf(client, table)) !== 'complete') return undefined;
@@ -1183,8 +1208,11 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
           await tx.execute({ sql: copy, args: [cursor, String(upTo)] });
           return { commit: true, value: String(upTo) };
         }),
-      ).catch(() => undefined);
-      if (step === undefined) return;
+      ).catch((err: unknown) => {
+        this.vectorIndexRefused.set(sourceId, `the database refused its copy (${errorText(err)}); the next complete build resumes it`);
+        return null;
+      });
+      if (step === null || step === undefined) return;
       cursor = step;
     }
   }

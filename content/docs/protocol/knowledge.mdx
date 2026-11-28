@@ -749,8 +749,8 @@ large source of one organization, through an approximate index.
   with fewer than 4 × `topK` candidates in scope, or short of `topK` hits,
   runs again as the exact scan, so a narrow scope keeps its recall and a
   search never answers fewer hits than the exact scan. A database that
-  refuses the one-bit vectors or the index's DDL gets no index, and its
-  builds complete. The candidates are ranked before the
+  refuses the one-bit vectors or the index's DDL gets no index, its builds
+  complete, and the adapter's health check names the source and the reason. The candidates are ranked before the
   filter, so the index is never made, or used, over the passages of two
   organizations (passages of none count as one): each search reads the
   organization index and takes the exact scan once a second organization's
