@@ -4742,6 +4742,8 @@ const zhHant = {
     statusExecuted: '已執行',
     statusFailed: '失敗',
     statusRejected: '已拒絕',
+    statusExpired: '已過期',
+    expiredDetail: '沒有在期限內處理，或發起人已失去訪問權限。',
     colTool: '工具',
     colAction: '動作',
     colObject: '物件',

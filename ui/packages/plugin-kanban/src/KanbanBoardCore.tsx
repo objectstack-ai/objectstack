@@ -84,6 +84,12 @@ export interface KanbanBoardCoreProps {
    */
   laneCounts?: KanbanBoardProps['laneCounts'];
   /**
+   * Each swimlane row's whole record count on a windowed board — see
+   * `KanbanBoardProps.swimlaneCounts` (objectstack#37844). A PROP for the
+   * reason `laneCounts` is.
+   */
+  swimlaneCounts?: KanbanBoardProps['swimlaneCounts'];
+  /**
    * Draw the trailing "Uncategorized" lane even when no loaded card lands in
    * it: its records sit past the page (objectstack#37516). A PROP for the
    * reason `laneCounts` is: only `ObjectKanban`, which asks the grouped lane
@@ -144,6 +150,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
   dropBlockedReason,
   onLaneRowsChange,
   laneCounts,
+  swimlaneCounts,
   keepUncolumned,
   quickAdd,
   onQuickAdd,
@@ -184,6 +191,7 @@ export const KanbanBoardCore: React.FC<KanbanBoardCoreProps> = ({
         swimlaneField={schema.swimlaneField}
         countsAreWindowed={schema.countsAreWindowed}
         laneCounts={laneCounts}
+        swimlaneCounts={swimlaneCounts}
       />
     </Suspense>
   );

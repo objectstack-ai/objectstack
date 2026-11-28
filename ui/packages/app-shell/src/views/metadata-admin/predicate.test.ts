@@ -22,7 +22,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest';
-import { objectForm } from '@objectstack/spec/data';
+import { objectForm, fieldForm } from '@objectstack/spec/data';
 import { evaluatePredicate, resetPredicateWarnings } from './predicate';
 
 /**
@@ -843,17 +843,18 @@ describe('`in` with a path on the right is diagnosed, not resolved (objectui#661
   /* 9.7 — the spellings the reused walk cannot see fail to SILENCE, which is the
      pre-existing behaviour, never to a false claim about the author's code */
 
-  it('a parenthesised membership sits at depth > 0 and is not detected — silent, as before', () => {
-    // The evaluator does not support parentheses at all: the whole text is a
-    // path-shaped operand with an unbound root, so #6936 fires and the verdict
-    // is fail-open true. Widening the walk to reach it would mean teaching the
-    // detection about syntax the evaluator itself rejects.
+  it('a parenthesised membership is now detected: the group is stripped first (objectstack#38070)', () => {
+    // Before grouping was read, the whole text was one operand whose root
+    // segment `('admin' in current_user` is not a scope name, so #6936 fired. The
+    // VERDICT is the same either way (true, the §9.3 table pins it); only the
+    // diagnostic moved, from the generic unresolved-root warning to the precise
+    // membership one, which is diagnostic-only by the objectui#6617 ruling.
     expect(
       evaluatePredicate("('admin' in current_user.positions)", userScope({}, { positions: [] })),
     ).toBe(true);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warnings()).toContain(SIG.unresolvedPath6936);
-    expect(warnings()).not.toContain(SIG.inWithoutLiteralSet6617);
+    expect(warnings()).toContain(SIG.inWithoutLiteralSet6617);
+    expect(warnings()).not.toContain(SIG.unresolvedPath6936);
   });
 
   it('a tab-separated `in` is not detected — a miss is silence, not a false claim', () => {
@@ -861,5 +862,99 @@ describe('`in` with a path on the right is diagnosed, not resolved (objectui#661
       true,
     );
     expect(warnings()).not.toContain(SIG.inWithoutLiteralSet6617);
+  });
+});
+
+/* ── 10. parenthesised grouping is read, as CEL reads it (objectstack#38070) ── */
+
+describe('a parenthesised group is evaluated, not read as a path (objectstack#38070)', () => {
+  /* 10.1 — the grammar: whole-text groups, nested groups, negated groups */
+
+  it.each([
+    ["(data.type == 'text')", { type: 'text' }, true],
+    ["(data.type == 'text')", { type: 'number' }, false],
+    ["((data.type == 'text'))", { type: 'text' }, true],
+    ["((data.type == 'text'))", { type: 'number' }, false],
+    ["!(data.type == 'text')", { type: 'text' }, false],
+    ["!(data.type == 'text')", { type: 'number' }, true],
+    ["!(data.a && data.b)", { a: true, b: true }, false],
+    ["!(data.a && data.b)", { a: true, b: false }, true],
+    // Grouping overrides the default `&&`-binds-tighter reading.
+    ["(data.a || data.b) && data.c", { a: true, b: false, c: false }, false],
+    ["data.a || data.b && data.c", { a: true, b: false, c: false }, true],
+    ["(data.a || data.b) && data.c", { a: false, b: true, c: true }, true],
+    ["data.a || (data.b && (data.c || data.d))", { a: false, b: true, c: false, d: true }, true],
+    ["data.a || (data.b && (data.c || data.d))", { a: false, b: true, c: false, d: false }, false],
+    // An `in` set inside a group, and a parenthesis inside a string literal.
+    ["(data.type in ['a','b'])", { type: 'b' }, true],
+    ["(data.type in ['a','b'])", { type: 'z' }, false],
+    ["(data.label == 'a (b')", { label: 'a (b' }, true],
+    ["(data.label == 'a ) b')", { label: 'a ) b' }, true],
+  ])('%s over %j is %s', (expr, data, expected) => {
+    expect(evaluatePredicate(expr as string, scope(data as Record<string, unknown>))).toBe(expected);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  /* 10.2 — what is still unreadable still fails OPEN, with #6936's warning
+     (objectstack#6936 ruling C; ADR-0137 D3: a faulting visibleWhen shows) */
+
+  it.each([
+    "(data.type == 'text'",
+    "(data.type == 'text') == true",
+    'size(data.tags) > 0',
+  ])('%s still fails open and warns', (expr) => {
+    expect(evaluatePredicate(expr, scope({ type: 'number', tags: [] }))).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  /* 10.3 — the two bundled field-form rows that carried the bug */
+
+  type Row = { field?: string; visibleWhen?: string | { source: string }; [k: string]: unknown };
+  const findRow = (node: unknown, field: string): Row | undefined => {
+    if (!node || typeof node !== 'object') return undefined;
+    if (Array.isArray(node)) {
+      for (const n of node) {
+        const hit = findRow(n, field);
+        if (hit) return hit;
+      }
+      return undefined;
+    }
+    const n = node as Row;
+    if (n.field === field && n.visibleWhen) return n;
+    for (const v of Object.values(n)) {
+      const hit = findRow(v, field);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  const predicateOf = (field: string): string => {
+    const row = findRow(fieldForm, field);
+    const pred = row?.visibleWhen;
+    const source = typeof pred === 'string' ? pred : pred?.source;
+    if (!source) throw new Error(`fieldForm ships no visibleWhen row for ${field}`);
+    return source;
+  };
+
+  it('both rows still spell a parenthesised group (non-vacuity guard)', () => {
+    // If a later edit drops the parentheses, the table below stops testing the
+    // grouping branch; this keeps that change from passing silently.
+    expect(predicateOf('percentDisplay')).toContain('(');
+    expect(predicateOf('currencyConfig')).toContain('(');
+  });
+
+  const DRAFTS: Array<[label: string, draft: Record<string, unknown>, percent: boolean, currency: boolean]> = [
+    ['text', { type: 'text' }, false, false],
+    ['percent', { type: 'percent' }, true, false],
+    ['currency', { type: 'currency' }, false, true],
+    ['formula returning percent', { type: 'formula', returnType: 'percent' }, true, false],
+    ['formula returning currency', { type: 'formula', returnType: 'currency' }, false, true],
+    ['formula returning number', { type: 'formula', returnType: 'number' }, false, false],
+    ['an empty draft', {}, false, false],
+  ];
+
+  it.each(DRAFTS)('on %s, each row is offered only where its type allows', (_label, draft, percent, currency) => {
+    expect(evaluatePredicate(predicateOf('percentDisplay'), scope(draft))).toBe(percent);
+    expect(evaluatePredicate(predicateOf('currencyConfig'), scope(draft))).toBe(currency);
+    expect(warn).not.toHaveBeenCalled();
   });
 });

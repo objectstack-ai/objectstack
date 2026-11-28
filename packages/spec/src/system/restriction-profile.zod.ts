@@ -13,7 +13,10 @@ import { strictObject } from '../shared/strict-object';
  * (`automation/approval.zod.ts`): the ADR-0019 approval node and its ADR-0044
  * revise window, both registered by `plugin-approvals`. Not engine built-ins,
  * so not {@link FlowNodeAction} ids; whether an environment runs them depends
- * on whether it installs that plugin, which is exactly what a profile states.
+ * on whether it installs that plugin. A profile that states plugin composition
+ * lists them only when the environment runs that plugin; the open profile a
+ * self-hosted runtime serves lists them on every kernel and states no plugin
+ * composition (see the `allowedFlowNodeTypes` reader rules).
  */
 const SPEC_DECLARED_PLUGIN_NODE_TYPES = [APPROVAL_NODE_TYPE, APPROVAL_REVISE_NODE_TYPE] as const;
 
@@ -76,6 +79,11 @@ export type RestrictionProfileNodeType = z.input<typeof RestrictionProfileNodeTy
  * - **The node vocabulary is the spec's own.** `allowedFlowNodeTypes` is an
  *   array of {@link RestrictionProfileNodeType}, derived — never hand-copied —
  *   from the spec's own node type declarations: see there.
+ * - **Not a plugin inventory on a self-hosted runtime.** The open profile a
+ *   self-hosted runtime serves (`GET {basePath}/discovery/restriction-profile`,
+ *   `@objectstack/rest`) is a constant: it restricts nothing and lists the
+ *   whole node vocabulary, the approval pair included, on every kernel. It
+ *   does not say which plugins that kernel runs.
  * - **Code is two dimensions.** `allowCode` governs code that runs in the
  *   process (a handler-form hook or job, named `functions`, code plugins, the
  *   `script` flow node); `allowSandboxedJs` governs the sandboxed JavaScript
@@ -213,8 +221,13 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
      *   `allowCode`: under `allowCode: false` it is refused by `allowCode`
      *   alone, and under `allowCode: true` by this list.
      * - `approval` / `approval_revise` are in this vocabulary, so this list
-     *   judges them: an environment that runs the approvals plugin lists
-     *   them, and one that does not leaves them out.
+     *   judges them, and by this list alone. A profile that states plugin
+     *   composition lists them only when the environment runs the approvals
+     *   plugin. The open profile a self-hosted runtime serves lists the whole
+     *   vocabulary and states no plugin composition, so there a listed pair
+     *   does not mean the approvals plugin is installed: a reader that allows
+     *   an approval node by that list has not checked that the kernel has an
+     *   executor for it.
      * - A node type outside the profile's vocabulary cannot be named by this
      *   list (a code plugin the spec declares no contract for registered it),
      *   so `allowCode` governs it: refused under `allowCode: false`, allowed
@@ -224,7 +237,8 @@ export const RestrictionProfileSchema = lazySchema(() => strictObject(
       .array(RestrictionProfileNodeType)
       .describe(
         'Flow node types a flow may use (FlowNodeAction ids plus the spec-declared plugin node types approval and '
-        + 'approval_revise); a type of that vocabulary not listed is forbidden',
+        + 'approval_revise); a type of that vocabulary not listed is forbidden. The open profile a self-hosted '
+        + 'runtime serves lists the whole vocabulary and does not state which plugins the runtime runs',
       ),
 
     /**

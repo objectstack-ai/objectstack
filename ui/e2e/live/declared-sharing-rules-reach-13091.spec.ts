@@ -34,8 +34,16 @@ test('at 1440 px, Clone and the Active switch are inside the viewport and the ta
   // The table's own scroll box. objectstack#36897 — the list is drawn by
   // ObjectGrid, whose table box marks itself (`data-table-scroll-box`); the
   // table's parent is no longer the element that scrolls.
+  //
+  // `goto` resolves at the document's load event, before the shell has drawn
+  // the list: on a contended runner (the nightly shard runs this beside the
+  // showcase smoke, a second backend and a Console build) the table arrived
+  // 8.4 s after that event, with no request failing meanwhile, so the 5 s
+  // default read a slow first render as "no table". The first wait after the
+  // cold navigation takes the suite's cold-load budget (30 s, as the record
+  // specs' first heading); every measurement below is unchanged.
   const scroller = page.locator('[data-table-scroll-box]').first();
-  await expect(scroller).toBeVisible();
+  await expect(scroller).toBeVisible({ timeout: 30_000 });
   const clone = page.locator('[data-testid^="catalog-clone-"]').first();
   const active = page.locator('[data-testid^="catalog-active-"]').first();
   await expect(clone).toBeVisible();

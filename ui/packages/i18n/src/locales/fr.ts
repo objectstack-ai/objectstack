@@ -4578,6 +4578,8 @@ const fr = {
     statusExecuted: "Exécutée",
     statusFailed: "Échouée",
     statusRejected: "Rejetée",
+    statusExpired: "Expirée",
+    expiredDetail: "Pas de réponse à temps, ou la personne qui l'a demandée n'a plus accès.",
     colTool: "Outil",
     colAction: "Action",
     colObject: "Objet",
