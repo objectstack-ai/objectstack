@@ -418,7 +418,17 @@ the run that opened the request still write the lines. Children joined by a plai
 **Deleting the record while it is pending** is not refused: the delete lands and
 its pending request is cancelled (`status: 'cancelled'`, with `cancel_reason` on
 the row), and the request's timeline says so in a system note, in the reader's
-language. The delete removes the record's `master_detail` lines with it. In the
+language. The flow run that was waiting on that request is cancelled for the same
+reason, so neither the `approve` nor the `reject` branch runs: when the approval
+sits inside `subflow` steps on the same record, every run up that chain is
+cancelled too, and when the run is one item of a batch (`map`), the batch goes on
+to its next item and records the deleted one as cancelled. Runs left paused by
+deletes made before this release are not cleaned up automatically: find them by
+the cancelled request whose `cancel_reason` is `record_deleted`, which names its
+run in `flow_run_id`, and cancel that run by hand if it is still `paused`
+(requests voided by a delete after this release carry the same reason, and
+their runs already show `cancelled`). The delete removes the record's
+`master_detail` lines with it. In the
 cases below the server refuses the whole delete with `409 RECORD_LOCKED` instead, and
 the record, its lines and its pending request all stay:
 

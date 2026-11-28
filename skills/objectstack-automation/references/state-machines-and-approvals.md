@@ -238,7 +238,7 @@ environment-wide (`ambiguous-in-environment`).
 ### Dynamic approvers (`type: 'expression'`)
 
 An `expression` approver computes WHO approves at the moment the node is
-entered. Its CEL source sees exactly **three roots** — nothing else:
+entered. Its CEL source sees exactly **three roots**:
 
 | Root | Meaning |
 |:-----|:--------|
@@ -252,7 +252,7 @@ say which time you mean, `current.x` or `trigger.x`.
 Result contract: a user-id string, a CSV string, or an array of ids. An **empty**
 result (present-but-empty field/variable) triggers `onEmptyApprovers`. A
 **missing** key (`vars.never_written`) is a loud error, never a silent empty
-slate — guard genuinely-optional inputs explicitly, e.g.
+slate — guard optional inputs, e.g.
 `has(vars.picked) ? vars.picked : []`.
 
 ```typescript
@@ -370,19 +370,19 @@ These are wired on the **graph**, not in node config:
    the record and its `master_detail` child rows only: a `lookup` child shown
    in the record's details (`relatedList: 'primary'`) stays editable (warning
    `approval-detail-editable-while-pending`). Deleting the pending record
-   still lands, cancelling the request and cascading its `master_detail` rows;
-   it is refused (`409 RECORD_LOCKED`) where the cascade lacks one transaction
-   or the child object declares a second cascading relation.
+   still lands, cancelling the request and its parked run — neither `approve`
+   nor `reject` runs, so a delete-time action goes in the record's delete
+   hook — and cascading its `master_detail` rows; it is refused
+   (`409 RECORD_LOCKED`) where the cascade lacks one transaction or the child
+   declares a second cascading relation.
 3. **Notify the submitter from downstream nodes** wired to the `approve` /
    `reject` edges. Opening already tells each resolved approver
-   (`approval.requested`); ⛔ no `notify` node for the opening: it tells
-   them twice.
+   (`approval.requested`): ⛔ a `notify` node there tells them twice.
 4. **A flow reacting to the mirrored status runs as the person who acted.**
    The `approvalStatusField` write is elevated but attributed — submit carries
-   the submitter, approve / reject / recall / send-back the person who decided —
-   so a `record_change` flow on that field stays `runAs: 'user'` and runs
-   with the decider's own grants. Only the
-   two machine-driven transitions carry no user — an SLA `escalation`
-   auto-decision and the release of a record whose run died — and a
-   `runAs: 'user'` flow fired by one has its data steps refused: a flow that
-   must react to those too declares `runAs: 'system'`.
+   the submitter, approve / reject / recall / send-back the decider — so a
+   `record_change` flow on that field stays `runAs: 'user'`, with that person's
+   grants. Only two machine-driven transitions carry no user — an SLA
+   `escalation` auto-decision and the release of a record whose run died —
+   and refuse a `runAs: 'user'` flow's data steps: to react to those too,
+   declare `runAs: 'system'`.
