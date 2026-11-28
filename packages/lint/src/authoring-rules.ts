@@ -104,6 +104,7 @@ import { validateManagedApiMethods } from './validate-managed-api-methods.js';
 import { validateTransferCascades } from './validate-transfer-cascades.js';
 import { validateViewContainers } from './validate-view-containers.js';
 import { validateWidgetBindings } from './validate-widget-bindings.js';
+import { validateAppNavigationPresent, validateObjectShellReach } from './validate-app-shell-reach.js';
 import { validateDatasetMeasureAggregates } from './validate-dataset-measure-aggregates.js';
 import { validateDatasetMemberVocabulary } from './validate-dataset-member-vocabulary.js';
 import { validateDashboardActionRefs } from './validate-dashboard-action-refs.js';
@@ -140,6 +141,7 @@ import { validateFormConsumers, validateFormPublicAddresses } from './validate-f
 import { validateThankYouRecordFields } from './validate-thank-you-record-fields.js';
 import { validateAssignmentRules } from './validate-assignment-rules.js';
 import { validateAiContext } from './validate-ai-context.js';
+import { validateKnowledgeSource } from './validate-knowledge-source.js';
 import { validateSeedStateMachine } from './validate-seed-state-machine.js';
 import { validateVisibilityPredicates } from './validate-visibility-predicates.js';
 import { validatePredicatePathRefs } from './validate-predicate-path-refs.js';
@@ -185,7 +187,9 @@ import {
   lintLegacyOrganizationComposites,
   lintInlineEditBulk,
   lintFieldReferenceShapes,
+  lintOptionColors,
   summaryRollupFindings,
+  type OptionColorPicklist,
 } from './data-model-rules.js';
 import { objectExtensionsByTarget, objectsAsServed } from './object-graph.js';
 
@@ -2084,6 +2088,46 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     runtimeTypes: ['ai_context'],
     run: (stack, ctx) => validateAiContext(stack, ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
   },
+  // [ADR-0161 K4, row 4] Knowledge sources whose object or a listed field the
+  // stack does not have, whose object the API does not serve for `search`, or
+  // that index a system object which does not opt into AI reads (the gates of
+  // the knowledge service's admission that need no principal), and a listed
+  // credential-class or `internal` field, which the index never carries.
+  //
+  // GATING, and on the runtime publish door for `knowledge_source`: ADR-0161
+  // K4 says an item "is refused when the object or a named field does not
+  // exist" and that "a packaged item meets the gates that need no principal in
+  // `os validate` and at publish". That is the departure from the
+  // `validateAiContext` row above, which only advises at publish because a
+  // context pack still reads what resolves; a source that fails one of these
+  // has nothing to index (a missing object), indexes no text for a member (a
+  // missing field), or is never searched for a caller the service judges (a
+  // gated object). The rule reads `knowledgeSources`, `objects` (and the
+  // stack's own extensions), `manifest.dependencies` and no other collection;
+  // `objects` is the context every per-write snapshot carries, and the
+  // written source is the sole member of its own collection. Under a stated
+  // package scope that `objects` is the write's closure, so the scope is
+  // passed through and an object outside it is worded for the closure with
+  // `closureDependencyRemedy`. With no scope `objects` is the whole
+  // collection the host serves (`wholeCollection`), so an unresolved object
+  // is an error there too; only the CLI, where a manifest dependency the
+  // artifact does not carry may define it, hedges it as a warning (the
+  // `flow-trigger-unknown-object` split). An `error` refuses the publish
+  // (422), the `warning`s ride the 2xx `advisories`.
+  {
+    name: 'validateKnowledgeSource',
+    tier: 'gating',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-knowledge-source.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['knowledge_source'],
+    run: (stack, ctx) =>
+      validateKnowledgeSource(stack, {
+        ...(ctx.packageScope ? { packageScope: ctx.packageScope } : {}),
+        wholeCollection: ctx.runtimeWriteType !== undefined && !ctx.packageScope,
+      }),
+  },
   // [#34613] `validateSeedReplaySafety` (framework#3434, the `insert`-mode
   // replay warning) is retired: `SeedMode` itself refuses `insert` and
   // `replace` at parse (ruling 6942780880), so no stack this rule could flag
@@ -2740,6 +2784,62 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
           hint: f.fix ?? '',
         }),
       );
+    },
+  },
+  // A select option `color` the option badge renders neutral
+  // (`field/option-color-renders-neutral`): since the ruling on
+  // objectstack#36882 (option A) an option is coloured only by its declared
+  // colour, and a declared colour outside the nine palette families and the
+  // `#rgb` / `#rrggbb` hex paints the same neutral grey as no colour at all.
+  // ADVISORY: `SelectOption.color` stays a free string (charts and gantt hand
+  // it to the browser as a CSS colour), so nothing is refused.
+  //
+  // On the runtime publish gate's `object` and `object_extension` writes,
+  // where the written entry's own options are the whole input, so the
+  // differential charges a write only with a colour it declares. This is an
+  // advisory-tier rule at the object door, and that is this rule's own card's
+  // crossing, not one of the fenced rules': the fence
+  // (`RUNTIME_OBJECT_ADVISORY_VOLUME`) prices advisory VOLUME, and this rule
+  // fires on 0 of the platform's and the examples' declared option colours
+  // (every one is a family name or a 6-digit hex), so a save hears it only
+  // when its author wrote a colour that will not paint. `picklist` is not a
+  // runtime-creatable type, so picklists are judged on the CLI alone.
+  {
+    name: 'lintOptionColors',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/data-model-rules.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['object', 'object_extension'],
+    run: (stack) => {
+      const extensions = [...objectExtensionsByTarget(stack).entries()].flatMap(([target, list]) =>
+        list.map((ext) => ({ target, path: ext.path, fields: ext.fields })),
+      );
+      const picklists: OptionColorPicklist[] = [];
+      const collect = (key: 'picklists' | 'picklistExtensions', nameKey: 'name' | 'extend', noun: string) => {
+        const entries = (stack as AnyRec)[key];
+        if (!Array.isArray(entries)) return;
+        entries.forEach((entry: AnyRec, i: number) => {
+          const name = typeof entry?.[nameKey] === 'string' ? (entry[nameKey] as string) : '';
+          if (!name) return;
+          picklists.push({ name, path: `${key}[${i}]`, where: `${noun} "${name}"`, options: entry.options });
+        });
+      };
+      collect('picklists', 'name', 'picklist');
+      collect('picklistExtensions', 'extend', 'picklist extension of');
+      return lintOptionColors(
+        Array.isArray(stack.objects) ? (stack.objects as unknown[]) : [],
+        extensions,
+        picklists,
+      ).map((f) => ({
+        severity: f.severity === 'suggestion' ? ('info' as const) : f.severity,
+        rule: f.rule,
+        where: f.where,
+        path: f.path,
+        message: f.message,
+        hint: f.fix ?? '',
+      }));
     },
   },
   // Two visible fields of one object served under one label
@@ -3437,6 +3537,36 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // `base_namespace_too_long`), so the ensure door will refuse to create its
   // `.custom` pair and its installers can never customize it. Advisory: the
   // package builds, installs and runs, and only its customization is refused.
+  // [#35143] An app with no navigation entry (`app-navigation-empty`): the
+  // console's app root renders the "no access" empty state to every member.
+  // ADVISORY: Studio may save a new app before its first entry, and another
+  // package may contribute the entries (ADR-0029 D7). The written app is the
+  // whole question, so it runs on the runtime `app` door as on the CLI.
+  {
+    name: 'validateAppNavigationPresent',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-app-shell-reach.ts',
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['app'],
+    run: (stack) => validateAppNavigationPresent(stack),
+  },
+  // [#35143] An object no app's navigation opens
+  // (`object-unreachable-from-navigation`), and an object navigation opens that
+  // declares no list view (`object-without-view`). ADVISORY: both work, and
+  // show the user less than was built. CLI only: the verdict reads every app,
+  // view and object of the stack, which no per-write snapshot carries.
+  {
+    name: 'validateObjectShellReach',
+    tier: 'advisory',
+    input: 'parsed',
+    commands: ALL,
+    source: 'packages/lint/src/validate-app-shell-reach.ts',
+    surfaces: CLI_ONLY,
+    surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
+    run: (stack) => validateObjectShellReach(stack),
+  },
   // `normalized` because it reads one string off each delivered manifest and
   // needs no parsed stack, so `os lint` judges it too.
   {

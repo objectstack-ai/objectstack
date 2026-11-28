@@ -11,7 +11,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 19.x and @objectstack/formula 19.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "19.0.0-next.1"
+  version: "19.0.0-next.2"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---
@@ -136,7 +136,7 @@ does not satisfy that gate. `has()` over an **undeclared** key stays legal: that
 is its use there — telling "absent from this PATCH" apart from "explicitly null".
 
 **The exception: action `visible` / `disabled` are client-side and sparse.**
-They bind the row the client already holds, and that row — a `list_item` row
+They bind the row the client already holds, and that row — a list row
 above all — lacks a key when the column is outside the view's projection, when
 field-level security refuses it, or when it was never written (the mongo and
 memory drivers).

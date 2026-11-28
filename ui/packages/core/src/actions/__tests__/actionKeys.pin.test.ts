@@ -203,7 +203,7 @@ describe('unknown-key warning', () => {
   afterEach(() => warn.mockRestore());
 
   it('says nothing about an action built only from recognized keys', () => {
-    warnOnUnknownActionKeys({ name: 'save', type: 'api', target: '/api/v1/save', locations: ['record_header'] });
+    warnOnUnknownActionKeys({ name: 'save', type: 'api', target: '/api/v1/save', locations: ['record_page'] });
     expect(warn).not.toHaveBeenCalled();
   });
 

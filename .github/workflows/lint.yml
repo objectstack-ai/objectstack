@@ -3395,6 +3395,7 @@ jobs:
           run_self_test node scripts/ci/scheduled-full-run-card.mjs --self-test
           run_self_test node scripts/ci/nightly-tiers-card.mjs --self-test
           run_self_test node scripts/ci/docker-rolling-tags.mjs --self-test
+          run_self_test node scripts/ci/publish-starter-marketplace.mjs --self-test
           run_self_test bash scripts/ci/board-snapshot-r2-upload.selftest.sh
           # Not a moved body: the weekly queue-duration reading and its card
           # writer, whose write fires only on an OVER week on main (#35322).

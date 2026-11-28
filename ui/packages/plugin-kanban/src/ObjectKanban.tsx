@@ -1855,8 +1855,10 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
    * keys name every lane of the query, so a lane whose records all sit past
    * the page is drawn too, after the page's lanes, titled by its referenced
    * record (one read of those records on the lane field's target object) and
-   * by its key until then. The empty group is not one of them: the trailing
-   * "Uncategorized" lane is drawn by the cards it holds.
+   * by its key until then. The empty group is not one of them: it is the
+   * trailing "Uncategorized" lane, drawn by the cards it holds and, over the
+   * same lane fields, by the read's count of it when none of those cards is
+   * on the page (`keepUncolumned` below, objectstack#37516).
    *
    * Only over a lane field that names the object it references
    * (`laneTargetObject`): a reference's group key is its foreign key, the
@@ -1873,6 +1875,17 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
     const drawn = new Set((effectiveColumns as Array<{ id: unknown }>).map((col) => String(col.id)));
     return keys.filter((key) => !drawn.has(key));
   }, [hostLaneRead, flatLanes, lanesFromData, laneReadHeld, effectiveColumns, laneTargetObject]);
+  /**
+   * objectstack#37516 — the trailing "Uncategorized" lane past the page. The
+   * lane read counts the records whose lane value is empty under
+   * `KANBAN_UNCOLUMNED_ID`; when every one of them sits past the page no card
+   * draws the lane, so the board draws it from that count, under the gate the
+   * lanes past the page take. A partial or refused read answers no counts
+   * (`hostLaneCounts` null), and no lane is drawn from it.
+   */
+  const keepUncolumned =
+    hostLaneRead && flatLanes && lanesFromData && !!laneTargetObject
+    && (hostLaneCounts?.[KANBAN_UNCOLUMNED_ID] ?? 0) > 0;
   const extraLaneIdsKey = JSON.stringify(extraLaneIds);
   const [extraLaneTitles, setExtraLaneTitles] = useState<{ key: string; titles: Record<string, string> } | null>(null);
   useEffect(() => {
@@ -2598,6 +2611,9 @@ export const ObjectKanban: React.FC<ObjectKanbanComponentProps> = ({
         // objectstack#37327 — each lane's whole count on the board handed one
         // page (see `hostLaneCounts`). A PROP for the reason `objectFields` is.
         laneCounts={hostLaneCounts}
+        // objectstack#37516 — the "Uncategorized" lane whose records all sit
+        // past the page (see `keepUncolumned`).
+        keepUncolumned={keepUncolumned}
         schema={{
           ...effectiveSchema,
           // `5591f03bd` — the lane headers count rows that came back, so when

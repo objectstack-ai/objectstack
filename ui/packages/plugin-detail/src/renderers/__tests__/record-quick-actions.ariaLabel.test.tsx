@@ -56,7 +56,7 @@ import { RecordQuickActionsRenderer } from '../record-quick-actions';
  * all — with no visible action the bar short-circuits to its dashed placeholder,
  * which carries no toolbar role.
  */
-const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_header'] };
+const ACT = { name: 'act', label: 'Act', type: 'script', locations: ['record_page'] };
 
 function mount(aria?: Record<string, unknown>) {
   return render(

@@ -28,8 +28,8 @@ import { describe, it, expect } from 'vitest';
 import { actionRendersAt, resolveDeclaredActionIds } from '../ui-action';
 import * as barrel from '../index';
 
-const CONVERT = { name: 'convert', label: 'Convert Lead', locations: ['record_header'] };
-const QUALIFY = { name: 'qualify', label: 'Qualify', locations: ['record_header'] };
+const CONVERT = { name: 'convert', label: 'Convert Lead', locations: ['record_page'] };
+const QUALIFY = { name: 'qualify', label: 'Qualify', locations: ['record_page'] };
 /** A second registration under an already-taken name — registration order must win. */
 const CONVERT_AGAIN = { name: 'convert', label: 'Convert (duplicate)' };
 /** Registrations the resolver must skip without choking: no name, or not a string. */

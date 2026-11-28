@@ -634,28 +634,113 @@ describe('[#5493] every non-`admit` outcome is byte-for-byte the refusal of a st
   });
 });
 
-describe('[#5493 / #6736] the BULK path is untouched — a verdict is a by-id answer', () => {
-  it('a multi update still composes the write FILTER, unwidened, and never reaches the probe', async () => {
-    const stack = makeStack();
-    // No inferable id anywhere (`data`, `options.id`, `options.where.id`) ⇒ the
-    // bulk branch. Ruling Q2 = A1 is verdict-shaped and by-id ONLY; composing a
-    // filter from a per-row verdict is a different problem, tracked as #6736.
-    const opCtx: any = {
-      object: 'crm_campaign',
-      operation: 'update',
-      ast: { where: { stage: 'prospecting' } },
-      data: { description: 'bulk' },
-      options: { multi: true, where: { stage: 'prospecting' } },
-      context: { ...WIDENED_CTX },
-    };
+describe('[#37535] the BULK path ORs the authored policies\' own scope into its write scope, verb for verb', () => {
+  // Ruling record 7190344023 (2a), replacing the #6736 deferral: a predicate
+  // write reaches the rows an APP-AUTHORED update / delete policy admits, as the
+  // by-id deferral above does. The middleware asks the security service for the
+  // filter-shaped twin of the verdict (`getAuthoredRowWriteFilter`) and composes
+  // sharing scope OR authored scope; it asks no per-row verdict on this path.
+  const AUTHORED_SCOPE = { stage: 'prospecting' };
+  const SHARING_UPDATE_SCOPE = { $or: [
+    { owner_id: U_WIDENED },
+    { id: { $in: SharedRecordIds.write('crm_campaign', U_WIDENED, WRITE_ACCESS_LEVELS) } },
+  ] };
+  const bulkCtx = (operation: 'update' | 'delete', context: object = WIDENED_CTX): any => ({
+    object: 'crm_campaign',
+    operation,
+    // No inferable id anywhere (`data`, `options.id`, `options.where.id`) ⇒ the bulk branch.
+    ast: { where: { region: 'emea' } },
+    ...(operation === 'update' ? { data: { description: 'bulk' } } : {}),
+    options: { multi: true, where: { region: 'emea' } },
+    context: { ...context },
+  });
+  /** The scope stub: the policies of {@link AUTHORED_POLICIES}, as one filter per (object, operation). */
+  const servingScope = (asked: unknown[]) => ({
+    async getAuthoredRowWriteFilter(object: string, operation: string, context: any) {
+      asked.push({ object, operation, userId: context?.userId });
+      if (!context?.userId || context?.onBehalfOf?.userId) return undefined;
+      const applicable = (AUTHORED_POLICIES[context.userId] ?? []).filter(
+        (p) => p.object === object && p.operation === operation,
+      );
+      return applicable.length > 0 ? AUTHORED_SCOPE : undefined;
+    },
+  });
+
+  it('a multi update is scoped to sharing scope OR the authored update scope, and asks no verdict', async () => {
+    const asked: unknown[] = [];
+    const stack = makeStack({ probe: servingScope(asked) });
+    const opCtx = bulkCtx('update');
     let nextCalled = false;
     await stack.mw(opCtx, async () => { nextCalled = true; });
     expect(nextCalled, 'the bulk branch scopes rather than refuses').toBe(true);
-    expect(opCtx.ast.where, 'still scoped by OWNERSHIP and edit-shares, unwidened by any authored policy')
-      .toEqual({ $and: [{ stage: 'prospecting' }, { $or: [
-        { owner_id: U_WIDENED },
-        { id: { $in: SharedRecordIds.write('crm_campaign', U_WIDENED, WRITE_ACCESS_LEVELS) } },
-      ] }] });
-    expect(stack.security!.calls, 'the bulk path asks no verdict').toEqual([]);
+    expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, { $or: [SHARING_UPDATE_SCOPE, AUTHORED_SCOPE] }] });
+    expect(asked).toEqual([{ object: 'crm_campaign', operation: 'update', userId: U_WIDENED }]);
+    expect(stack.security!.calls, 'the bulk path asks no per-row verdict').toEqual([]);
+  });
+
+  it('verb for verb: a multi delete asks the delete scope, and an update-only widener widens nothing there', async () => {
+    const asked: unknown[] = [];
+    const stack = makeStack({ probe: servingScope(asked) });
+    const opCtx = bulkCtx('delete');
+    await stack.mw(opCtx, async () => {});
+    // U_WIDENED's only `crm_campaign` widener is an UPDATE policy (ADR-0111 D3:
+    // the delete scope is the owner set alone).
+    expect(asked).toEqual([{ object: 'crm_campaign', operation: 'delete', userId: U_WIDENED }]);
+    expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, { owner_id: U_WIDENED }] });
+  });
+
+  it('CONTROL: a caller who holds no authored policy keeps the sharing scope, byte for byte', async () => {
+    const asked: unknown[] = [];
+    const stack = makeStack({ probe: servingScope(asked) });
+    const opCtx = bulkCtx('update', ctxFor(U_REP));
+    await stack.mw(opCtx, async () => {});
+    expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, { $or: [
+      { owner_id: U_REP },
+      { id: { $in: SharedRecordIds.write('crm_campaign', U_REP, WRITE_ACCESS_LEVELS) } },
+    ] }] });
+  });
+
+  it('CONTROL: a delegated (on-behalf-of) write is not widened and the scope is not asked', async () => {
+    const asked: unknown[] = [];
+    const stack = makeStack({ probe: servingScope(asked) });
+    const opCtx = bulkCtx('update', { ...WIDENED_CTX, onBehalfOf: { userId: U_REP } });
+    await stack.mw(opCtx, async () => {});
+    expect(asked, 'the by-id probe abstains on a delegated write, and so does this').toEqual([]);
+    expect(JSON.stringify(opCtx.ast.where)).not.toContain('prospecting');
+  });
+
+  it('an absent member keeps today\'s scope: the stub without it composes the write filter unwidened', async () => {
+    const stack = makeStack();
+    const opCtx = bulkCtx('update');
+    await stack.mw(opCtx, async () => {});
+    expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, SHARING_UPDATE_SCOPE] });
+    expect(stack.security!.calls).toEqual([]);
+  });
+
+  it('a member that throws, or answers no filter object, keeps today\'s scope (the throw is logged, the write goes on)', async () => {
+    const throwing = makeStack({ probe: { getAuthoredRowWriteFilter: async () => { throw new Error('rls compile failed'); } } });
+    const opCtx = bulkCtx('update');
+    let nextCalled = false;
+    await throwing.mw(opCtx, async () => { nextCalled = true; });
+    expect(nextCalled).toBe(true);
+    expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, SHARING_UPDATE_SCOPE] });
+    expect(throwing.logger.warn).toHaveBeenCalledTimes(1);
+
+    for (const answer of [null, 'stage == open', ['stage', '=', 'open'], true]) {
+      const odd = makeStack({ probe: { getAuthoredRowWriteFilter: async () => answer as never } });
+      const ctx = bulkCtx('update');
+      await odd.mw(ctx, async () => {});
+      expect(ctx.ast.where, `answer ${JSON.stringify(answer)}`).toEqual({ $and: [{ region: 'emea' }, SHARING_UPDATE_SCOPE] });
+    }
+  });
+
+  it('no security service at all keeps today\'s scope', async () => {
+    for (const opts of [{ noSecurityService: true }, { lookupThrows: true }]) {
+      const stack = makeStack(opts);
+      const opCtx = bulkCtx('update');
+      await stack.mw(opCtx, async () => {});
+      expect(opCtx.ast.where).toEqual({ $and: [{ region: 'emea' }, SHARING_UPDATE_SCOPE] });
+    }
   });
 });
+

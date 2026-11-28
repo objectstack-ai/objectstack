@@ -166,8 +166,12 @@ A source binds to an **adapter id** (e.g. `'pgvector'`, `'turso'`,
 `'memory'`), resolved at run time to the plugin that registered itself under
 that name (ADR-0161 K4):
 
-- **Named** — that adapter. One that is not mounted is refused at index and
-  search, `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
+- **Named** — that adapter. One that is not mounted is refused at its save
+  (the `/meta` and MCP save doors), `VALIDATION_ERROR` (400), naming the
+  source, the adapter and the adapters that are. A package install, a source
+  registered in code and `os validate` are not judged there; such a source is
+  named at boot at `error` and refused at index and search,
+  `SERVICE_UNAVAILABLE` (503), naming the adapters that are.
 - **Omitted** — the deployment's adapter: the store the runtime mounted beside
   the service (`pgvector` on PostgreSQL, `turso` otherwise; the runtime passes
   `KnowledgeServicePlugin` its `deploymentAdapter` option when it mounts both),
@@ -198,11 +202,15 @@ starts and follows the type from then on, with no restart:
   the adapter's `dropSource` (§3.4). Over an adapter without that member the
   index is kept, and the service says so once in its log, naming the source.
 
-A deployment that holds a `knowledge_source` item but mounts no knowledge
-service says so once at boot, naming the items: nothing loads, indexes or
-searches them until `KnowledgeServicePlugin` and an adapter are mounted. Such
-an item is one the stack does not ship — saved at run time or installed in a
-package after the boot — since a shipped one mounts the service.
+A source is saved only on a deployment that mounts the knowledge service
+(see [Who may author one](#who-may-author-one)). A deployment that holds a
+`knowledge_source` item but mounts no knowledge service says so once at boot,
+naming the items: nothing loads, indexes or searches them until the service is
+mounted, by `requires: ['knowledge']` in the stack and a restart (or, on a host
+that composes its own kernel, `KnowledgeServicePlugin` and a store). Such an
+item is one the stack does not ship, since a shipped one mounts the service:
+one a package install, a seed or a migration wrote after the boot, or one
+saved before saves were refused there.
 
 #### Who may author one
 
@@ -231,10 +239,22 @@ and the MCP draft door:
    as the author: an object of a disabled package, an object the API does not
    serve for `search`, a system object without `enable.aiReadable`, or a field
    the author may not query refuses the save `403`, naming the object or the
-   field. The fields judged are the ones the source serves (`content`,
+   field; an `adapter` naming no mounted store refuses it `400`, naming the
+   source, the adapter and the mounted ones. The fields judged are the ones the source serves (`content`,
    `metadataFields`, the title field) and the ones its `where` reads. A
    verdict that cannot be reached, or a knowledge service that is registered
    and cannot be resolved, refuses `503`; nothing is written.
+
+**A deployment with no knowledge service saves no source.** Nothing there
+would load, index or search it, and the service is mounted when the server
+starts, never while it runs; a source saved at run time is not one the stack
+ships, so it does not mount the service either. So on such a deployment every
+door above refuses an author's save `503 SERVICE_UNAVAILABLE`, and a duplicate
+that would copy a source is refused the same way; nothing is written. The
+refusal names the fix: add `requires: ['knowledge']` to the stack, restart,
+then save the source. The engine's own writes (a package install, a seed, a
+migration) are not refused, and a knowledge service a host mounts itself
+answers for its own sources.
 
 #### One name, one source
 
@@ -301,7 +321,15 @@ re-check name fewer than `topK` records (several passages of one record
 count once), every source that answered as many hits as it was
 asked is asked once more, for `topK × 20`. That is the cap: a caller who may
 read fewer than `topK` of the rows within the cap gets fewer than `topK`
-hits. An
+hits. So before the first round the service reads, as the caller, the ids of
+the source's records they may read (under the source's `where`, ids only, at
+most 501). When there are 500 or fewer, the source is handed them as a
+`record` term of the [record scope](#record-scope) — intersected with the
+caller's own scope, never added to it — and the adapter ranks only those
+rows, so a caller who may read 20 of 1,000 records is answered from their 20
+wherever they rank. More than 500, a scope with a parent term, a read that
+fails, or no readable record in scope, and the source is searched as above.
+Every hit is still re-checked, and the organization filter is unchanged. An
 adapter that answers fewer than it was asked (one that caps `topK`) is not
 asked again. For the system identity every source is asked for `topK`
 once. The answer is at most `topK` hits.
@@ -333,8 +361,9 @@ system-context read per source of only the records about to be answered
 `where` since it was indexed, or whose document hash computed now differs
 from the hit's `docHash`, is not answered, and the next record moves up (at
 most three rounds; a hit still unchecked after them is not answered). Its
-document is repaired in the background, through the event sync's path, once
-until its hash matches again — except in a source with
+document is repaired in the background — a record-sync message with reason
+`freshness` [through the queue](#through-the-queue), or the inline sync
+without one — once until its hash matches again — except in a source with
 `refresh.onRecordChange: false`, whose index an external indexer owns: the
 service writes nothing there, and the hit is only not answered. A hit whose
 adapter stores no hash is checked for membership only. Record granularity
@@ -350,8 +379,36 @@ credential-class or `internal` field, when the value is empty, and when
 the object resolves no display field. A source over an object with no
 registered definition reads a field named `title`. Documents indexed
 before this rule carry the value of a field named `title` until a complete
-reindex writes them again, so the source admission below still asks about a
-declared `title` field as well as the display field.
+reindex writes them again. So a source over an object that declares a
+`title` field the index may carry and the source does not serve (the display
+field is another field, none resolves, or the object's fields cannot be
+enumerated) is searched for a caller other than the system context only once
+its adapter's index status reports the fingerprint and the recipe hash the
+service computes now. The recipe hash names the title rule and is recorded
+only when a complete build completes, and only a build that purges removes
+the documents it did not walk. Until then the search refuses the source
+`KNOWLEDGE_REBUILD_REQUIRED` (409), and the boot's build pass, a source
+reload, the reconcile or `os knowledge rebuild` builds it. Under
+`buildAtBoot: false` (which also turns off the build on reload) nothing but
+the reconcile, where it runs, or `os knowledge rebuild` builds it. No build
+proves such a source, so it stays refused, when its
+`refresh.onRecordChange` is `false` (its builds purge nothing, and the boot
+pass and the reconcile leave it alone) or when its adapter has no
+`listDocuments`, no `completeBuild` or no index status.
+
+The proof covers the index as its last complete build left it. So each hit of
+a proven source is also checked against its record as it reads now, with one
+read per source per search round in the system context. A hit is served only
+when the record still belongs to the source (its `where` included) and the
+document the store holds is the one the current recipe assembles from it (the
+same `docHash`). A document the build's purge left in place, or one written
+after the build under an earlier recipe, is never served. The search repairs
+a stale or missing record's own document in the background, once per document
+until a later search finds it current; a document under a foreign id is
+dropped and not repaired. A check that cannot be made drops the hit: the
+read fails, the hit names no record or carries no hash, the hash cannot be
+computed, or the tenancy posture cannot be read. The read decides only whether
+a hit is served; nothing it reads is added to the hit.
 
 ### 3.3 `IKnowledgeService` (consumed by the ObjectOS AI runtime, REST, Console)
 
@@ -649,7 +706,10 @@ an exact scan.
   `organization_id` column, which every search filters on before ranking.
 - **Where the tables are.** In their own schema, `os_knowledge` (option
   `schema`): `knowledge_generation`, one row per source and generation, and
-  one passage table per vector width, `knowledge_vec_d<width>`. Object
+  one passage table per vector width, `knowledge_vec_d<width>`, indexed on
+  each passage's record so a search narrowed to a caller's few readable
+  records reads only their passages (made with the table, or on the first
+  write after an upgrade for a table made before). Object
   tables live in the connection's own schema, and the platform's drift
   checks read only that one — so no store table can collide with an object
   table or be reported as drift.
@@ -709,7 +769,8 @@ an exact scan.
 libSQL's native vectors (`F32_BLOB`, `vector32`, `vector_distance_cos`): the
 store for local development and for a deployment not on PostgreSQL. It takes
 the service's passages, embeds them with the kernel's `embedder` service (or
-the `embedder` it is given), and answers a search by an exact scan.
+the `embedder` it is given), and answers a search by an exact scan, or, for a
+large source of one organization, through an approximate index.
 
 - **Which database.** The `url` option (`file:`, `:memory:` or a
   `libsql://` Turso URL), else `knowledge.db` under the project's
@@ -725,19 +786,41 @@ the `embedder` it is given), and answers a search by an exact scan.
   way when its fingerprint is the same, and replaces it otherwise, so the
   first builder's writes are then refused), and one passage table per source and generation,
   `knowledge_<source>_g<n>`, its vector column sized for that generation
-  (`<source>` is the source's index key). A key that is not snake_case is
+  (`<source>` is the source's index key) and indexed on `source_record_id`, so
+  a search narrowed to a caller's few readable records reads only their
+  passages; a generation made before carries the index from its next build. A key that is not snake_case is
   refused before any SQL.
 - **Search.** Two legs merged by reciprocal rank fusion (`k` = 60, each leg
-  at most `topK`) before the service's re-check: an exact scan by cosine
-  distance, and a keyword leg in a contentless FTS5 trigram index beside each
+  at most `topK`) before the service's re-check: a vector leg by cosine
+  distance (an exact scan, or the approximate index below), and a keyword leg in a contentless FTS5 trigram index beside each
   passage table (kept in step by triggers), a term of three characters or
   more as a quoted phrase, a shorter one by `LIKE`. The organization filter,
   the [record scope](#record-scope) and the metadata `filter` (JSON equality
-  per key) are one `WHERE`, run in both legs before either ranks. The store creates no DiskANN index: `vector_top_k` ranks
-  before it filters, and with one, 1,000 vectors of 1,536 dimensions grew a
-  file from 8.2 MB to 329 MB and took 21.8 s to index. Without it the same
-  1,000 passages take 8.3 MB and a search about 5 ms; 10,000 take 82 MB and
-  about 50 ms. A larger source belongs on `knowledge-pgvector`.
+  per key) are one `WHERE`, run in both legs. Without the approximate index
+  the vector leg reads every row in scope: 1,000 passages of 1,536 dimensions take 8.3 MB and a search about
+  5 ms; 10,000 take 82 MB and about 50 ms.
+- **Approximate index.** A complete build that completes on a generation of
+  `vectorIndexThreshold` passages or more (default 20,000), all of one
+  organization, makes its approximate index: each passage's vector quantized
+  to one bit a dimension, in a side table kept in step by triggers, copied in
+  2,048 rows to a transaction before the switch, never on a search (200,000
+  passages: 3 s, 54 MB). The vector leg then takes the
+  `topK × vectorIndexOverfetch` passages nearest by that index (default 40 a
+  hit), runs the same `WHERE` over them, ranks those in scope by their stored
+  vector, and feeds the fusion as the exact leg does; a leg the filter leaves
+  with fewer than 8 × `topK` candidates in scope, or short of `topK` hits,
+  runs again as the exact scan, so a narrow scope keeps its recall and a
+  search never answers fewer hits than the exact scan. A database that
+  refuses the one-bit vectors or the index's DDL gets no index, its builds
+  complete, and the adapter's health check names the source and the reason. The candidates are ranked before the
+  filter, so the index is never made, or used, over the passages of two
+  organizations (passages of none count as one): each search reads the
+  organization index and takes the exact scan once a second organization's
+  passage is written. At 200,000 passages of 1,536
+  dimensions a search whose keyword leg matched nothing took 81 ms at p95
+  (the exact scan 1,054 ms), with a recall@10 against the exact scan of 0.998. libSQL's own DiskANN index (`vector_top_k`)
+  is not used: on the same 200,000 passages it took 24 minutes and 2.2 GB to
+  build and answered a recall@10 of 0.39.
 - **Rebuilds.** A changed fingerprint is refused (§3.6). A complete reindex
   under a new fingerprint builds a new generation table beside the active
   one, which keeps answering its own fingerprint, and switches at the end of
@@ -904,10 +987,9 @@ searched for a non-system caller, the service asks, once per object per search:
 - **System objects** — a `sys_*` object is searched only when it declares
   `enable.aiReadable: true` (the AI read tools' posture).
 - **Field-level rules** — every field the source serves (each `content`
-  member; each `metadataFields`
-  member; the display field the title is read from, and a declared `title`
-  field), less the credential-class and `internal: true` fields an
-  index never carries, must be one the caller may **query**, per the `security`
+  member; each `metadataFields` member; the display field the title is read
+  from), less the credential-class and `internal: true` fields an index never
+  carries, must be one the caller may **query**, per the `security`
   service's `getQueryableFields`. Without that answer: its `getReadableFields`
   less every field declaring a `maskingRule`; with no `security` service at
   all: every field except those declaring a `maskingRule`. Queryable, not
@@ -971,21 +1053,88 @@ when the source has no `where`).
   builds the document from the event's `after`, and a source with `where` is
   not synced, which the service logs once per source as a warning.
 
-A delete removes the document named by the event's required `recordId`. Syncs
-of one document run one after another in the process, so two events for the
-same row cannot interleave: each re-reads after the previous one finished, and
-the last leaves the index agreeing with the database. Because the sync is
-inline, a write's sync can wait behind an earlier in-flight sync of the same
-document (on a single-connection pool, up to the pool's acquire timeout); the
-index still ends consistent.
+A delete removes the row's document: through the queue, by the same re-read
+(no row comes back); inline, by the event's required `recordId`. Syncs of one
+document run one after another in the process, so two syncs of the same row
+cannot interleave: each re-reads after the previous one finished, and the last
+leaves the index agreeing with the database.
 
-**When the sync runs.** The engine publishes `data.record.created` and
-`data.record.updated` from inside the write, after its `after*` hooks — before
-any unit of work around the write commits (the write's own unit, opened when a
-metadata hook can abort it, or a caller's `engine.transaction(…)`). The
-in-process realtime service awaits each subscriber, so the re-read runs inside
-the same open transaction and sees the row the write just made. If that unit
-then rolls back, the index is wrong in one of two ways:
+### Through the queue
+
+Where the kernel composes a durable `queue` service — the platform's
+`QueueServicePlugin` over a data engine, whose database adapter keeps messages
+in `sys_job_queue` — and a data engine is bound, the sync runs through that
+queue (ADR-0161 K1). The standard runtime mounts `queue` on every preset but `minimal`.
+
+- **A save publishes; it does not sync.** For each source that indexes the
+  written object on record change, either trigger (the realtime subscription,
+  or the after-write hooks [below](#without-a-realtime-service-the-after-write-hooks))
+  publishes one message to the `knowledge-record-sync` queue: the source's
+  index key, the object, the record id, and why (`event`, or `freshness` for
+  the repair a search starts). Never a field value: `sys_job_queue` is an
+  object an administrator can list, and a record body there would be a copy of
+  the row outside its permissions. The save does not wait for the re-read, the
+  split, the embedding call or the store write.
+- **After the commit, and never for a rollback.** The message is published
+  through the engine's `runAfterOpenUnitsCommit`: once the unit of work open
+  at the write commits (the write's own unit, or a caller's
+  `engine.transaction(…)`), and not at all when it rolls back. So nothing is
+  processed before the write commits, and a write that rolls back leaves the
+  index as it was. With no unit open the message is published at once. A
+  publish that fails is logged at `error`; the document is stale until the
+  record's next save, a search that finds it stale, or the reconcile.
+- **The worker** subscribes in `kernel:ready`, resolves the source by its
+  index key when it processes the message, and re-reads the row as above: a
+  row comes back → its document is written; none → its document is deleted.
+- **Retries.** A failure a retry can change — the re-read, the split, the
+  embedding call, the store write — is thrown to the queue, which retries it
+  with backoff: eight attempts, 5 s doubling to a 2 min cap, so a provider
+  outage of six and a half minutes is ridden out (the plugin's
+  `recordSyncRetry` option). Then the message is a dead letter the queue lists
+  (`listFailed`), naming the source and the record in its metadata, and the
+  plugin says so once at `error`. The [reconcile](#reconcile-keeping-the-index-correct)
+  repairs what a dead letter names.
+- **Not retried**, because a retry cannot change them, and completed with no
+  write: a source no longer registered, or no longer indexing the object on
+  record change. A `whole` document over the embedder's budget is removed from
+  the index and reported at `error`, as on every path. A source whose adapter
+  is not mounted is retried like a failure, so a store that registers late is
+  met by a later attempt, and one that never does leaves a dead letter.
+- **A burst of saves.** Every save publishes its own message — one queue row
+  per source per save; completed rows are kept for `sys_job_queue`'s declared
+  retention (7 days). No message is keyed by its document: the queue
+  suppresses a keyed publish while a message with the key is pending **or
+  running**, and for a day after it completed, so a save made while a sync of
+  the record runs would be lost, and a completed sync would block the record's
+  later saves. Each message re-reads the row as it is when it is processed, so
+  the last one leaves the last committed version.
+- **A delete** leaves the index when its message is processed. Until then a
+  member's search (each hit re-read as the member) and a `granularity:
+  'record'` search (each hit checked against its record) do not answer it: the
+  record no longer exists. A system-identity search at chunk granularity
+  re-reads nothing, so it can answer the deleted record's chunks until the
+  message is processed.
+- **A restart** loses nothing published: messages wait in `sys_job_queue` and
+  are processed after it.
+
+### Without a durable queue
+
+With only the kernel's built-in fallback queue (synchronous, in-process, no
+durability, no retry; it labels itself `degraded`), a queue with no dead-letter
+surface (`listFailed` — the in-memory `MemoryQueueAdapter` has none), or no data
+engine bound, the sync runs inline and the plugin says so once at boot, at `warn`. A
+host that mounts the service by hand adds `QueueServicePlugin` over the
+ObjectQL engine to get the queued sync.
+
+**When the inline sync runs.** On the realtime trigger the engine publishes
+`data.record.created` and `data.record.updated` from inside the write, after
+its `after*` hooks — before any unit of work around the write commits (the
+write's own unit, opened when a metadata hook can abort it, or a caller's
+`engine.transaction(…)`). The in-process realtime service awaits each
+subscriber, so the save waits for the embedder, the re-read runs inside the
+same open transaction and sees the row the write just made, and a failed sync
+is logged and not retried. If that unit then rolls back, the index is wrong in
+one of two ways:
 
 - **The uncommitted row matched** — the document stays built from a row that
   never committed.
@@ -995,16 +1144,13 @@ then rolls back, the index is wrong in one of two ways:
 The row's next event or a `reindexSource` repairs a row that still exists. A
 document built from an **insert** that rolled back has no row left to repair it
 from; it stays until a complete reindex purges it (below) — at the latest, the
-next [reconcile](#reconcile-keeping-the-index-correct).
+next [reconcile](#reconcile-keeping-the-index-correct). Inline, a write's sync
+can also wait behind an earlier in-flight sync of the same document (on a
+single-connection pool, up to the pool's acquire timeout); the index still ends
+consistent.
 
 `data.record.restored` is
 published after the restore's own unit has committed.
-
-- **MVP (Phase 1):** synchronous, inline with the originating mutation.
-  Fast for low-volume dev / demo. Indexing failures are logged but do
-  not block the originating write.
-- **Phase 2:** async via `service-queue` for batching, retries, and
-  back-pressure.
 
 <Callout type="warn">
   **A predicate write leaves the index stale until its reconcile.** A
@@ -1029,10 +1175,12 @@ A kernel that composes no `realtime` service publishes no `data.record.*`
 event (the ObjectQL plugin bridges that same service to the engine). There,
 `KnowledgeServicePlugin` registers the data engine's `afterInsert`,
 `afterUpdate` and `afterDelete` hooks on every object a source with
-`refresh.onRecordChange` not `false` indexes, and each hook calls the same
-`handleRecordUpsert` / `handleRecordDelete` the subscription calls — the
-re-read under `where`, the field rules and the per-document ordering above all
-apply. The plugin takes exactly one of the two triggers, chosen at
+`refresh.onRecordChange` not `false` indexes, and each hook does what the
+subscription does: [through the queue](#through-the-queue) it publishes the
+record's message on the same commit, and without one it calls the same
+`handleRecordUpsert` / `handleRecordDelete` — the re-read under `where`, the
+field rules and the per-document ordering above all apply. The points below
+describe that inline sync. The plugin takes exactly one of the two triggers, chosen at
 `kernel:ready`, so a write is never synced twice. A source registered or loaded
 later for a new object gets its hooks when it arrives.
 
@@ -1055,11 +1203,17 @@ later for a new object gets its hooks when it arrives.
   every object that already carries a per-row hook (the audit plugin's, for
   one): over it the write is refused and nothing is written.
 - **A recycle-bin restore** runs no hooks (a restore is not a create, ADR-0148
-  D2), so on such a kernel a restored row is not re-indexed by itself; a
-  `reindexSource` brings it back.
+  D2), so the plugin also registers one engine middleware that hears the
+  `restore` operation: once a restore has answered, each row it wrote back is
+  synced, the master first, through the same seams (the queue, or the deferral
+  above, so a restore inside a unit that rolls back indexes nothing). A restore
+  that refuses or fails syncs nothing; one that landed with a stale roll-up
+  (`ERR_SUMMARY_RECOMPUTE`) syncs its rows. A restored row is re-read under each
+  source's `where`, as a write's is.
 
-The sync is in-process: a sync that has not finished when the process stops is
-lost, and the next `reindexSource` repairs it.
+The inline sync is in-process: a sync that has not finished when the process
+stops is lost, and the next reconcile or `reindexSource` repairs it. Through the
+queue, a message survives the restart.
 
 ### Reindex: skip and purge
 
@@ -1128,8 +1282,9 @@ de-indexed too.
 - **Batching** is the sweep's: 500 rows per batch, 20 batches per sweep, the
   backlog draining across sweeps.
 - **Opt-out.** `refresh.onRecordChange: false` on a source — or
-  `enableEventSync: false` on the plugin — turns off inline index sync in both
-  directions, event subscription and reap-time de-index alike. An index an
+  `enableEventSync: false` on the plugin — turns off the record sync in both
+  directions, the record-change sync (queued or inline: nothing is published,
+  nothing subscribed) and reap-time de-index alike. An index an
   external indexer owns is never a reason to hold up another package's
   retention.
 
@@ -1207,14 +1362,13 @@ followed (§4.1, §4.2) are the adapters to run in production.
 | `knowledge-memory` | ✅ | In-process; deterministic fake embedder |
 | `knowledge-ragflow` | retired | Shipped in Phase 1; its requests did not match the RAGFlow HTTP API, and the package was removed. Use `knowledge-pgvector`, `knowledge-turso` or an adapter of your own |
 | `search_knowledge` AI tool | ✅ | Threads `ToolExecutionContext` |
-| Event-driven sync | ✅ (sync) | MVP synchronous; queue in Phase 2 |
+| Event-driven sync | ✅ | Through the queue service when one is durable (retries, dead letters); inline otherwise |
 | Console source-management UI | ⏳ Phase 2 |  |
-| Async indexer (queue) | ⏳ Phase 2 |  |
 | Audit + metrics | ⏳ Phase 2 |  |
 | `knowledge-llamaindex` | ⏳ Phase 2 |  |
 | `knowledge-dify` | ⏳ Phase 3 / community |  |
 | `knowledge-pgvector` | ✅ | PostgreSQL + pgvector; exact scan and a `tsvector` keyword leg merged by RRF, organization, record scope and metadata filter in SQL, index fingerprint (§4.1) |
-| `knowledge-turso` | ✅ | A libSQL file of its own; exact scan and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
+| `knowledge-turso` | ✅ | A libSQL file of its own; a vector leg (an exact scan, or a one-bit approximate index for a large source of one organization) and an FTS5 trigram keyword leg merged by RRF, organization, record scope and metadata filter in SQL, a generation built beside the active one (§4.2) |
 
 ### 7.1 Non-goals for Phase 1
 

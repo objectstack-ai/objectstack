@@ -998,7 +998,11 @@ describe('[ADR-0161 K4] a knowledge_source draft needs the human to hold manage_
   });
 
   it('CONTROL: a human holding both saves and discards; the same human still saves another type', async () => {
-    const { authoring, served } = await authorThroughDomain({ systemPermissions: ['manage_metadata', 'manage_knowledge_sources'] });
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring, served } = await authorThroughDomain({
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
     expect((await save(authoring)).isError).toBe(false);
     expect((await discard(authoring)).body).toEqual({ discarded: { type: 'knowledge_source', name: 'faq', package: 'com.acme.crm' } });
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source']);
@@ -1063,7 +1067,25 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
   });
 
-  it('CONTROL: an admitted source is saved; another type is never asked about; no knowledge service judges nothing', async () => {
+  /**
+   * Ruled D: on a deployment that registers no knowledge service, nothing
+   * loads, indexes or searches a source, and nothing mounts the service while
+   * the server runs. So the human's draft save is refused, naming the reason
+   * and the remedy, instead of being kept and never served.
+   */
+  it('no knowledge service registered: the draft save is refused 503 SERVICE_UNAVAILABLE with the remedy, and nothing is written', async () => {
+    const none = await authorThroughDomain({ systemPermissions: BOTH });
+    const refused = await save(none.authoring);
+    expect(refused.isError).toBe(true);
+    expect(refused.body.error).toMatchObject({ code: 'SERVICE_UNAVAILABLE', status: 503 });
+    expect(refused.body.error.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+    expect(refused.body.error.message).toMatch(/requires: \['knowledge'\].*restart the server.*then save the source again/);
+    expect(none.served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem')).toEqual([]);
+    // Another type saves as before on the same deployment.
+    expect((await call(none.authoring, 'save_metadata_draft', { type: 'flow', name: 'lead_intake', item: FLOW_DRAFT, package: 'com.acme.crm' })).isError).toBe(false);
+  });
+
+  it('CONTROL: an admitted source is saved; another type is never asked about; a registered knowledge service that is not the platform\'s judges nothing', async () => {
     const admitAuthoredSource = vi.fn(async () => ({ admitted: true }));
     const { authoring, served } = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { admitAuthoredSource } });
     expect((await save(authoring)).isError).toBe(false);
@@ -1071,8 +1093,8 @@ describe('[ADR-0161 K4] save_metadata_draft asks the knowledge service to admit 
     expect(admitAuthoredSource).toHaveBeenCalledTimes(1);
     expect(served.protocolCalls.filter((c: any) => c[0] === 'saveMetaItem').map((c: any) => c[1].type)).toEqual(['knowledge_source', 'flow']);
 
-    const none = await authorThroughDomain({ systemPermissions: BOTH });
-    expect((await save(none.authoring)).isError).toBe(false);
+    const hostMounted = await authorThroughDomain({ systemPermissions: BOTH, knowledge: { search: async () => [] } });
+    expect((await save(hostMounted.authoring)).isError).toBe(false);
   });
 });
 
@@ -1402,6 +1424,63 @@ describe('done when: an OAuth author saves an app-crm flow draft with no routabl
     expect(missing.body.error.message).toContain('/properties/no_such_key');
     expect(missing.body.error.message).toContain('fields');
     expect(missing.body.contract).toBeUndefined();
+  });
+
+  it('[ADR-0161 K4, K5] the knowledge_source contract serves the content rule and no create seed; a source with one object and one content field saves, a wildcard or a retired key is refused', async () => {
+    const metadata = new MetadataManager({} as never);
+    metadata.setTypeRegistry(DEFAULT_METADATA_TYPE_REGISTRY);
+    const protocol = await realProtocol(new Map([['metadata', metadata]]));
+    // A deployment that mounts a knowledge service admitting the source (on one with none, ruled D refuses the save).
+    const { authoring } = await authorThroughDomain({
+      protocol,
+      systemPermissions: ['manage_metadata', 'manage_knowledge_sources'],
+      knowledge: { admitAuthoredSource: async () => ({ admitted: true }) },
+    });
+    const entry = (await protocol.getMetaTypes!()).entries!.find((e) => e.type === 'knowledge_source') as any;
+
+    const { contract } = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true })).body;
+    expect(contract.form).toBe('lean');
+    // No seed is served: the type stays unseeded until the Studio form builds `source` (metadata-create-seeds.test.ts).
+    expect(getMetadataCreateSeed('knowledge_source')).toBeUndefined();
+    expect(contract).not.toHaveProperty('createSeed');
+    expect(Object.keys(contract.schema.properties)).toEqual(Object.keys(entry.schema.properties));
+
+    // The content rule, as the served schema states it: a non-empty list, no empty name, no `'*'` member.
+    const contentPath = '/properties/source/properties/content';
+    const content = (await call(authoring, 'list_metadata_items', { type: 'knowledge_source', contract: true, contractPath: contentPath })).body.contract;
+    expect(content).toMatchObject({ form: 'full', path: contentPath });
+    expect(content.schema).toEqual(entry.schema.properties.source.properties.content);
+    expect(content.schema.minItems).toBe(1);
+    expect(content.schema.items).toMatchObject({ minLength: 1 });
+    expect(new RegExp(content.schema.items.pattern).test('*')).toBe(false);
+    expect(new RegExp(content.schema.items.pattern).test('body')).toBe(true);
+
+    // A tombstone is not served: the served schema publishes what an author MAY write (`{ not: {} }` is
+    // dropped). Its prescription reaches the author through the save, below.
+    expect(entry.schema.properties.id).toBeUndefined();
+    expect(entry.schema.properties.source.properties.contentFields).toBeUndefined();
+
+    // A source with one object and one content field saves as a draft; with a wildcard it is refused and nothing is written.
+    const item = { name: 'crm_opportunity_notes', label: 'Opportunity notes', source: { kind: 'object', object: 'crm_opportunity', content: ['name'] } };
+    const saved = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: item.name, item, package: STUDIO_BASE });
+    expect(saved.isError, JSON.stringify(saved.body)).toBe(false);
+    expect(saved.body.saved).toMatchObject({ type: 'knowledge_source', name: 'crm_opportunity_notes', package: STUDIO_BASE, state: 'draft' });
+
+    const wildcard = { ...item, name: 'crm_opportunity_all', source: { ...item.source, content: ['*'] } };
+    const refused = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: wildcard.name, item: wildcard, package: STUDIO_BASE });
+    expect(refused.body.error).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+    expect(JSON.stringify(refused.body.error.issues)).toContain('content');
+
+    // A retired key is refused with its tombstone's prescription, as the describe reads.
+    for (const [retired, replacement] of [
+      [{ ...item, name: 'crm_opportunity_id', id: 'crm_opportunity_id' }, '`name`'],
+      [{ ...item, name: 'crm_opportunity_cf', source: { ...item.source, contentFields: ['name'] } }, '`content`'],
+    ] as const) {
+      const tomb = await call(authoring, 'save_metadata_draft', { type: 'knowledge_source', name: retired.name, item: retired, package: STUDIO_BASE });
+      expect(tomb.body.error, replacement).toMatchObject({ code: 'INVALID_METADATA', status: 422 });
+      expect(JSON.stringify(tomb.body.error.issues), replacement).toContain(`use ${replacement}`);
+    }
+    expect((await call(authoring, 'list_drafts', { package: STUDIO_BASE })).body.drafts.map((d: any) => d.name)).toEqual(['crm_opportunity_notes']);
   });
 
   it('an inherited member\'s name as `type`, which the fold keeps as sent, is refused and writes nothing', async () => {

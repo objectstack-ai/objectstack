@@ -345,9 +345,13 @@ the rollback. Keep the objects a `before*` hook
 writes on the default datasource; on MongoDB, run it as a replica set, which
 any unit needs. On a standalone MongoDB server every write the unit carries is
 refused, the hook's own `ctx.api` write first, even when nothing in the write
-fails: the server answers "This MongoDB deployment does not support retryable
-writes", and adding `retryWrites=false` to the connection string does not
-change that answer. Writes to an object that opens no unit are unaffected.
+fails, with `NOT_IMPLEMENTED` (501) "This MongoDB server is a standalone
+mongod, and MongoDB runs transactions only on a replica set member or through
+mongos…", and the driver says so once when it connects. A single-node replica
+set is enough. Adding `retryWrites=false` to the connection string, which the
+MongoDB client's own message suggests, does not help: what is missing is
+transactions, not retryable writes. Writes to an object that opens no unit are
+unaffected.
 
 On PostgreSQL and on a MongoDB replica set, a statement that fails at the
 database aborts the whole unit, and the unit takes no savepoint around a
@@ -373,6 +377,34 @@ write ran in, which is a worse guarantee than the one documented here. An
 never joined the unit, and it is the one that waits for the commit (below).
 </Callout>
 
+### What `ctx.api.transaction` joins, and where it stops
+
+A body's `ctx.api.transaction(fn)` opens a unit only when none is open. Inside
+one (a row of the table above, a caller's `engine.transaction()`, or a unit an
+action body opened with its own `ctx.api.transaction`) it **joins** it: its
+return is no commit and its throw no rollback, and the outer unit commits or
+rolls back all of it. A write made inside a body's transaction runs its hooks
+in that unit too, so their `ctx.api` writes, and a `ctx.api.transaction` they
+open, join it and roll back with it. Its bounds:
+
+- **One level per body.** A `ctx.api.transaction` called inside another one in
+  the same body is refused at the inner call ("nested ctx.api.transaction is
+  not supported") before anything of it runs. The refusal is thrown inside the
+  outer callback; uncaught, it rolls the outer unit back. Put the inner work in
+  the outer callback instead.
+- **The default datasource only.** A write in it to an object on another
+  datasource is refused before it runs
+  (`400 ERR_CROSS_DATASOURCE_TRANSACTION_WRITE`), except an append-only ledger
+  (`lifecycle.class` `audit`, `telemetry` or `event`), which is written outside
+  the unit and survives its rollback.
+- **A failed statement aborts the unit.** On PostgreSQL and a MongoDB replica
+  set, as above, a statement that fails inside the callback aborts the whole
+  unit even when the callback catches it: every later statement in it is
+  refused, and nothing the unit wrote is stored.
+- **No transactions, no unit.** On a driver with no transactions (Turso's
+  remote transport), the callback runs anyway, with no transaction and no
+  warning: each write is stored as it is made, and a throw undoes none of them.
+
 ### `async: true` after hooks run after the commit
 
 An `async: true` hook on `afterInsert`, `afterUpdate` or `afterDelete` is not
@@ -381,8 +413,9 @@ abort the write nor have its writes rolled back with it. Inside a unit of work
 (any row of the table above) it therefore waits for that unit's outcome:
 
 - **The unit commits:** the hook starts once the **outermost** unit has
-  committed, so its `ctx.api` reads see the triggering write. A nested
-  `transaction()` joins the outer unit, so its return is no commit.
+  committed, so its `ctx.api` reads see the triggering write. A
+  `transaction()` opened inside the unit joins it, so its return is no commit
+  ([above](#what-ctxapitransaction-joins-and-where-it-stops)).
 - **The unit rolls back:** the hook **never runs**. It does not announce a
   write that did not survive, so an `async` hook is the one to give an effect
   outside the engine. To react to a write that was refused, use a blocking

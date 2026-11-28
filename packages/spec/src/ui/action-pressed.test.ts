@@ -24,7 +24,7 @@ const base = {
   objectName: 'kb_article',
   type: 'script',
   target: 'markHelpful',
-  locations: ['record_header'],
+  locations: ['record_page'],
 } as const;
 
 const PRESSED = "has(record.viewer) && record.viewer.vote == 'helpful'";

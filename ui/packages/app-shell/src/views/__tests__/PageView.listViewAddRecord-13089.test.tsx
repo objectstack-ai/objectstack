@@ -89,8 +89,8 @@ const OBJECTS = [
     fields: FIELDS,
     // One of each placement, so a served executor would show up as a key.
     actions: [
-      { name: 'invite_user', label: 'Invite user', type: 'api', target: '/api/v1/org/invite', locations: ['list_toolbar'] },
-      { name: 'remove', label: 'Remove', type: 'api', target: '/api/v1/members/{id}/remove', locations: ['list_item'] },
+      { name: 'invite_user', label: 'Invite user', type: 'api', target: '/api/v1/org/invite', locations: ['list'] },
+      { name: 'remove', label: 'Remove', type: 'api', target: '/api/v1/members/{id}/remove', locations: ['record_row'] },
     ],
   },
   { name: PAGE_MODE, label: 'Contract', editMode: 'page', fields: { name: FIELDS.name } },

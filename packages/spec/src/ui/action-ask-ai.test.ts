@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import type { z } from 'zod';
 import { ActionSchema, ActionType, InlineActionSchema } from './action.zod';
 
-const base = { name: 'ask_about_account', label: 'Ask AI', objectName: 'account', locations: ['record_header'] };
+const base = { name: 'ask_about_account', label: 'Ask AI', objectName: 'account', locations: ['record_page'] };
 
 function issuePaths(result: { success: boolean; error?: z.ZodError }): string[] {
   return result.success ? [] : (result.error as z.ZodError).issues.map((i) => i.path.join('.'));

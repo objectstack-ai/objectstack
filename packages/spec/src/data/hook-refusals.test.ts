@@ -592,3 +592,103 @@ describe('Hook.refusals — a listed reason is refused at save where the body na
     expect(r.success).toBe(true);
   });
 });
+
+// A code or reason is literal only when its quoted value closes the value: a
+// property's quote is followed by `,` or `}`; an assignment's by `;`, `,`, `}`,
+// `)`, the source's end, or a line end whose next line does not continue the
+// expression. A value built from a literal (`'OVER' + suffix`, a member access,
+// a template hole) is computed, and the run-time refusal decides it, as the
+// `hookRefusalCodesThrownIn` docblock says.
+describe('Hook.refusals — a literal code or reason closes its value; one built from a literal is computed', () => {
+  const refusals = {
+    OVER_LIMIT: { message: 'Over the limit.', reasons: { too_high: { message: 'The amount is too high.' } } },
+  };
+  const codeSuffix = "const suffix = '_LIMIT';\n";
+  const reasonSuffix = "const suffix = '_high';\n";
+
+  const LITERAL_CODE = [
+    ['a property closed by `}`', "throw { code: 'OVER' };"],
+    ['a property closed by `,`', "throw { code: 'OVER', reason: 'too_high' };"],
+    ['a property with a line break before the close', "throw {\n  code: 'OVER'\n};"],
+    ['a property with a comment before the close', "throw { code: 'OVER' /* the cap */ };"],
+    ['a property in a backtick with no hole', 'throw { code: `OVER` };'],
+    ['a property in Object.assign', "throw Object.assign(new Error('x'), { code: 'OVER' });"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER'\nthrow e"],
+    ['an assignment closed by a comment and a line end', "const e = new Error('x');\ne.code = 'OVER' // the cap\nthrow e;"],
+    ['an assignment closed by `,`', "const e = new Error('x'); e.code = 'OVER', e.reason = 'too_high'; throw e;"],
+    ['an assignment closed by `}`', "const e = new Error('x'); if (ctx.input.x) { e.code = 'OVER' } throw e;"],
+    ['an assignment closed by `)`', "const e = new Error('x'); (e.code = 'OVER'); throw e;"],
+    ['an assignment at the source end', "const e = new Error('x'); if (ctx.input.x) throw e; e.code = 'OVER'"],
+  ] as const;
+
+  it.each(LITERAL_CODE)('lit: refuses an undeclared literal code written as %s, at body.source', (_shape, source) => {
+    expect(hookRefusalCodesThrownIn(source)).toEqual(['OVER']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookRefusalCodeAtSave('OVER', ['OVER_LIMIT']));
+  });
+
+  const COMPUTED_CODE = [
+    ['a property concatenation', "throw { code: 'OVER' + suffix };"],
+    ['a property concatenation on the next line', "throw { code: 'OVER'\n  + suffix };"],
+    ['a property backtick concatenation', 'throw { code: `OVER` + suffix };'],
+    ['a property member access', "throw { code: 'OVER'.concat(suffix) };"],
+    ['a property template hole', 'throw { code: `OVER${suffix}` };'],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  + suffix\nthrow e;"],
+    ['an assignment member access on the next line', "const e = new Error('x');\ne.code = 'OVER'\n  .concat(suffix)\nthrow e;"],
+    ['an assignment backtick concatenation', "const e = new Error('x'); e.code = `OVER` + suffix; throw e;"],
+  ] as const;
+
+  it.each(COMPUTED_CODE)('dark: passes the save for a code built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookRefusalCodesThrownIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, refusals, body: body(codeSuffix + source) }).success).toBe(true);
+  });
+
+  const LITERAL_REASON = [
+    ['a property closed by `}`', "throw { code: 'OVER_LIMIT', reason: 'too' };"],
+    ['a property closed by `,`', "throw { code: 'OVER_LIMIT', reason: 'too', params: {} };"],
+    ['a property in a listed reason', "throw { code: 'OVER_LIMIT', reasons: [{ reason: 'too' }] };"],
+    ['an assignment closed by `;`', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too'; throw e;"],
+    ['an assignment closed by a line end', "const e = new Error('x')\ne.code = 'OVER_LIMIT'\ne.reason = 'too'\nthrow e"],
+  ] as const;
+
+  it.each(LITERAL_REASON)('lit: refuses an undeclared literal reason written as %s, at body.source', (_shape, source) => {
+    expect(hookRefusalReasonsThrownIn(source).map((p) => p.reason)).toEqual(['too']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    const issue = r.error!.issues.find((i) => i.path.join('.') === 'body.source')!;
+    expect(issue.message).toBe(undeclaredHookRefusalReasonAtSave('OVER_LIMIT', 'too', ['too_high'], 'body.source'));
+  });
+
+  const COMPUTED_REASON = [
+    ['a property concatenation', "throw { code: 'OVER_LIMIT', reason: 'too' + suffix };"],
+    ['a property member access', "throw { code: 'OVER_LIMIT', reason: 'too'.concat(suffix) };"],
+    ['a listed property concatenation', "throw { code: 'OVER_LIMIT', reasons: [{ reason: 'too' + suffix }] };"],
+    ['an assignment concatenation', "const e = new Error('x'); e.code = 'OVER_LIMIT'; e.reason = 'too' + suffix; throw e;"],
+    ['an assignment concatenation on the next line', "const e = new Error('x');\ne.code = 'OVER_LIMIT';\ne.reason = 'too'\n  + suffix\nthrow e;"],
+  ] as const;
+
+  it.each(COMPUTED_REASON)('dark: passes the save for a reason built from a literal by %s (the run-time refusal decides it)', (_shape, source) => {
+    expect(hookRefusalReasonsThrownIn(source)).toEqual([]);
+    expect(HookSchema.safeParse({ ...base, refusals, body: body(reasonSuffix + source) }).success).toBe(true);
+  });
+
+  it('dark: an inline handler building its code by concatenation passes the save, at handler', () => {
+    const handler = async () => {
+      const suffix = '_LIMIT';
+      throw Object.assign(new Error('x'), { code: 'OVER' + suffix });
+    };
+    expect(HookSchema.safeParse({ ...base, handler, refusals }).success).toBe(true);
+  });
+
+  it('CONTROL: a literal code beside a computed one in the same body is still refused, once', () => {
+    const source = `${codeSuffix}if (ctx.input.x) throw { code: 'OVER' + suffix };\nthrow { code: 'OVER' };`;
+    expect(hookRefusalCodesThrownIn(source)).toEqual(['OVER']);
+    const r = HookSchema.safeParse({ ...base, refusals, body: body(source) });
+    expect(r.success).toBe(false);
+    expect(r.error!.issues.filter((i) => i.path.join('.') === 'body.source')).toHaveLength(1);
+  });
+});

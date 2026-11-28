@@ -41,7 +41,7 @@ const PURGE = {
   type: 'api' as const,
   target: '/api/v1/datasources/${ctx.recordId}/purge',
   confirmText: 'Every cached row of this datasource is dropped.',
-  locations: ['record_header', 'list_toolbar'],
+  locations: ['record_page', 'list'],
 };
 
 const nativeConfirm = vi.fn(() => true);
@@ -64,7 +64,7 @@ afterEach(() => {
 
 describe('MetadataTypeActions — confirmText is asked in-app and names the item (objectui#13333)', () => {
   it('(a) record header: the title names the action and the item; accepting runs it once', async () => {
-    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="record_header" recordId="warehouse" />);
+    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="record_page" recordId="warehouse" />);
     fireEvent.click(screen.getByRole('button', { name: 'Purge cache' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByRole('heading').textContent).toBe('Purge cache on "warehouse"?');
@@ -76,7 +76,7 @@ describe('MetadataTypeActions — confirmText is asked in-app and names the item
   });
 
   it('(b) CONTROL: Cancel runs nothing', async () => {
-    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="record_header" recordId="warehouse" />);
+    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="record_page" recordId="warehouse" />);
     fireEvent.click(screen.getByRole('button', { name: 'Purge cache' }));
     const dialog = await screen.findByRole('alertdialog');
     fireEvent.click(within(dialog).getByTestId('type-action-confirm-cancel'));
@@ -86,7 +86,7 @@ describe('MetadataTypeActions — confirmText is asked in-app and names the item
   });
 
   it('(c) list toolbar: no item, so the title names the action alone', async () => {
-    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="list_toolbar" />);
+    render(<MetadataTypeActions entry={{ actions: [PURGE] as never }} location="list" />);
     fireEvent.click(screen.getByRole('button', { name: 'Purge cache' }));
     const dialog = await screen.findByRole('alertdialog');
     expect(within(dialog).getByRole('heading').textContent).toBe('Purge cache?');

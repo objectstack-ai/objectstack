@@ -722,9 +722,6 @@ export const ptBR: PlatformTranslationData = {
           help: 'Tamanho máximo de um trecho, em caracteres, quando o serviço de conhecimento divide um documento. Um tamanho definido na própria fonte tem prioridade; o limite de entrada do modelo de embeddings pode reduzi-lo.',
         },
       },
-      actions: {
-        test: { label: 'Testar conexão' },
-      },
     },
     lifecycle: {
       title: 'Ciclo de vida dos dados',

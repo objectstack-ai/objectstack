@@ -88,7 +88,7 @@ const COMPLETE_TASK = {
   name: 'complete_task',
   label: 'Complete Task',
   objectName: OBJECT,
-  locations: ['record_header'],
+  locations: ['record_page'],
   type: 'script',
   body: {
     language: 'js',

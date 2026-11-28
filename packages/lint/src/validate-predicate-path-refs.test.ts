@@ -709,7 +709,11 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 96 today, an ADDITION of ONE: #35926 offered the field form's
     // `inlineEdit` select, gated on `data.type in ['lookup','master_detail']`. It
     // is an in-list, so it does not reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(96);
+    // It is 98 today, an ADDITION of TWO: the hook form's `refusals` and `texts`
+    // rows are each gated on the test `HookSchema` refuses both keys by,
+    // `data.body.language == 'js' || data.body == null && data.handler != null
+    // && data.handler != ''`. They reach the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(98);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -840,7 +844,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // It is 67 today: #35096's `action :: texts` and #34823's
     // `action :: refusals` rows are each gated on `data.type == 'script'`, two
     // single-quoted literal comparisons.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(67);
+    // It is 71 today: the hook form's `hook :: refusals` and `hook :: texts`
+    // gates each carry two single-quoted literal comparisons, `== 'js'` and
+    // `!= ''` (the two `null` comparisons are not single-quoted literals).
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(71);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

@@ -18,7 +18,7 @@
  *
  * This call site has two sources `resolveRecordIdParamSeed` alone does not
  * know about, on top of the row: a literal `recordId` override, and the
- * `pageRecord` fallback `record_header` actions rely on when no row is
+ * `pageRecord` fallback `record_page` actions rely on when no row is
  * stashed (same fallback `interpolationRecord` above uses for `{field}` URL
  * tokens). Both are preserved — the tests below pin that, alongside the two
  * refusal wordings and the happy path — so adopting the helper here did not
@@ -273,12 +273,12 @@ describe('RecordDetailView api handler — recordIdParam seeding refuses instead
     expect(JSON.parse(String(init.body))).toMatchObject({ targetCode: 'INV-1' });
   });
 
-  it('falls back to the page record when no row is stashed (record_header actions)', async () => {
+  it('falls back to the page record when no row is stashed (record_page actions)', async () => {
     const handlers = await mountAndCaptureHandlers();
 
     let r: any;
     await act(async () => {
-      // A record_header-style action: no `_rowRecord` stash, so the only
+      // A record_page-style action: no `_rowRecord` stash, so the only
       // source is the page's own loaded record — the fallback
       // `interpolationRecord` above also relies on. `recordIdField`
       // defaults to `id`.

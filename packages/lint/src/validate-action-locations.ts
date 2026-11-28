@@ -156,7 +156,7 @@ export function validateActionLocations(stack: AnyRec): ActionLocationsFinding[]
       // vocabulary, name placement and the headless shape are
       // `os explain action-no-placement`.
       hint:
-        'Declare where it renders, e.g. `locations: [\'record_header\']`, place it from a list view\'s ' +
+        'Declare where it renders, e.g. `locations: [\'record_page\']`, place it from a list view\'s ' +
         '`bulkActions`, or write `locations: []` if it is headless (REST / MCP / AI only)',
     });
   };

@@ -2,10 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SettingsManifestSchema } from '@objectstack/spec/system';
-import {
-  knowledgeSettingsManifest,
-  knowledgeTestActionHandler,
-} from './knowledge.manifest.js';
+import { knowledgeSettingsManifest } from './knowledge.manifest.js';
 
 describe('knowledgeSettingsManifest', () => {
   it('parses against SettingsManifestSchema', () => {
@@ -47,21 +44,18 @@ describe('knowledgeSettingsManifest', () => {
   it('gates nothing on the retired adapter: no specifier declares a visibility predicate', () => {
     const specs = knowledgeSettingsManifest.specifiers as any[];
     // Non-vacuity: the specifiers are there to inspect.
-    expect(specs.length).toBeGreaterThanOrEqual(3);
+    expect(specs.length).toBeGreaterThanOrEqual(2);
     for (const s of specs) expect(s.visible, s.key ?? s.id).toBeUndefined();
     expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('data.adapter');
   });
 
-  it('exposes a test action wired to /api/settings/knowledge/test', () => {
-    const f = (knowledgeSettingsManifest.specifiers as any[]).find(
-      (s) => s.type === 'action_button' && s.id === 'test',
-    );
-    expect(f).toBeDefined();
-    expect(f.handler).toEqual({
-      kind: 'http',
-      method: 'POST',
-      url: '/api/settings/knowledge/test',
-    });
+  // "Test connection" checks the Turso fields alone, so it left this page with
+  // them: `@objectstack/knowledge-turso` declares it and registers its handler
+  // where it contributes the group, and pins both cases.
+  it('declares no action: the Turso check is contributed with the Turso fields', () => {
+    const specs = knowledgeSettingsManifest.specifiers as any[];
+    expect(specs.filter((s) => s.type === 'action_button')).toEqual([]);
+    expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('/api/settings/knowledge/test');
   });
 });
 
@@ -77,103 +71,6 @@ describe('knowledgeSettingsManifest — no banner outlives the key it warned abo
 
   it('carries the warning glyph nowhere', () => {
     expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('⚠');
-  });
-});
-
-describe('knowledgeTestActionHandler', () => {
-  it('accepts no URL (the plugin defaults to its own file)', async () => {
-    const r = await knowledgeTestActionHandler({ values: {} } as any);
-    expect(r.ok).toBe(true);
-    expect(r.severity).toBe('info');
-    // The plugin opens a file of its own, never the platform's database (#37107).
-    expect(r.message).toMatch(/knowledge\.db/);
-    expect(r.message).not.toMatch(/reuse the tenant/);
-  });
-
-  it('accepts a local file URL', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { turso_url: 'file:./knowledge.db' },
-    } as any);
-    expect(r.ok).toBe(true);
-  });
-
-  it('rejects managed turso URL without auth token', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { turso_url: 'libsql://x.turso.io' },
-    } as any);
-    expect(r.ok).toBe(false);
-    expect(r.severity).toBe('error');
-  });
-
-  it('accepts managed turso URL with auth token', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' },
-    } as any);
-    expect(r.ok).toBe(true);
-  });
-
-  // The turso adapter's plugin package is built in this repo since #37107. The
-  // live-call hint names the package and how a deployment registers it, and no
-  // longer says it ships elsewhere. Pinned as a property, not as a literal, so
-  // the wording can be improved without the guard going stale.
-  it('turso live-call hint names the package and how it is registered, not an outside origin', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { turso_url: 'file:./knowledge.db' },
-    } as any);
-    expect(r.ok).toBe(true);
-    const message = String(r.message);
-    expect(message).toContain('@objectstack/knowledge-turso');
-    expect(message).toMatch(/registered beside the knowledge service/);
-    expect(message).not.toMatch(/ObjectOS Cloud monorepo|does not ship/);
-    // the un-followable form this card retired: named, with no origin stated
-    expect(message).not.toMatch(/Mount @objectstack\/knowledge-turso to exercise live calls/);
-  });
-
-  // #24769 — "Test connection" is answered (the handler is in the plugin's
-  // default map), and what it answers is a form check: no package in this repo
-  // registers `knowledge/test`, so nothing replaces it with a live probe. Every
-  // green answer must say no connection was attempted, and none may promise
-  // that mounting a package makes this button live — no package does.
-  it('every green answer says no connection was attempted', async () => {
-    const forms: Array<[string, Record<string, unknown>]> = [
-      ['no URL', {}],
-      ['local file', { turso_url: 'file:./knowledge.db' }],
-      ['managed', { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' }],
-    ];
-    for (const [label, values] of forms) {
-      const r = await knowledgeTestActionHandler({ values } as any);
-      expect(r.ok, label).toBe(true);
-      const message = String(r.message);
-      expect(message, label).toMatch(/no connection was attempted/);
-      expect(message, label).not.toMatch(/to exercise live calls/);
-    }
-  });
-
-  // `adapter` is retired (#37104): a value saved before, or a stale form still
-  // sending one, is not read. The answer is the one the same Turso fields get
-  // with no adapter at all — never "Unknown adapter", never the in-memory
-  // warning the retired `memory` option answered.
-  it('reads no adapter: a stale one in the values or the payload changes nothing', async () => {
-    const fields = { turso_url: 'libsql://x.turso.io', turso_auth_token: 't' };
-    const baseline = await knowledgeTestActionHandler({ values: fields } as any);
-    expect(baseline.ok).toBe(true);
-    for (const adapter of ['memory', 'turso', 'ragflow', 'pgvector']) {
-      const fromValues = await knowledgeTestActionHandler({ values: { ...fields, adapter } } as any);
-      const fromPayload = await knowledgeTestActionHandler({ values: fields, payload: { values: { adapter } } } as any);
-      expect(fromValues, adapter).toEqual(baseline);
-      expect(fromPayload, adapter).toEqual(baseline);
-    }
-    // Non-vacuity: the fields it does read change the answer.
-    expect((await knowledgeTestActionHandler({ values: { turso_url: 'libsql://x.turso.io' } } as any)).ok).toBe(false);
-  });
-
-  it('prefers payload.values over persisted values', async () => {
-    const r = await knowledgeTestActionHandler({
-      values: { turso_url: 'libsql://x.turso.io' },
-      payload: { values: { turso_url: 'file:foo.db' } },
-    } as any);
-    expect(r.ok).toBe(true);
-    expect(r.message).toMatch(/file:foo\.db/);
   });
 });
 

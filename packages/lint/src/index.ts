@@ -36,6 +36,9 @@ export {
   WIDGET_LEGACY_ANALYTICS_UNRENDERABLE,
   DASHBOARD_FILTER_FIELD_UNKNOWN,
   DASHBOARD_FILTER_FIELD_UNPROVISIONED,
+  // [#35143] A dashboard with no widgets: an error on the CLI, a warning at
+  // the runtime door, where Studio creates a dashboard empty.
+  DASHBOARD_WITHOUT_WIDGETS,
   // [#14275] The `include` clause on a DASHBOARD-level filter's effective
   // field, now that it is resolved on the object graph rather than skipped
   // whenever it was dotted.
@@ -408,6 +411,16 @@ export {
 export type { AiContextFinding, AiContextSeverity } from './validate-ai-context.js';
 
 export {
+  validateKnowledgeSource,
+  KNOWLEDGE_SOURCE_OBJECT_UNKNOWN,
+  KNOWLEDGE_SOURCE_FIELD_UNKNOWN,
+  KNOWLEDGE_SOURCE_OBJECT_NOT_SEARCHABLE,
+  KNOWLEDGE_SOURCE_SYSTEM_OBJECT_NOT_AI_READABLE,
+  KNOWLEDGE_SOURCE_FIELD_NEVER_INDEXED,
+} from './validate-knowledge-source.js';
+export type { KnowledgeSourceFinding, KnowledgeSourceSeverity } from './validate-knowledge-source.js';
+
+export {
   validateAssignmentRules,
   ASSIGNMENT_RULE_USER_TARGET,
   ASSIGNMENT_RULE_QUEUE_UNSTAFFED,
@@ -709,6 +722,10 @@ export {
   LIST_VIEW_CHART_DATASET_FOREIGN_OBJECT,
   LIST_VIEW_KANBAN_LANE_UNKNOWN,
   LIST_VIEW_KANBAN_LANE_REPEATED,
+  // [#35143] A board grouped by a field with no fixed lanes (advisory), and a
+  // filter keyed on a field computed on read (refused).
+  LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL,
+  LIST_VIEW_FILTER_FIELD_VIRTUAL,
   LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
   LIST_VIEW_OBJECT_UNKNOWN,
   LIST_VIEW_KEY_RETIRED,
@@ -1149,6 +1166,14 @@ export {
 // the registry and are not exported.
 export { ACTION_BODY_WRITE_CAPABILITY_UNDECLARED } from './validate-action-body-capabilities.js';
 export { SEED_RECORD_UNKNOWN_FIELD } from './validate-seed-record-keys.js';
+// [#35143] The Views, dashboards and app shell family's app-shell ids, all
+// advisory, exported for `os explain` as the two above; the rules run through
+// the registry and are not exported.
+export {
+  APP_NAVIGATION_EMPTY,
+  OBJECT_UNREACHABLE_FROM_NAVIGATION,
+  OBJECT_WITHOUT_VIEW,
+} from './validate-app-shell-reach.js';
 export type {
   ActionBodyCompileFinding,
   HostCompileFailure,
@@ -1383,8 +1408,15 @@ export {
   FIELD_EMBEDDED_SUB_FIELDS,
   FIELD_MISSING_VALUE_DOMAIN,
   RELATIONSHIP_INLINE_EDIT_NEEDS_BULK,
+  // A select option `color` the option badge renders neutral (the families and
+  // the predicate are published so a renderer-side or AI-side check asks the
+  // same question as the save door).
+  FIELD_OPTION_COLOR_RENDERS_NEUTRAL,
+  OPTION_COLOR_FAMILIES,
+  isBadgePaintableOptionColor,
+  lintOptionColors,
 } from './data-model-rules.js';
-export type { LintIssue, LocatedLintIssue, Severity } from './data-model-rules.js';
+export type { LintIssue, LocatedLintIssue, OptionColorPicklist, Severity } from './data-model-rules.js';
 
 // ─── The registry itself (#4409, relocated #4463) ────────────────────
 //

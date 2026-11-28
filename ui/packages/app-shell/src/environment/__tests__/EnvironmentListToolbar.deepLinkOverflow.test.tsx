@@ -61,12 +61,12 @@ const CREATE = {
   name: 'create_environment',
   label: 'Create Environment',
   type: 'api',
-  locations: ['list_toolbar'],
+  locations: ['list'],
 };
 const FILLERS = [
-  { name: 'a1', label: 'a1', type: 'api', order: -1, locations: ['list_toolbar'] },
-  { name: 'a2', label: 'a2', type: 'api', order: -1, locations: ['list_toolbar'] },
-  { name: 'a3', label: 'a3', type: 'api', order: -1, locations: ['list_toolbar'] },
+  { name: 'a1', label: 'a1', type: 'api', order: -1, locations: ['list'] },
+  { name: 'a2', label: 'a2', type: 'api', order: -1, locations: ['list'] },
+  { name: 'a3', label: 'a3', type: 'api', order: -1, locations: ['list'] },
 ];
 
 /** ready + no production env yet → `setup_production`. */

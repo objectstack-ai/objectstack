@@ -506,10 +506,10 @@ describe('ActionSchema', () => {
   describe('Action Locations', () => {
     it('should accept valid locations', () => {
       const locations = [
-        'list_toolbar',
-        'list_item',
-        'record_header',
-        'record_more',
+        'list',
+        'record',
+        'record_page',
+        'record_row',
         'record_related',
         'record_section',
       ] as const;
@@ -529,7 +529,7 @@ describe('ActionSchema', () => {
         name: 'toolbar_action',
         label: 'Toolbar Action',
         target: 'noop',
-        locations: ['list_toolbar'],
+        locations: ['list'],
       };
 
       expect(() => ActionSchema.parse(action)).not.toThrow();
@@ -729,7 +729,7 @@ describe('ActionSchema', () => {
         label: 'Approve',
         icon: 'check-circle',
         type: 'script',
-        locations: ['record_header', 'record_more'],
+        locations: ['record_page'],
         target: 'approveOpportunity',
         confirmText: 'Are you sure you want to approve this opportunity?',
         successMessage: 'Opportunity approved successfully!',
@@ -747,7 +747,7 @@ describe('ActionSchema', () => {
         icon: 'arrow-right',
         type: 'modal',
         target: 'transfer_case_modal',
-        locations: ['record_more'],
+        locations: ['record_page'], component: 'action:menu',
         params: [
           {
             name: 'new_owner',
@@ -783,7 +783,7 @@ describe('ActionSchema', () => {
         icon: 'mail',
         type: 'flow',
         target: 'send_quote_flow',
-        locations: ['record_header', 'list_item'],
+        locations: ['record'],
         params: [
           {
             name: 'recipient',
@@ -815,7 +815,7 @@ describe('ActionSchema', () => {
         icon: 'file-spreadsheet',
         type: 'api',
         target: '/api/export/excel',
-        locations: ['list_toolbar'],
+        locations: ['list'],
         successMessage: 'Export started. You will receive an email when ready.',
       };
 
@@ -828,7 +828,7 @@ describe('ActionSchema', () => {
         label: 'Delete',
         icon: 'trash',
         type: 'script',
-        locations: ['record_more'],
+        locations: ['record_page'], component: 'action:menu',
         target: 'deleteRecord',
         confirmText: 'Are you sure you want to delete this record? This action cannot be undone.',
         successMessage: 'Record deleted successfully!',
@@ -845,7 +845,7 @@ describe('ActionSchema', () => {
         label: 'Clone',
         icon: 'copy',
         type: 'script',
-        locations: ['record_more', 'list_item'],
+        locations: ['record'], component: 'action:menu',
         target: 'cloneRecord',
         params: [
           {
@@ -1116,7 +1116,7 @@ describe('ActionSchema - ai block (ADR-0011)', () => {
         label: 'Hint',
         target: 'noop',
         objectName: 'task',
-        locations: ['record_header'],
+        locations: ['record_page'],
         ai: { exposed: true, description: longDescription, paramHints: { recordId: { description: 'The task id.' } } },
       }),
     ).not.toThrow();
@@ -1244,18 +1244,18 @@ describe('ActionSchema - order', () => {
     })).toThrow();
   });
 
-  it('should combine order with variant and locations (record_header primary hint)', () => {
+  it('should combine order with variant and locations (record_page primary hint)', () => {
     const result = ActionSchema.parse({
       name: 'approve',
       label: 'Approve',
       target: 'approve_handler',
-      locations: ['record_header', 'record_more'],
+      locations: ['record_page'],
       variant: 'primary',
       order: -10,
     });
     expect(result.order).toBe(-10);
     expect(result.variant).toBe('primary');
-    expect(result.locations).toContain('record_header');
+    expect(result.locations).toContain('record_page');
   });
 });
 
@@ -1503,13 +1503,31 @@ describe('ACTION_LOCATIONS — canonical source of truth', () => {
   // of producing a silent runtime mismatch.
   it('exposes the full set of supported locations', () => {
     expect([...ACTION_LOCATIONS]).toEqual([
-      'list_toolbar',
-      'list_item',
-      'record_header',
-      'record_more',
+      'list',
+      'record',
+      'record_page',
+      'record_row',
       'record_related',
       'record_section',
     ]);
+  });
+
+  // ─── objectstack#36495 — the page-part words are retired ────────────────
+  //
+  // Locations say what an action acts on. The four words that named a part of
+  // a page are refused with the word to write instead, and the ADR-0087
+  // conversion `action-locations-acted-on` rewrites stored and pre-19 sources.
+  it.each([
+    ['list_toolbar', '`list`'],
+    ['list_item', '`record_row`'],
+    ['record_header', '`record_page`'],
+    ['record_more', "component: 'action:menu'"],
+  ])('refuses the retired page-part word %s with its prescription', (word, prescription) => {
+    const result = ActionLocationSchema.safeParse(word);
+    expect(result.success).toBe(false);
+    const message = result.success ? '' : result.error.issues.map((i) => i.message).join('\n');
+    expect(message).toContain(`\`${word}\``);
+    expect(message).toContain(prescription);
   });
 
   it('ActionLocationSchema accepts every value in ACTION_LOCATIONS', () => {

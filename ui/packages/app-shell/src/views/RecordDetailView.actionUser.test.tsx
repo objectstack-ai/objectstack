@@ -14,7 +14,7 @@
  * the capability gate the engine reads (`user.systemPermissions`) is whatever
  * this object carries. It used to carry identity only — `{id, name, avatar}` —
  * and since `ActionEngine.getActionsForLocation` fails OPEN on `undefined`, every
- * `record_header` / `record_more` action's `requiredPermissions` was silently
+ * `record` / `record_page` action's `requiredPermissions` was silently
  * unenforced on the one surface those locations exist on.
  *
  * Three properties are pinned here, and they pull in different directions:
@@ -69,7 +69,7 @@ describe('resolveActionUser — ADR-0066 D4 capability gate seeding (#3923)', ()
     // backend never reported systemPermissions", and `resolveActionUser` must
     // forward it unchanged so `ActionEngine`'s own `Array.isArray(held)` check
     // reads it as unknown and fails OPEN — collapsing it here would silently
-    // flip that to fail-CLOSED for every record_header/record_more action.
+    // flip that to fail-CLOSED for every record / record_page action.
     const resolved = resolveActionUser(user, true, undefined);
     expect(resolved.systemPermissions).toBeUndefined();
     expect(Array.isArray(resolved.systemPermissions)).toBe(false);

@@ -1,5 +1,15 @@
 # @objectstack/hono
 
+## 19.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [dbe0716]
+- Updated dependencies [ecd10e9]
+  - @objectstack/runtime@19.0.0-next.2
+  - @objectstack/plugin-hono-server@19.0.0-next.2
+  - @objectstack/types@19.0.0-next.2
+
 ## 19.0.0-next.1
 
 ### Patch Changes

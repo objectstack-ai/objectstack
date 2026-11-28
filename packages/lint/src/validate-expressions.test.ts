@@ -1685,7 +1685,7 @@ describe('validateStackExpressions (ADR-0032 build-time)', () => {
     it('flags a bare-field `visible` on a stack action (the trap that hid Mark Done)', () => {
       const issues = validateStackExpressions({
         objects: [{ name: 'showcase_task', fields: { done: { type: 'boolean' }, status: { type: 'select' } } }],
-        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_header'], visible: '!done' }],
+        actions: [{ name: 'mark_done', objectName: 'showcase_task', type: 'script', locations: ['record_page'], visible: '!done' }],
       });
       const v = issues.filter(i => i.where.includes("action 'mark_done' visible"));
       expect(v).toHaveLength(1);
@@ -7149,6 +7149,46 @@ describe('validateStackExpressions — a bare date ordering before date arithmet
   it('CONTROL: the same bare ordering before an ordering of the root read against today() stays clean', () => {
     for (const site of ['start', 'edge', 'decision'] as const) {
       expect(validateStackExpressions(stackWith(site, 'due_date > "2026-01-01" && record.due_date < today()')), site).toEqual([]);
+    }
+  });
+});
+
+// [#38135] A flow CONDITION that compares a date field with `addDays(today(), N)`
+// (or `addMonths`, `date(…)`, `timestamp(…)`) has always been clean here, and the
+// runtime now evaluates it the way it evaluates the `today()` comparison, so it
+// stays clean: this door is unchanged by that fix, at all three sites.
+describe('validateStackExpressions — a date field compared with a Timestamp-returning call stays clean (#38135)', () => {
+  const LOAN = { name: 'library_loan', fields: { due_date: { type: 'date', required: true } } };
+  const stackWith = (site: 'start' | 'edge' | 'decision', condition: string) => ({
+    objects: [LOAN],
+    flows: [{
+      name: 'loan_due',
+      nodes: [
+        {
+          id: 'start', type: 'start',
+          config: { objectName: 'library_loan', triggerType: 'record-after-update', ...(site === 'start' ? { condition } : {}) },
+        },
+        ...(site === 'decision'
+          ? [{ id: 'gate', type: 'decision', config: { conditions: [{ label: 'Due', expression: condition }] } }]
+          : []),
+        { id: 'end', type: 'end' },
+      ],
+      edges: site === 'decision'
+        ? [{ id: 'e1', source: 'start', target: 'gate' }, { id: 'e2', source: 'gate', target: 'end' }]
+        : [{ id: 'e1', source: 'start', target: 'end', ...(site === 'edge' ? { condition } : {}) }],
+    }],
+  });
+
+  it.each(['start', 'edge', 'decision'] as const)('accepts the spellings in a %s condition with no finding', (site) => {
+    for (const condition of [
+      'record.due_date < addDays(today(), 30)',
+      'due_date > "2026-01-01" && addDays(today(), 30) > record.due_date',
+      'record.due_date == addDays(today(), 1)',
+      'record.due_date >= addMonths(today(), 1)',
+      'record.due_date == date("2026-06-21")',
+      'record.due_date < today()',
+    ]) {
+      expect(validateStackExpressions(stackWith(site, condition)), `${site}: ${condition}`).toEqual([]);
     }
   });
 });

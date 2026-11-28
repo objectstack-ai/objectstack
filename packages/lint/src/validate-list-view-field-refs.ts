@@ -448,6 +448,40 @@
  * `groupByField` that resolves to nothing, which is `list-view-field-unknown`
  * at that key.
  *
+ * ## [#35143] A board grouped by a field with no lanes of its own
+ *
+ * {@link LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL}, `warning`. The board
+ * (`ObjectKanban.tsx` in objectui) draws its lanes from the group field's
+ * declared `options`, else — a lookup, a boolean, anything else — from the
+ * distinct values on the cards it has loaded (`lanesFromRecords`). For a
+ * `select` / `radio`, a boolean or a single-valued reference that is a small,
+ * fixed set. For any other field it is not: a text, number or date field
+ * draws one lane per distinct value (often one per card), no lane exists for
+ * a value no loaded card holds, so a card cannot be dragged to it, and an
+ * empty board draws no lanes at all. A multi-valued field (`multiselect`,
+ * `checkboxes`, `tags`, a `multiple` select or reference) puts a card holding
+ * several values in one lane named by all of them together.
+ *
+ * Advisory, not refused: every card still renders and a drag still writes
+ * the lane's value, so the board works as a grouping — it is the wrong one.
+ * Judged only on a list view whose `type` is `kanban`, against the group
+ * field's resolved declaration; a dotted `groupByField`, an unresolved one
+ * (`list-view-field-unknown`) and a field whose type is not readable are not
+ * judged.
+ *
+ * ## [#35143] A filter on a field computed on read
+ *
+ * {@link LIST_VIEW_FILTER_FIELD_VIRTUAL}, `error`. A `formula` field has no
+ * stored column, so the engine refuses every query whose `where` names one
+ * (`assertFilterIsMaterializable` in `@objectstack/objectql`, `400
+ * INVALID_FIELD`): a list view whose own `filter`, or a `userFilters.tabs[]`
+ * preset, keys on a formula opens on that error, every time, with no records.
+ * Virtuality is the spec's storage predicate (`isVirtualSearchField`), the one
+ * the engine's door asks. Judged at an undotted key whose head resolves; a
+ * dotted key whose head is a formula is already {@link LIST_VIEW_FIELD_DOTTED}.
+ * The filter-bar FIELD list (`userFilters.fields`) is not judged here: it
+ * offers a field to filter on, it does not filter.
+ *
  * ## Skips — the same three every field-existence rule in this package takes
  *
  * Resolution is {@link resolveFieldPath}'s and its `unknowable` verdicts are
@@ -471,8 +505,11 @@
 import {
   BOOLEAN_VALUE_TYPES,
   FieldType,
+  REFERENCE_VALUE_TYPES,
   classifyDottedFilterHead,
   isAggregateCompatibleWithFieldType,
+  isMultiValueField,
+  isVirtualSearchField,
   virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import {
@@ -565,6 +602,33 @@ export const LIST_VIEW_KANBAN_LANE_UNKNOWN = 'list-view-kanban-lane-unknown';
  * that name on this module.
  */
 export const LIST_VIEW_KANBAN_LANE_REPEATED = 'list-view-kanban-lane-repeated';
+
+/**
+ * [#35143] A `kanban` board grouped by a field that has no fixed set of lanes.
+ * Advisory. See the section "A board grouped by a field with no lanes of its
+ * own" on this module.
+ */
+export const LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL = 'list-view-kanban-group-field-uncategorical';
+
+/**
+ * [#35143] A list view filter — its own `filter` or a `userFilters.tabs[]`
+ * preset — keyed on a field computed on read (`formula`), which the engine
+ * refuses to filter by. See the section "A filter on a field computed on read"
+ * on this module.
+ */
+export const LIST_VIEW_FILTER_FIELD_VIRTUAL = 'list-view-filter-field-virtual';
+
+/**
+ * [#35143] The field types a board can draw a fixed set of lanes from, when
+ * the field holds one value: the options of a `select` / `radio`, the two
+ * values of a boolean, and the records a single-valued reference names.
+ */
+const KANBAN_CATEGORICAL_TYPES: ReadonlySet<string> = new Set([
+  'select',
+  'radio',
+  ...BOOLEAN_VALUE_TYPES,
+  ...REFERENCE_VALUE_TYPES,
+]);
 
 /**
  * A list view that still carries a key `@objectstack/spec` retired — reported
@@ -1394,6 +1458,36 @@ export function validateListViewFieldRefs(
   };
 
   /**
+   * [#35143] A `kanban` board grouped by a field with no fixed set of lanes —
+   * see the section "A board grouped by a field with no lanes of its own" on
+   * this module. Once per list view, at `kanban.groupByField`.
+   */
+  const checkKanbanGroupField = (listView: AnyRec, object: string, where: string, path: string): void => {
+    if (listView.type !== 'kanban' || !isRec(listView.kanban)) return;
+    const groupBy = strName(listView.kanban.groupByField);
+    if (!groupBy || groupBy.includes('.')) return;
+    const verdict = resolveFieldPath(graph, object, groupBy);
+    if (!verdict || verdict.kind !== 'ok' || !verdict.meta?.type) return;
+    const { type, multiple } = verdict.meta;
+    const multi = isMultiValueField({ type, multiple } as never);
+    if (!multi && KANBAN_CATEGORICAL_TYPES.has(type)) return;
+    findings.push({
+      severity: 'warning',
+      rule: LIST_VIEW_KANBAN_GROUP_FIELD_UNCATEGORICAL,
+      where: `${where} › kanban`,
+      path: `${path}.kanban.groupByField`,
+      message: multi
+        ? `"${object}.${groupBy}" is a multi-valued \`${type}\` field: a card holding several values falls into ` +
+          'one lane named by all of them together'
+        : `"${object}.${groupBy}" is a \`${type}\` field: the board draws a lane per distinct value on its loaded ` +
+          'cards, none for a value no card holds, and none on an empty list',
+      hint:
+        `Group the board by a single-valued \`select\` (one lane per option), a boolean or a lookup, or show ` +
+        `"${groupBy}" as a grid grouping`,
+    });
+  };
+
+  /**
    * Judge ONE written reference at one position.
    *
    * The HEAD segment is what is resolved — see the dotted-path note on this
@@ -1640,6 +1734,7 @@ export function validateListViewFieldRefs(
     }
 
     checkKanbanLanes(listView, bound, where, path);
+    checkKanbanGroupField(listView, bound, where, path);
 
     // [#36370, #36520] The lane foot statistic: the field it names, then the
     // `sum` / `avg` / `min` / `max` over that field's declaration.
@@ -1670,10 +1765,34 @@ export function validateListViewFieldRefs(
     // on every list-view shape, and this rule judges the PARSED stack
     // (`input: 'parsed'` in the authoring-rule registry), where the key can
     // never arrive — the parse refuses it with its prescription first.
+    // [#35143] A filter key naming a field computed on read — see the section
+    // "A filter on a field computed on read" on this module. An undotted key
+    // only: a dotted one is the dotted verdict's, judged by `check` above.
+    const checkFilterVirtual = (raw: unknown, object: string, filterWhere: string, at: string): void => {
+      const written = strName(raw);
+      if (!written || written.includes('.')) return;
+      const verdict = resolveFieldPath(graph, object, written);
+      if (!verdict || verdict.kind !== 'ok' || !isVirtualSearchField(verdict.meta as never)) return;
+      const type = verdict.meta?.type ?? 'formula';
+      findings.push({
+        severity: 'error',
+        rule: LIST_VIEW_FILTER_FIELD_VIRTUAL,
+        where: filterWhere,
+        path: at,
+        message:
+          `filter key "${written}" is a \`${type}\` field of "${object}": it has no stored column, so the engine ` +
+          'refuses the list\'s query (400 INVALID_FIELD) and the view opens on that error',
+        hint:
+          'Filter on the stored fields the formula reads, or keep the value in a stored field written when its ' +
+          `sources change; or remove the "${written}" condition`,
+      });
+    };
+
     const checkFilter = (filter: unknown, filterWhere: string, filterPath: string): void => {
       if (filter === undefined || filter === null) return;
       walkFilterFieldKeys(filter, filterPath, ({ field, path: at }) => {
         check(field, bound, 'error', filterWhere, at, 'filter key', 'filter');
+        checkFilterVirtual(field, bound, filterWhere, at);
       });
     };
 

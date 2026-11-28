@@ -94,10 +94,9 @@ import {
     type InboundHookRouteMatch,
 } from '@objectstack/core';
 import { automationAddressRegistryOf } from './automation-address.js';
-import type { ITriggerApiService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps } from '../domain-handler-registry.js';
-import { catalogNotImplemented } from './own-door-bridge.js';
+import { catalogNotImplemented, readDoorSlot } from './own-door-bridge.js';
 
 /** The slot the member lives on — the trigger package's own name (ADR-0041 §2). */
 const TRIGGER_API_SLOT = 'trigger-api';
@@ -181,8 +180,8 @@ export async function handleInboundHookRequest(
     context: HttpProtocolContext,
     hook: InboundHookRouteMatch,
 ): Promise<HttpDispatcherResult> {
-    const service = await deps.resolveService(context, TRIGGER_API_SLOT, context.environmentId) as
-        Pick<ITriggerApiService, 'handleInboundHook'> | undefined;
+    // The request's own kernel serves the door, and only it (`readDoorSlot`).
+    const service = await readDoorSlot(deps, context, TRIGGER_API_SLOT);
     // [#37662] The `501` is the operation-message catalog's, in the request's
     // top `Accept-Language` tag, as the own-door bridge answers its own.
     if (!service) {
@@ -237,7 +236,8 @@ export async function handleInboundHookRequest(
     const hookId = decodeHookSegment(hook.hookId);
     if (hook.qualifier !== undefined) {
         const qualifier = decodeHookSegment(hook.qualifier);
-        const engine = await deps.resolveService(context, 'automation', context.environmentId) as InboundHookEngine | undefined;
+        // The request kernel's engine judges the address, as its member serves it (`readDoorSlot`).
+        const engine = await readDoorSlot(deps, context, 'automation') as InboundHookEngine | undefined;
         const registry = await inboundHookRegistry(deps, context);
         const namespaceOwners = typeof registry?.getNamespaceOwners === 'function' ? registry.getNamespaceOwners(qualifier) ?? [] : [];
         const slot = typeof engine?.inboundHookSlot === 'function' ? engine.inboundHookSlot(flowName, { qualifier, namespaceOwners }) : undefined;
