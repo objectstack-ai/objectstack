@@ -8,7 +8,7 @@
 
 /**
  * `data-table`'s select-first cell model (objectstack#35684), behind the
- * `GridCellSelection` a host mounts. The list page mounts it through
+ * `GridCellSelectionProvider` a host mounts. The list page mounts it through
  * `ObjectGrid`'s `cellSelection`; its keys while selected and while editing
  * are `data-table-keys-35687.test.tsx`.
  *
@@ -336,7 +336,6 @@ describe('data-table select-first — a cell that opens no editor says why', () 
 });
 
 describe('data-table select-first — no edit-only column, ever (objectstack#35554, objectstack#35685)', () => {
-  const editHeader = (c: HTMLElement) => c.querySelector('[data-testid="data-table-edit-column-header"]');
   const lastHeader = (c: HTMLElement) => [...c.querySelectorAll('thead th')].pop()!;
   // The shape `ObjectGrid` hands the list page: a save path and no row menu.
   const EDIT_ONLY = { rowActions: true, onRowSave: () => Promise.resolve() };
@@ -344,12 +343,10 @@ describe('data-table select-first — no edit-only column, ever (objectstack#355
   it('none at rest and none after a commit: the commit saves itself', () => {
     const onRowSave = vi.fn(() => Promise.resolve());
     const t = renderTable({ extra: { ...EDIT_ONLY, onRowSave } });
-    expect(editHeader(t.container)).toBeNull();
     expect(lastHeader(t.container)).toHaveTextContent('Site');
     fireEvent.click(t.cell(0, 0));
     fireEvent.change(t.catcher()!, { target: { value: 'A' } });
     fireEvent.keyDown(t.editor()!, { key: 'Enter' });
-    expect(editHeader(t.container)).toBeNull();
     expect(lastHeader(t.container)).toHaveTextContent('Site');
     expect(t.container.querySelector('button[title="Save row"]')).toBeNull();
     expect(onRowSave).toHaveBeenCalledTimes(1);
@@ -625,5 +622,40 @@ describe('data-table select-first — a read-only cell says so in the grid (obje
     const t = renderTable({ selection: null, extra: { editable: false } });
     expect(t.container.querySelector('table')).not.toHaveAttribute('role');
     expect(t.container.querySelector('[aria-readonly]')).toBeNull();
+  });
+});
+
+describe('data-table select-first — an injected editor keeps the model\'s keys (objectstack#35687)', () => {
+  // An editor opens only inside the select-first model (an `editable` table
+  // with no select-first host is read-only), so a host-injected editor's Tab
+  // and Ctrl/Cmd+Enter always follow that model.
+  const renderCellEditor = (ctx: { value: unknown; stage: (v: unknown) => void }) => (
+    <textarea aria-label="name editor" value={String(ctx.value ?? '')} onChange={(e) => ctx.stage(e.target.value)} />
+  );
+  const openEditor = () => {
+    const t = renderTable({ extra: { renderCellEditor } });
+    fireEvent.click(t.cell(0, 0));
+    fireEvent.keyDown(t.catcher()!, { key: 'Enter' });
+    const area = screen.getByLabelText('name editor');
+    fireEvent.change(area, { target: { value: 'Alpha 2' } });
+    return { t, area };
+  };
+
+  it('Tab commits a multi-line editor and moves to the next cell', () => {
+    const { t, area } = openEditor();
+    fireEvent.keyDown(area, { key: 'Tab' });
+    expect(screen.queryByLabelText('name editor')).toBeNull();
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'name', 'Alpha 2', ROWS[0]);
+    expect(t.cell(0, 1)).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('Enter is a new line; Ctrl/Cmd+Enter commits and the cell stays selected', () => {
+    const { t, area } = openEditor();
+    fireEvent.keyDown(area, { key: 'Enter' });
+    expect(screen.getByLabelText('name editor')).toBeInTheDocument();
+    fireEvent.keyDown(area, { key: 'Enter', ctrlKey: true });
+    expect(screen.queryByLabelText('name editor')).toBeNull();
+    expect(t.onCellChange).toHaveBeenLastCalledWith(0, 'name', 'Alpha 2', ROWS[0]);
+    expect(t.cell(0, 0)).toHaveAttribute('aria-selected', 'true');
   });
 });

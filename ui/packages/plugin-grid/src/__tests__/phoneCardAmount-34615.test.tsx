@@ -155,3 +155,105 @@ describe('the phone list card draws its amount whole, on a line of its own (obje
     expect(within(card).getByTestId('grid-card-subtitle').textContent).toBe('Wayne Enterprises · Sign by 11-27');
   });
 });
+
+/**
+ * objectstack#37890 — the amount slot takes any column whose value draws as
+ * money, not only a literal `currency` column: a formula declaring
+ * `returnType: 'currency'` and a summary declaring its currency are amounts
+ * too, so an order line's card shows the line total rather than the unit
+ * price. Measured on the base tree with this fixture: with `unit_price` shown
+ * first the slot read the unit price; with `total_price` first it still read
+ * the unit price and the total fell into the subtitle; with no plain currency
+ * column there was no slot at all.
+ *
+ * ── Directions on the base tree (measured before the fix) ────────────────
+ *   formula total shown before the unit price → slot holds the total   RED
+ *   formula total as the only money column → slot holds the total      RED
+ *   currency summary as the only money column → slot holds it          RED
+ *   control: a view that presents the formula as text → not promoted   GREEN
+ *   control: a number-returning formula → not promoted                 GREEN
+ */
+describe('the phone card amount slot takes a formula or summary that draws as money (objectstack#37890)', () => {
+  const LINE_OBJECT = 'order_line_37890';
+  const LINE_FIELDS = {
+    id: { type: 'text' },
+    name: { type: 'text', label: 'Product' },
+    quantity: { type: 'number', label: 'Quantity' },
+    unit_price: { type: 'currency', label: 'Unit Price' },
+    total_price: {
+      type: 'formula',
+      label: 'Total',
+      returnType: 'currency',
+      expression: 'record.quantity * record.unit_price * (1 - record.discount)',
+    },
+    line_weight: { type: 'formula', label: 'Weight', returnType: 'number', expression: 'record.quantity * 3' },
+    lines_total: {
+      type: 'summary',
+      label: 'Lines Total',
+      summaryOperations: { object: 'order_item', field: 'amount', function: 'sum' },
+      currencyConfig: { currencyMode: 'dynamic' },
+    },
+  };
+  const LINE_ROWS = [
+    { id: 'l1', name: 'Admin Training Workshop', quantity: 2, unit_price: 6000, total_price: 10800, line_weight: 6, lines_total: 777 },
+  ];
+
+  async function lineCard(columns: unknown[]) {
+    setWidth(390);
+    const dataSource = {
+      find: vi.fn(async () => ({ data: LINE_ROWS, total: LINE_ROWS.length, hasMore: false, pageSize: 50 })),
+      getObjectSchema: async (name: string) => ({ name, nameField: 'name', fields: structuredClone(LINE_FIELDS) }),
+    } as never;
+    render(
+      <LocalizationProvider value={{ currency: 'CNY', locale: 'en' }}>
+        <ActionProvider>
+          <SchemaRendererProvider dataSource={dataSource}>
+            <ObjectGrid
+              schema={{ type: 'object-grid', objectName: LINE_OBJECT, columns, pagination: { pageSize: 50 } } as never}
+              dataSource={dataSource}
+            />
+          </SchemaRendererProvider>
+        </ActionProvider>
+      </LocalizationProvider>,
+    );
+    // The quantity column draws through the number cell once the field defs
+    // arrive; the money cells below read the same defs.
+    await waitFor(() => expect(screen.getByTestId('grid-card-subtitle').textContent).toMatch(/^2\b/));
+    expect(document.querySelector('table'), 'the card layout, not the table').toBeNull();
+    return cardOf('Admin Training Workshop');
+  }
+  const fields = (...names: string[]) => names.map((field) => ({ field }));
+
+  it('takes a currency formula shown before the unit price: the card reads the line total', async () => {
+    const card = await lineCard(fields('name', 'quantity', 'total_price', 'unit_price'));
+    expect(within(card).getByTestId('grid-card-amount').textContent).toBe('CN¥10,800.00');
+    expect(within(card).getByTestId('grid-card-subtitle').textContent).toBe('2 · CN¥6,000.00');
+  });
+
+  it('takes a currency formula that is the only money column', async () => {
+    const card = await lineCard(fields('name', 'quantity', 'total_price'));
+    expect(within(card).getByTestId('grid-card-amount').textContent).toBe('CN¥10,800.00');
+    expect(within(card).getByTestId('grid-card-subtitle').textContent).toBe('2');
+  });
+
+  it('takes a summary that declares its currency', async () => {
+    const card = await lineCard(fields('name', 'quantity', 'lines_total'));
+    expect(within(card).getByTestId('grid-card-amount').textContent).toBe('CN¥777.00');
+  });
+
+  it('keeps the first money column in view order: a unit price shown first stays the amount', async () => {
+    const card = await lineCard(fields('name', 'quantity', 'unit_price', 'total_price'));
+    expect(within(card).getByTestId('grid-card-amount').textContent).toBe('CN¥6,000.00');
+  });
+
+  it('CONTROL: a number-returning formula is not an amount', async () => {
+    const card = await lineCard(fields('name', 'quantity', 'line_weight'));
+    expect(within(card).queryByTestId('grid-card-amount-line')).toBeNull();
+    expect(within(card).getByTestId('grid-card-subtitle').textContent).toBe('2 · 6');
+  });
+
+  it('CONTROL: a view that presents the currency formula as text keeps it a plain value', async () => {
+    const card = await lineCard([{ field: 'name' }, { field: 'quantity' }, { field: 'total_price', type: 'text' }]);
+    expect(within(card).queryByTestId('grid-card-amount-line')).toBeNull();
+  });
+});
