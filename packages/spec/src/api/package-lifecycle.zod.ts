@@ -378,6 +378,112 @@ export const ReassignOrphanedMetadataResponseSchema = lazySchema(() => z.object(
 }));
 
 /**
+ * One item a move names: the item's metadata type and name, and for a bundled
+ * type (an email template's locale) the one member. See
+ * {@link MoveIntoPackageRequestSchema}.
+ */
+export const MoveIntoPackageItemSchema = lazySchema(() => z.object({
+  type: z.string().min(1).describe('Metadata type of the loose item (singular, e.g. `flow`, `dataset`, `object`).'),
+  name: z.string().min(1).describe('Machine name of the loose item.'),
+  member: z.string().min(1).optional().describe(
+    'The bundle member to move, for a bundled type (an email template\'s locale). Omitted, the canonical member.',
+  ),
+}).strict());
+
+/**
+ * `POST /packages/:id/move-in` — move a selection of loose (package-less)
+ * metadata items into one installed, writable package; the client method is
+ * `packages.moveIn` (ADR-0084 amendment of 2026-11-26, "Loose items stay where
+ * they are, and one door moves them").
+ *
+ * Every item goes through the save door into the target, so it is refused
+ * with the save door's own code, and the selection is judged as a set first:
+ * a moved item that names a loose item left behind is refused (ADR-0150
+ * D3 (a)). Any refusal refuses the whole call and nothing is written.
+ * `dryRun: true` answers the same judgement and writes nothing.
+ */
+export const MoveIntoPackageRequestSchema = lazySchema(() => z.object({
+  items: z.array(MoveIntoPackageItemSchema).min(1).describe(
+    'The loose items to move: one, several, or every loose item of a type, across types. Each names an item '
+    + 'bound to no package; an item a package holds, a customization pair item and an overlay of a shipped item '
+    + 'are not loose and are refused. Listed once each.',
+  ),
+  dryRun: z.boolean().optional().describe(
+    'Judge the move and answer what it would do, writing nothing. Omitted or false, the move is made.',
+  ),
+}).strict().describe(
+  'Body of `POST /packages/:id/move-in`: the selection of loose items to move into the package the path names.',
+));
+
+/** What a move changes in one moved item's addresses. See {@link MoveIntoPackageResponseSchema}. */
+export const MoveIntoPackageMovedItemSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type of the moved item.'),
+  name: z.string().describe('Name of the moved item; a move never renames.'),
+  member: z.string().optional().describe('The bundle member moved, for a bundled type.'),
+  states: z.array(z.enum(['active', 'draft'])).min(1).describe(
+    'Which of the item\'s rows moved: its published row, its pending draft, or both.',
+  ),
+  environmentAddress: z.string().optional().describe(
+    'The environment-qualified address the item answered at before the move (`_env/NAME`), present for a type '
+    + 'addressed by package (ADR-0150 D5). After the move it no longer resolves: the item answers at '
+    + '`qualifiedAddress` and, while it is the only holder of its name, at its bare name.',
+  ),
+  qualifiedAddress: z.string().optional().describe(
+    'The package-qualified address the item answers at after the move (`NAMESPACE/NAME`), present beside '
+    + '`environmentAddress`.',
+  ),
+  aiFaceName: z.object({
+    before: z.string().describe('The name AI clients listed the item under before the move.'),
+    after: z.string().describe('The name AI clients list it under after the move.'),
+  }).optional().describe(
+    'The AI face name change (ADR-0150 D6), present for a tool, skill, agent or object-less action whose face '
+    + 'the move changes.',
+  ),
+}));
+
+/** One refused item of a move. See {@link MoveIntoPackageResponseSchema}. */
+export const MoveIntoPackageRefusedItemSchema = lazySchema(() => z.object({
+  type: z.string().describe('Metadata type of the refused item.'),
+  name: z.string().describe('Name of the refused item.'),
+  member: z.string().optional().describe('The bundle member, for a bundled type.'),
+  code: z.string().describe(
+    'The refusal\'s code: the save door\'s own (`WRITABLE_PACKAGE_REQUIRED`, `NAMESPACE_PREFIX`, …), '
+    + '`NOT_LOOSE` for an item bound to a package or not found, or `REFERENCE_LEFT_BEHIND` for an item that '
+    + 'names a loose item the selection leaves behind.',
+  ),
+  error: z.string().describe('What refused the item and what to do.'),
+  references: z.array(z.object({
+    type: z.string().describe('Metadata type of the loose item left behind.'),
+    name: z.string().describe('Name of the loose item left behind.'),
+  })).optional().describe(
+    'For `REFERENCE_LEFT_BEHIND`: every loose item this item names that the selection leaves behind. Adding '
+    + 'them to the selection moves them together.',
+  ),
+}));
+
+/**
+ * Answer of `POST /packages/:id/move-in`. Whole or nothing: `refused` empty
+ * exactly when the move was made (or, on a dry run, would be made).
+ */
+export const MoveIntoPackageResponseSchema = lazySchema(() => z.object({
+  outcome: z.enum(['moved', 'would_move', 'refused']).describe(
+    '`moved`: every item moved. `would_move`: a dry run that would move every item; nothing was written. '
+    + '`refused`: at least one item is refused, so nothing moved.',
+  ),
+  targetPackageId: z.string().describe('The package the items move into.'),
+  moved: z.array(MoveIntoPackageMovedItemSchema).describe(
+    'Every item, with what the move changes in its addresses. Empty on `refused`.',
+  ),
+  refused: z.array(MoveIntoPackageRefusedItemSchema).describe(
+    'Every refused item, each with its own code. Empty unless `outcome` is `refused`.',
+  ),
+  commitId: z.string().optional().describe('The package commit the move recorded (absent on a dry run or a refusal).'),
+}).strict().describe(
+  'Answer of the move door: what moved (or would move) and what each moved item\'s addresses become, or every '
+  + 'refusal with nothing moved.',
+));
+
+/**
  * `POST /packages/:id/duplicate` — clone this base into a NEW writable
  * package, re-namespacing objects and rewriting references (ADR-0070 D4).
  *
@@ -766,6 +872,21 @@ export type PackageExportBundleParsed = z.infer<typeof PackageExportBundleSchema
 export type ReassignOrphanedMetadataResponse = z.input<typeof ReassignOrphanedMetadataResponseSchema>;
 /** Post-parse shape of {@link ReassignOrphanedMetadataResponse} — defaults applied, transforms run (ADR-0122). */
 export type ReassignOrphanedMetadataResponseParsed = z.infer<typeof ReassignOrphanedMetadataResponseSchema>;
+export type MoveIntoPackageItem = z.input<typeof MoveIntoPackageItemSchema>;
+/** Post-parse shape of {@link MoveIntoPackageItem} — defaults applied, transforms run (ADR-0122). */
+export type MoveIntoPackageItemParsed = z.infer<typeof MoveIntoPackageItemSchema>;
+export type MoveIntoPackageRequest = z.input<typeof MoveIntoPackageRequestSchema>;
+/** Post-parse shape of {@link MoveIntoPackageRequest} — defaults applied, transforms run (ADR-0122). */
+export type MoveIntoPackageRequestParsed = z.infer<typeof MoveIntoPackageRequestSchema>;
+export type MoveIntoPackageMovedItem = z.input<typeof MoveIntoPackageMovedItemSchema>;
+/** Post-parse shape of {@link MoveIntoPackageMovedItem} — defaults applied, transforms run (ADR-0122). */
+export type MoveIntoPackageMovedItemParsed = z.infer<typeof MoveIntoPackageMovedItemSchema>;
+export type MoveIntoPackageRefusedItem = z.input<typeof MoveIntoPackageRefusedItemSchema>;
+/** Post-parse shape of {@link MoveIntoPackageRefusedItem} — defaults applied, transforms run (ADR-0122). */
+export type MoveIntoPackageRefusedItemParsed = z.infer<typeof MoveIntoPackageRefusedItemSchema>;
+export type MoveIntoPackageResponse = z.input<typeof MoveIntoPackageResponseSchema>;
+/** Post-parse shape of {@link MoveIntoPackageResponse} — defaults applied, transforms run (ADR-0122). */
+export type MoveIntoPackageResponseParsed = z.infer<typeof MoveIntoPackageResponseSchema>;
 export type DuplicatePackageResponse = z.input<typeof DuplicatePackageResponseSchema>;
 /** Post-parse shape of {@link DuplicatePackageResponse} — defaults applied, transforms run (ADR-0122). */
 export type DuplicatePackageResponseParsed = z.infer<typeof DuplicatePackageResponseSchema>;
