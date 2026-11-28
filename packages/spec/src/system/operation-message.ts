@@ -398,6 +398,19 @@ export function operationMessageTranslationKey(messageKey: string): string {
  * `{{member}}`, `{{table}}`, `{{name}}` and `{{packageId}}` are code, table,
  * item and package names, never translated; `{{noun}}` is one of the
  * `catalog_activation_noun_*` keys, rendered in the same locale.
+ *
+ * The `capability_unavailable_*` keys are the `501` a dispatcher domain
+ * answers when its route is mounted and nothing implements the capability
+ * behind it (`capabilityUnavailable`, `domains/unavailable.ts` and the
+ * custom-endpoint flow target, `@objectstack/runtime`, #37864), read the same
+ * way. Their English is byte-identical to `serviceUnavailableMessage(slot)`
+ * (`core-services.zod.ts`), the sentence discovery reports for the slot under
+ * `services.<slot>.message`: discovery is a machine-read surface and stays
+ * English, so only the `501` follows the request's language, and a pin holds
+ * the two English sentences equal for every slot. `_ui`, `_ai` and `_search`
+ * carry the slots with a sentence of their own; every other slot reads
+ * `_install` (`{{package}}`, the slot's provider package) or `_unshipped`
+ * (`{{slot}}`); package, slot, plugin and route names are never translated.
  */
 export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> = {
   en: {
@@ -544,6 +557,14 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     security_audience_reopen_unsupported:
       "This deployment's security service does not implement re-opening a dismissed audience-binding suggestion, so the dismissal stands.",
     share_links_unconfigured: 'Sharing is not configured',
+    capability_unavailable_install: 'Install {{package}} to enable',
+    capability_unavailable_unshipped: "No implementation ships for the '{{slot}}' slot — register a service under it to enable",
+    capability_unavailable_ui:
+      'Served by the protocol service — register MetadataPlugin (@objectstack/metadata-protocol) to enable',
+    capability_unavailable_ai:
+      'Provided by @objectstack/service-ai in ObjectOS Cloud/Enterprise — no implementation ships in the open framework',
+    capability_unavailable_search:
+      "No implementation ships for the 'search' slot — a dedicated search engine (Elasticsearch/Meilisearch); register a service under it to enable. Cross-object search does not depend on it: GET {basePath}/search is served by the protocol itself, and whether it is served on this host is reported by capabilities.search — not by this slot.",
   },
   'zh-CN': {
     permission_denied: '您没有执行此操作的权限，如需访问请联系管理员。',
@@ -626,12 +647,12 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     packages_commit_rollback_unsupported: '不支持回滚到某次提交。',
     packages_orphan_adoption_unsupported: '不支持认领孤立的元数据。',
     packages_duplication_unsupported: '不支持复制软件包。',
-    packages_customization_ensure_unsupported: '不支持确保定制软件包存在。',
+    packages_customization_ensure_unsupported: '不支持确保定制包存在。',
     automation_connector_credentials_unsupported:
       '此部署挂载的自动化服务不支持连接器凭据：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
     automation_connector_connections_unsupported:
       '此部署挂载的自动化服务不支持连接器连接：它未实现 `IAutomationService` 的可选成员 `{{member}}`。未读取或更改任何内容。',
-    automation_flow_clone_unsupported: '不支持复制流程：副本要存入一个软件包，而此部署没有能够确保定制软件包存在并将流程保存进去的元数据协议。',
+    automation_flow_clone_unsupported: '不支持复制流程：副本要存入一个软件包，而此部署没有能够确保定制包存在并将流程保存进去的元数据协议。',
     automation_resume_unsupported: '不支持恢复运行。',
     automation_run_cancel_unsupported: '此部署挂载的自动化服务不支持取消运行：它未实现 `IAutomationService` 的可选成员 `cancelRun`。没有取消任何运行。',
     automation_run_restore_unsupported:
@@ -648,10 +669,16 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     catalog_activation_noun_queue: '声明的队列',
     catalog_activation_noun_assignment_rule: '声明的分配规则',
     permission_set_clone_pair_unsupported:
-      "权限集 '{{name}}' 由只读软件包 '{{packageId}}' 提供，因此它的副本应存入该软件包配对的定制软件包，而此部署的元数据协议无法确保该定制软件包存在。",
+      "权限集 '{{name}}' 由只读软件包 '{{packageId}}' 提供，因此它的副本应存入该软件包配对的定制包，而此部署的元数据协议无法确保该定制包存在。",
     permission_set_clone_no_protocol: '此部署没有可用于保存副本的元数据协议，因此无法在这里复制权限集。',
     security_audience_reopen_unsupported: '此部署的安全服务未实现重新打开已忽略的受众绑定建议，因此该忽略保持有效。',
     share_links_unconfigured: '未配置共享。',
+    capability_unavailable_install: '安装 {{package}} 即可启用。',
+    capability_unavailable_unshipped: "'{{slot}}' 槽位没有随附的实现：在该槽位下注册一个服务即可启用。",
+    capability_unavailable_ui: '由协议服务提供：注册 MetadataPlugin（@objectstack/metadata-protocol）即可启用。',
+    capability_unavailable_ai: '由 ObjectOS Cloud/Enterprise 中的 @objectstack/service-ai 提供，开源框架不附带实现。',
+    capability_unavailable_search:
+      "'search' 槽位没有随附的实现：它对应专用搜索引擎（Elasticsearch/Meilisearch），在该槽位下注册一个服务即可启用。跨对象搜索不依赖它：GET {basePath}/search 由协议本身提供，本主机是否提供它由 capabilities.search 报告，而不是由这个槽位报告。",
   },
   'ja-JP': {
     permission_denied: 'この操作を実行する権限がありません。アクセスが必要な場合は管理者にお問い合わせください。',
@@ -790,6 +817,15 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     permission_set_clone_no_protocol: 'このデプロイメントにはコピーを保存するためのメタデータプロトコルがないため、ここでは権限セットを複製できません。',
     security_audience_reopen_unsupported: 'このデプロイメントのセキュリティサービスは却下された対象者バインドの提案を再度開く機能を実装していないため、却下はそのまま有効です。',
     share_links_unconfigured: '共有が構成されていません。',
+    capability_unavailable_install: '有効にするには {{package}} をインストールしてください。',
+    capability_unavailable_unshipped:
+      "'{{slot}}' スロットには同梱の実装がありません。有効にするには、このスロットにサービスを登録してください。",
+    capability_unavailable_ui:
+      'プロトコルサービスが提供します。有効にするには MetadataPlugin（@objectstack/metadata-protocol）を登録してください。',
+    capability_unavailable_ai:
+      'ObjectOS Cloud/Enterprise の @objectstack/service-ai が提供します。オープンフレームワークには実装が同梱されていません。',
+    capability_unavailable_search:
+      "'search' スロットには同梱の実装がありません。これは専用の検索エンジン（Elasticsearch/Meilisearch）用のスロットで、有効にするにはこのスロットにサービスを登録してください。オブジェクト横断検索はこれに依存しません。GET {basePath}/search はプロトコル自体が提供し、このホストで提供されているかどうかはこのスロットではなく capabilities.search が報告します。",
   },
   'es-ES': {
     permission_denied:
@@ -937,6 +973,15 @@ export const BUILTIN_OPERATION_MESSAGES: Record<string, Record<string, string>> 
     security_audience_reopen_unsupported:
       'El servicio de seguridad de esta implementación no implementa reabrir una sugerencia de vinculación de audiencia descartada, por lo que el descarte se mantiene.',
     share_links_unconfigured: 'El uso compartido no está configurado.',
+    capability_unavailable_install: 'Instale {{package}} para habilitarlo.',
+    capability_unavailable_unshipped:
+      "No se incluye ninguna implementación para la ranura '{{slot}}': registre un servicio en ella para habilitarla.",
+    capability_unavailable_ui:
+      'Lo proporciona el servicio de protocolo: registre MetadataPlugin (@objectstack/metadata-protocol) para habilitarlo.',
+    capability_unavailable_ai:
+      'Lo proporciona @objectstack/service-ai en ObjectOS Cloud/Enterprise; el framework abierto no incluye ninguna implementación.',
+    capability_unavailable_search:
+      "No se incluye ninguna implementación para la ranura 'search': corresponde a un motor de búsqueda dedicado (Elasticsearch/Meilisearch); registre un servicio en ella para habilitarla. La búsqueda entre objetos no depende de ella: GET {basePath}/search lo sirve el propio protocolo, y si se sirve en este host lo indica capabilities.search, no esta ranura.",
   },
 };
 

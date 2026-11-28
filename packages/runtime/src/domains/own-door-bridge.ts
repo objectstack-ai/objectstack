@@ -274,7 +274,12 @@ function notImplementedSentence(
  * the comment doors (`comments.ts`) and the webhook redelivery door
  * (`webhooks.ts`, both #37610), the approval action-page door (`approvals.ts`)
  * and the inbound automation hooks (`automation-hooks.ts`, both #37662), and
- * the other domain modules' `501`s (#37811).
+ * the other domain modules' `501`s (#37811), `capabilityUnavailable`
+ * (`unavailable.ts`, #37864) among them. Two callers read it directly: the
+ * activation door (`catalog-activation.ts`), for the noun its `501` names in
+ * the same language, and `capabilityUnavailableMessageFor`
+ * (`unavailable.ts`), for the custom-endpoint flow target's `501`, which
+ * builds its own envelope.
  */
 export function requestLocaleOf(context: HttpProtocolContext): string | undefined {
     const headers = (context.request as { headers?: unknown } | undefined)?.headers as
