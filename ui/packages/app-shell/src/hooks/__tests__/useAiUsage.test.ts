@@ -91,6 +91,55 @@ describe('useAiUsage', () => {
     expect(result.current.usage).toBeNull();
   });
 
+  // cloud#5159 — a paid plan's answer may carry the two allowance tiers.
+  describe('optional `tiers`', () => {
+    const TIERS = {
+      personal: { fraction: 1, resetsAt: '2026-12-01T00:00:00.000Z' },
+      teamPool: { fraction: 0.25, resetsAt: null },
+      usingTeamPool: true,
+      notice: { en: 'Using the team pool.', zh: '正在使用团队共享额度。', ja: 'チーム枠を使用中。', es: 'Usando el fondo del equipo.' },
+    };
+
+    async function read(body: unknown) {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(okResponse(body)));
+      const { result } = renderHook(() => useAiUsage({ apiBase: '/api/v1/ai' }));
+      await waitFor(() => expect(result.current.usage !== null || result.current.error !== undefined).toBe(true));
+      return result.current;
+    }
+
+    it('reads a valid `tiers` beside the pool and its split', async () => {
+      const r = await read({ ...RESP, tiers: TIERS });
+      expect(r.usage).toEqual({ ...RESP, tiers: TIERS });
+      expect(r.error).toBeUndefined();
+    });
+
+    it('reads `personal: null` (a pool-only caller) and `notice: null` as a normal reading', async () => {
+      const tiers = { ...TIERS, personal: null, usingTeamPool: false, notice: null };
+      const r = await read({ pool: POOL, tiers });
+      expect(r.usage).toEqual({ pool: POOL, tiers });
+      expect(r.error).toBeUndefined();
+    });
+
+    it('copies `tiers` to its declared fields only', async () => {
+      const r = await read({ pool: POOL, tiers: { ...TIERS, tokens: 123, teamPool: { ...TIERS.teamPool, used: 999 } } });
+      expect(r.usage?.tiers).toEqual(TIERS);
+    });
+
+    it.each([
+      ['a string', 'paid'],
+      ['no teamPool', { ...TIERS, teamPool: undefined }],
+      ['a token count for a fraction', { ...TIERS, teamPool: { fraction: '25%', resetsAt: null } }],
+      ['a personal tier that is not one', { ...TIERS, personal: { fraction: 0.5 } }],
+      ['no usingTeamPool', { ...TIERS, usingTeamPool: undefined }],
+      ['a notice missing a language', { ...TIERS, notice: { en: 'x', zh: 'x', ja: 'x' } }],
+    ])('drops a malformed `tiers` (%s) on its own — the pool and its split still stand', async (_label, tiers) => {
+      const r = await read({ ...RESP, tiers });
+      expect(r.usage).toEqual(RESP);
+      expect(r.usage).not.toHaveProperty('tiers');
+      expect(r.error).toBeUndefined();
+    });
+  });
+
   it('fails soft on a non-2xx (endpoint absent on an older backend) — usage stays null', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 } as unknown as Response);
     vi.stubGlobal('fetch', fetchMock);

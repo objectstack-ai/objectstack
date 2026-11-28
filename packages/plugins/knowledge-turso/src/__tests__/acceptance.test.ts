@@ -426,6 +426,44 @@ for (const kind of ['memory', 'file'] as StoreKind[]) {
       expect((await adapter.search('long name', { source: long, topK: 1 })).length).toBe(1);
       await expect(adapter.search('x', { source: bad, topK: 1 })).rejects.toThrow(/cannot name a table/);
     });
+
+    it('a search narrowed to a few records reads them through the source_record_id index, never by scanning the table', async () => {
+      // Every statement the adapter runs, so the search's own SQL is planned below.
+      const client = store.client();
+      const ran: Array<{ sql: string; args: unknown }> = [];
+      const recording = new Proxy(client, {
+        get(target, prop) {
+          const value: unknown = Reflect.get(target, prop, target);
+          if (prop === 'execute') {
+            return (stmt: { sql: string; args?: unknown }) => {
+              ran.push({ sql: stmt.sql, args: stmt.args });
+              return target.execute(stmt as never);
+            };
+          }
+          return typeof value === 'function' ? (value as (...a: unknown[]) => unknown).bind(target) : value;
+        },
+      });
+      const adapter = new TursoKnowledgeAdapter({ id: 'under_test', client: recording, embedder: new FakeEmbedder() });
+      const s = source('narrowed');
+      await adapter.upsert(
+        Array.from({ length: 40 }, (_, i) => doc(s, `r${i}`, `harbour crane passage ${i}`)),
+        ctx(s),
+      );
+      ran.length = 0;
+      const hits = await adapter.search('harbour crane', {
+        source: s, topK: 5, organizationIds: ['org_a'], scope: [{ kind: 'record', ids: ['r3', 'r7'] }],
+      });
+      expect(hits).toEqual([]); // no passage carries org_a: the organization filter still applies
+      const search = ran.find((r) => r.sql.trimStart().startsWith('WITH'));
+      expect(search).toBeDefined();
+      const plan = await client.execute({ sql: `EXPLAIN QUERY PLAN ${search!.sql}`, args: search!.args as never });
+      const details = plan.rows.map((r) => String(r.detail));
+      const table = `knowledge_${s.name}_g1`;
+      expect(details.some((d) => d.includes(`USING INDEX ${table}_record`))).toBe(true);
+      // Neither leg nor the keyword statistics reads the passage table whole (its
+      // keyword index, `<table>-fts`, is searched by MATCH, a virtual table's own plan).
+      expect(details.filter((d) => new RegExp(`^SCAN (${table}|p)(\\s|$)`).test(d))).toEqual([]);
+    });
   });
 }
 
