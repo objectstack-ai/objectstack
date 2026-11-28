@@ -189,7 +189,7 @@ export const SEARCH_VISIBLE_IDS_MAX = SEARCH_SCOPE_MAX_IDS;
  *   on the caller's terms alone, as before, and its hits re-checked one by one.
  *
  * A returned term may hold no ids: the caller may read none of the records the
- * search could answer.
+ * search could answer. The service does not apply such a narrowing.
  */
 export function narrowToVisible(
   terms: readonly AdapterScopeTerm[] | undefined,

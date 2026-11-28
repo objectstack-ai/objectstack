@@ -2607,14 +2607,14 @@ export class KnowledgeService implements IKnowledgeService {
    * more than {@link SEARCH_VISIBLE_IDS_MAX}, the source is handed them as a
    * `record` term, intersected with the caller's own scope, so its adapter
    * ranks only those rows and a narrow caller's answers are not crowded out of
-   * the refill cap by rows they could never be served. A source whose narrowed
-   * term holds no id is not searched: the caller may read none of what it
-   * could answer.
+   * the refill cap by rows they could never be served.
    *
    * A source is searched as before — on the caller's own scope, its hits
    * re-checked within the refill cap — when the caller may read more than
-   * that, when the caller's scope holds a parent (`metadata`) term, or when the
-   * read fails (logged at `warn`). Nothing here decides access: every hit is
+   * that, when the caller's scope holds a parent (`metadata`) term, when the
+   * narrowing names no record (the caller may read none of what the source
+   * could answer: answered as before, no hit or the source's refusal, never a
+   * new kind of empty), or when the read fails (logged at `warn`). Nothing here decides access: every hit is
    * still re-checked as the caller ({@link applyPermissionFilter}), and the
    * organization filter each source carries is not touched.
    */
@@ -2641,14 +2641,11 @@ export class KnowledgeService implements IKnowledgeService {
     for (const [i, entry] of sources.entries()) {
       const ids = await visible[i];
       const narrowed = ids === undefined ? undefined : narrowToVisible(entry.scope, ids);
-      if (narrowed === undefined) {
+      // A narrowing that names no record is not applied: the source is
+      // searched as before, so a caller who may read none of its records is
+      // answered as before too — no hit, or the source's refusal.
+      if (narrowed === undefined || narrowed.every((term) => term.ids.length === 0)) {
         out.push(entry);
-        continue;
-      }
-      if (narrowed.every((term) => term.ids.length === 0)) {
-        this.options.logger?.debug?.(
-          `[knowledge] source '${this.label(entry.source)}' not searched: the caller may read none of the records it could answer.`,
-        );
         continue;
       }
       out.push({ ...entry, scope: narrowed });
@@ -2668,15 +2665,13 @@ export class KnowledgeService implements IKnowledgeService {
   ): Promise<string[] | undefined> {
     let rows: unknown;
     try {
-      rows = await engine.find(
-        objSource.object,
-        {
-          ...(objSource.where === undefined ? {} : { where: objSource.where }),
-          fields: ['id'],
-          limit: SEARCH_VISIBLE_IDS_MAX + 1,
-        },
-        { context: ctx },
-      );
+      // As the caller, in the query, as the permission re-read asks.
+      rows = await engine.find(objSource.object, {
+        ...(objSource.where === undefined ? {} : { where: objSource.where }),
+        fields: ['id'],
+        limit: SEARCH_VISIBLE_IDS_MAX + 1,
+        context: ctx,
+      } as never);
       if (!Array.isArray(rows)) throw new Error(`the read answered ${describeValue(rows)} instead of a list of rows`);
     } catch (err) {
       this.options.logger?.warn?.(

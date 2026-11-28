@@ -228,7 +228,9 @@ type Row = Record<string, unknown>;
  *
  * The permission re-read (`where: { id: { $in } }`, the caller's context in
  * the query) answers the rows `wall` admits for that context; without a
- * `wall`, every row. The record-level search's freshness check passes its
+ * `wall`, every row. So does the read of the records a caller may read
+ * (`fields: ['id']`, the source's `where` and a `limit`, the caller's context in
+ * the query), ids only. The record-level search's freshness check passes its
  * system context in the trailing options, never in the query, so it is
  * answered as any other read: the rows its `where` (`id: { $in }`, alone or
  * under `$and`) matches, whole.
@@ -274,6 +276,14 @@ function rowsEngine(rows: Row[], wall?: (row: Row, context: ExecutionContext) =>
       const pinsIds = JSON.stringify(query?.where ?? {}).includes('"$in"');
       if (!pinsIds && (typeof query?.limit !== 'number' || !(query.limit > 0))) {
         throw new Error('engine double: an unbounded find');
+      }
+      const caller = query?.context;
+      if (caller !== undefined) {
+        return rows
+          .filter((r) => matches(r, query.where) && (wall === undefined || wall(r, caller)))
+          .sort((a, b) => (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0))
+          .slice(0, typeof query.limit === 'number' ? query.limit : undefined)
+          .map((r) => ({ id: r.id }));
       }
       return rows
         .filter((r) => matches(r, query.where))
