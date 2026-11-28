@@ -274,6 +274,31 @@ describe('data-objectstack uploads go to the storage service, the route the serv
     ]);
   });
 
+  it('a protocol-relative presigned URL is not treated as this server: it gets no token', async () => {
+    // Same-origin data source (`baseUrl: ''`): its own requests are paths starting with one `/`.
+    const sent: Array<{ url: string; method: string; authorization: string | null }> = [];
+    const network = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      sent.push({ url, method, authorization: new Headers(init?.headers).get('Authorization') });
+      if (url.endsWith('/upload/presigned')) {
+        return json({ success: true, data: { uploadUrl: '//other.example/bucket/x', method: 'PUT', fileId: 'file_1' } });
+      }
+      if (url.endsWith('/upload/complete')) return json({ success: true, data: { id: 'file_1' } });
+      if (method === 'PUT') return json({ success: true, data: {} });
+      return json({ success: true, data: { name: 'fake', routes: {} } });
+    });
+    const adapter = new ObjectStackAdapter({ baseUrl: '', token: 'config-token', fetch: network });
+
+    await adapter.uploadFile('task', file('a.txt'));
+
+    expect(sent.filter((s) => !s.url.includes('/api/v1/discovery'))).toEqual([
+      { url: '/api/v1/storage/upload/presigned', method: 'POST', authorization: 'Bearer config-token' },
+      { url: '//other.example/bucket/x', method: 'PUT', authorization: null },
+      { url: '/api/v1/storage/upload/complete', method: 'POST', authorization: 'Bearer config-token' },
+    ]);
+  });
+
   it('a refused storage request rejects UPLOAD_ERROR with the server status and code', async () => {
     const host = fakeServer();
     host.refuseComplete('file_1');

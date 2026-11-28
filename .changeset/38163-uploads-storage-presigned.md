@@ -15,4 +15,4 @@ The two methods posted the file to `/api/data/<resource>/upload`, a route the st
 - `fieldName` and `metadata` are now refused with `UNSUPPORTED_OPERATION` before any request, because neither presigned request carries them. Before, they were sent to the missing route. To fill a file field, upload without them, then write the returned file onto the record with `update()`.
 - A refused storage request rejects with `UPLOAD_ERROR`, the server's status, and its error code in `details.serverCode`. When a file in `uploadFiles` is refused, the batch stops there. The error's `details` carry `failedIndex` and, as `uploaded`, the files already stored.
 
-The requests still go through the injected `fetch`, outside the connection-state tracking, and the adapter's `token` is sent on every request to this server. A presigned byte URL on another origin does not get it.
+The requests still go through the injected `fetch`, outside the connection-state tracking, and the adapter's `token` is sent on every request to this server. A presigned byte URL on another origin does not get it, and a protocol-relative URL (`//host/...`) is not treated as this server.

@@ -3846,7 +3846,10 @@ export class ObjectStackAdapter<T = unknown> implements DataSource<T> {
     this.token = config.token;
     this.storageUploadFetch = (input, init) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      const toThisServer = url.startsWith('/') || (this.baseUrl !== '' && url.startsWith(`${this.baseUrl}/`));
+      // A path on this server: one leading `/` (a protocol-relative `//host/...` names another host), or
+      // this server's own origin.
+      const toThisServer =
+        (url.startsWith('/') && !url.startsWith('//')) || (this.baseUrl !== '' && url.startsWith(`${this.baseUrl}/`));
       if (!toThisServer) return transport(input, init);
       const headers = new Headers(init?.headers);
       for (const [name, value] of Object.entries(this.getAuthHeaders())) {
