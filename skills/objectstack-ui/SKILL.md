@@ -87,7 +87,7 @@ Two more: [List Views](#list-views), [Actions](#actions).
 ### List Views
 
 A list view's `type`: `grid` (the default table), `kanban` (a board by status),
-`gallery` (cards over an image, avatar or file field), `calendar`, `timeline`
+`gallery` (cards), `calendar`, `timeline`
 (a chronological stream), `gantt` (start/end bars with dependencies), `map`
 (`location` fields), `chart` (an aggregate over the object), `tree` (a
 self-referencing hierarchy).
@@ -133,7 +133,7 @@ reports success and changes nothing. Call the API, with the option `value`,
 never its label ([Actions](./rules/actions.md)):
 
 ```json
-{ "name": "mark_done", "label": "Mark as done", "objectName": "task",
+{ "name": "mark_done", "label": "Mark as done", "objectName": "task", "locations": ["record"],
   "type": "script", "body": { "language": "js", "capabilities": ["api.write"],
     "source": "await ctx.api.object('task').update({ id: ctx.recordId, status: 'done' });" } }
 ```
