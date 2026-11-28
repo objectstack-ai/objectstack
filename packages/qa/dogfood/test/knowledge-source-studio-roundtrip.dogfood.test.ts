@@ -28,6 +28,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { MCPServerPlugin } from '@objectstack/mcp';
 import { type VerifyStack } from '@objectstack/verify';
 import { KnowledgeSourceSchema } from '@objectstack/spec/ai';
+import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { bootShowcase } from './showcase-boot.js';
 
 const SOURCE = 'ks_studio_open_tasks';
@@ -136,10 +137,13 @@ describe('[ADR-0161 K4] a knowledge source authored through Studio\'s wire is se
     const res = await stack.apiAs(admin, 'GET', `/meta/knowledge_source/${SOURCE}`);
     expect(res.status, await res.clone().text()).toBe(200);
     const json: any = await res.json();
-    const item = json?.item ?? json?.data ?? json;
-    expect(item).toMatchObject(FORM_BODY);
-    expect(item.adapter).toBeUndefined();
-    const parsed = KnowledgeSourceSchema.safeParse(item);
+    const served = json?.item ?? json?.data ?? json;
+    expect(served).toMatchObject(FORM_BODY);
+    expect(served.adapter).toBeUndefined();
+    // The read path's own verdict on the stored item, which Studio shows on the form.
+    expect(served._diagnostics?.valid, JSON.stringify(served._diagnostics)).toBe(true);
+    // A served body carries read-time decorations; the stored item is the body without them.
+    const parsed = KnowledgeSourceSchema.safeParse(stripReadDecorations(served));
     expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
   });
 });
