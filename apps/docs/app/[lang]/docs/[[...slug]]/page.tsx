@@ -10,6 +10,7 @@ import { File, Folder, Files } from 'fumadocs-ui/components/files';
 import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
 import { LLMCopyButton, ViewOptions } from '@/components/ai/page-actions';
 import { gitConfig } from '@/lib/layout.shared';
+import { footerNeighbours } from '@/lib/client-page-tree';
 import { absoluteUrl } from '@/lib/site';
 import {
   breadcrumbList,
@@ -166,7 +167,14 @@ export default async function Page(props: {
   const MDX = page.data.body;
 
   return (
-    <DocsPage toc={page.data.toc} full={page.data.full}>
+    <DocsPage
+      toc={page.data.toc}
+      full={page.data.full}
+      // Served from here, not looked up in the browser: the client tree no longer
+      // carries page descriptions (`lib/client-page-tree.ts`), and the footer
+      // prints the neighbours' descriptions.
+      footer={{ items: footerNeighbours(source.pageTree[params.lang], page.url) }}
+    >
       <JsonLd graph={docsGraph(page, params.lang)} />
       <DocsTitle>{page.data.title}</DocsTitle>
       <DocsDescription className="mb-0">{page.data.description}</DocsDescription>
