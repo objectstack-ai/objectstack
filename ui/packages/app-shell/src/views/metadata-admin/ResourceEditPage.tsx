@@ -687,9 +687,11 @@ function MetadataResourceEditPageImpl({
   embedded,
 }: MetadataResourceEditPageImplProps) {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
-  // objectstack#38149 — a create whose address names no package asks for one first.
+  const [searchParams] = useSearchParams();
+  // objectstack#38149 — a create whose address names no package asks for one
+  // first; the answer is held for this form, so a retried Save reuses it.
   const { ask: askPackage, dialog: packageAskDialog } = usePackageCreateAsk();
+  const chosenCreatePackageRef = React.useRef<string | null>(null);
   // ADR-0048 — the owning package of the item being edited, carried on the
   // edit URL as `?package=` (emitted by the metadata list links). Scopes the
   // layered/draft read so a same-name collision resolves to the right
@@ -2122,25 +2124,20 @@ function MetadataResourceEditPageImpl({
       // objectstack#38149 (ADR-0070 D3, ADR-0084's amendment of 2026-11-26) —
       // a create whose address names no package (a deep link, Studio's
       // cross-package leg, Setup's catalog) asks the person to pick a package
-      // or create one before anything is written, and the address names it
-      // from then on, so a retried Save and the item it lands on keep it.
-      // Cancel writes nothing.
-      let activePackage = readActivePackageBinding();
+      // or create one before anything is written. The answer is held for this
+      // form, so a retried Save reuses it, and the item opens under it. It is
+      // NOT written into the address before the save: on Studio's cross-package
+      // leg a `?package=` moves the page into that package's area, which would
+      // remount the form mid-save. Cancel writes nothing.
+      let activePackage = readActivePackageBinding() ?? (createMode ? chosenCreatePackageRef.current ?? undefined : undefined);
       if (createMode && !activePackage) {
         const chosen = await askPackage({ typeLabel: translateMetadataType(type, locale, entry?.label ?? type) });
         if (!chosen) {
           setSaving(false);
           return;
         }
+        chosenCreatePackageRef.current = chosen;
         activePackage = chosen;
-        setSearchParams(
-          (prev) => {
-            const next = new URLSearchParams(prev);
-            next.set('package', chosen);
-            return next;
-          },
-          { replace: true },
-        );
       }
       const saveOptions = {
         force,

@@ -26,7 +26,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
 type Write = { method: string; path: string; mode: string | null; packageId: string | null };
-const server = { writes: [] as Write[] };
+const server = { writes: [] as Write[], refuseNext: false };
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -40,6 +40,11 @@ async function serve(input: RequestInfo | URL, init?: RequestInit): Promise<Resp
   if (seg[0] === '_drafts') return json(200, { drafts: [] });
   if (seg.length === 1) return json(200, { items: [] });
   if (method === 'PUT' || method === 'POST') {
+    if (server.refuseNext) {
+      server.refuseNext = false;
+      server.writes.push({ method: `${method} (refused)`, path: url.pathname, mode: url.searchParams.get('mode'), packageId: url.searchParams.get('package') });
+      return json(422, { success: false, error: { code: 'INVALID_METADATA', message: 'Refused once' } });
+    }
     server.writes.push({ method, path: url.pathname, mode: url.searchParams.get('mode'), packageId: url.searchParams.get('package') });
     return json(200, { success: true, version: 'hmac-sha256:v1', seq: 1, state: method === 'PUT' ? 'draft' : 'active', message: 'Saved' });
   }
@@ -86,6 +91,7 @@ client.current = new MetadataClient({ baseUrl: '', fetch: vi.fn(serve) as unknow
 
 beforeEach(() => {
   server.writes = [];
+  server.refuseNext = false;
   window.localStorage.setItem('metadata-admin:autosave', '0');
 });
 afterEach(() => {
@@ -172,5 +178,28 @@ describe('the editor asks for a package before a create its address names none f
     await waitFor(() => expect(server.writes).toHaveLength(2), { timeout: 8000 });
     expect(screen.queryByTestId('package-create-ask')).toBeNull();
     expect(server.writes[0]).toEqual({ method: 'PUT', path: '/api/v1/meta/position/regional_lead', mode: 'draft', packageId: 'com.acme.crm' });
+  });
+
+  it('a refused first save keeps the form and the answer: the retry asks nothing and names the same package', async () => {
+    server.refuseNext = true;
+    await createAt('position', '/metadata/position/new', 'regional_lead');
+    const dialog = await screen.findByTestId('package-create-ask', {}, { timeout: 8000 });
+    fireEvent.click(await within(dialog).findByTestId('package-create-ask-option-app.alpha'));
+    fireEvent.click(within(dialog).getByTestId('package-create-ask-continue'));
+    await waitFor(() => expect(server.writes).toHaveLength(1), { timeout: 8000 });
+    // The answer is not written into the address before the save: the form stays where it was.
+    expect(screen.getByTestId('where')).toHaveTextContent('/metadata/position/new');
+    expect(screen.getByTestId('where')).not.toHaveTextContent('package=');
+    // A refusal holds Save until the form changes (the server-refusal gate): the author edits, then saves again.
+    fireEvent.change(document.getElementById('mdf-label') as HTMLInputElement, { target: { value: 'Regional lead' } });
+    await waitFor(() => expect(screen.getByTestId('resource-save')).not.toBeDisabled());
+    fireEvent.click(screen.getByTestId('resource-save'));
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/metadata/position/regional_lead'), { timeout: 8000 });
+    expect(screen.queryByTestId('package-create-ask')).toBeNull();
+    expect(server.writes).toEqual([
+      { method: 'PUT (refused)', path: '/api/v1/meta/position/regional_lead', mode: 'draft', packageId: 'app.alpha' },
+      { method: 'PUT', path: '/api/v1/meta/position/regional_lead', mode: 'draft', packageId: 'app.alpha' },
+      { method: 'POST', path: '/api/v1/meta/position/regional_lead/publish', mode: null, packageId: 'app.alpha' },
+    ]);
   });
 });
