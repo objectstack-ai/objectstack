@@ -49,7 +49,7 @@
 - 契约记录只欠 `contract-review.md` 四面,head 移动照其例外;同 patch-id 干净合 main 只保 ACCEPT。
 - 落地:区先读 `check-governed-merges.mjs --pr N`;非受管 PR 照 `landing-operations.md` 自落,受拒报原文。
 - PASS 且全绿的非受管 PR 10 分钟内落地;挂前先查 PR 上已有落地评论,有即 ⛔ 不再挂。
-- 受管面与超 3,000 行 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
+- 受管面与过线卡的 PR 区 ⛔ 不落,交席位;席位照 SKILL.md〈路径分叉〉①–④ 一笔交棒。
 - 席位每轮照 `execution-duties.md` 四件套行复查全部已 PASS 受管 PR,各区转来的一并在内。
 - 性能卡与 PR 的提速数字只引已过 L1 的 bench PR 读数;⛔ 不引估算或未过 L1 的本地测量。
 - 席只裁路由(拆并延、归区);改可见行为或解读 ADR 照 SKILL.md〈升级与决策〉呈维护者。

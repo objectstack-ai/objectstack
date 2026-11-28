@@ -18,13 +18,13 @@
 - 例外:该 flake 在 `main` 上也红 ⇒ 照 main-red 约定①立 p0 锚卡,
   敲分诊 `Request: main-red`、锚卡车道 `Notify: main-red`(project-forms.md 立锚卡者行)。
 - flake 受害者(head 未变):照 landing-operations.md 四分支与三事实重投一次,同签名再弹即停。
-- 插队只用中继 `pr_enqueue_front`:ACCEPT 后、无受管面,余照该文插队各条(三因至逾 3,000 行)。
+- 插队只用中继 `pr_enqueue_front`:ACCEPT 后、无受管面,余照该文插队各条(三因至过线卡)。
 - 出队只用中继 `pr_dequeue`:落地席离线时本席代办 (a)(b);(c) 中继只认正文签名尾行之席。
 - 中继自贴审计评论并回读,仍在队或已合即 FAILED,⛔ 不重发,报维护者;落地席经订阅得知。
 
 ## 归维护者
 
-- 逾 3,000 行 PR 的批准、受管面 PR、Version Packages 合并、队列配置与 App 权限。
+- 过线卡各 PR 的批准、受管面 PR、Version Packages 合并、队列配置与 App 权限。
 
 ## 边界
 
