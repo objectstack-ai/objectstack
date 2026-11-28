@@ -102,7 +102,7 @@ model: opus
    - 每个可编译小步即 commit + push;有可展示内容即开 draft PR;接管只认远程分支最后 sha。
    - 工作分支收不下的已完成提交(会改动其上 open PR、拆分留后的一半、停在裁决或审核上)⇒ 当即推无 PR 备份分支 `claude/issue-<n>-<slug>-wip`。
    - 常设许可,⛔ 不问、不开决策卡;⛔ 永不从它开 PR 或合并它;其工作落地即删,删不掉(`readings-session.md`)⇒ 报告点名待删。
-   - 例:卡线程的平台分支挂着前半的 open PR ⇒ 后半做完不问,`git push origin HEAD:refs/heads/claude/issue-<n>-<slug>-wip`。
+   - 例:卡线程平台分支有前半的 open PR ⇒ 后半做完不问,本地建此分支,`git push -u origin claude/issue-<n>-<slug>-wip`。
    - ⛔ 一轮结束不留只在本地的工作:停下等 CI、审核、裁决或合并前,每个 commit 已在远端分支,报告点名它。
    - 交接、报告与记忆点名工作只用远端分支与 sha,⛔ 不用本地分支或容器路径。
    - 带具名缺口的 PR 是交付进行中的常态,未读到的判决写 `NOT MEASURED: <family>, reason: …`。
