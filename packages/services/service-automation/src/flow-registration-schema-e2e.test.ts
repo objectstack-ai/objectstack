@@ -249,3 +249,101 @@ describe('registerFlow — a flow condition\'s record. / previous. date arithmet
     }
   });
 });
+
+// [#38135] A start condition that compares a date field with `addDays(today(), N)`
+// registers clean (as before) AND now runs. The business case: a flow on loans due
+// within thirty days (`record.due_date < addDays(today(), 30)`), or due exactly
+// tomorrow (`record.due_date == addDays(today(), 1)`). The run holds the date
+// field as its `YYYY-MM-DD` text; the first spelling failed on every run, the
+// second answered a silent `false` and the flow was skipped, while the
+// `daysFromNow(N)` spellings fired.
+describe('a start condition comparing a date field with addDays(today(), N) registers and fires (#38135)', () => {
+  let kernel: LiteKernel;
+  let engine: AutomationEngine;
+  let stdout: string[];
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let ran: number;
+  const loanFlow = (name: string, condition: string) => ({
+    name,
+    label: 'Loan due',
+    type: 'record_change',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start', config: { objectName: 'library_loan', triggerType: 'record-after-update', condition } },
+      { id: 'mark', type: 'probe_mark', label: 'Mark' },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'mark' }, { id: 'e2', source: 'mark', target: 'end' }],
+  });
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-06-20T08:00:00Z'));
+    stdout = [];
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
+      stdout.push(String(chunk));
+      return true;
+    }) as never);
+    kernel = new LiteKernel();
+    kernel.use({
+      name: 'fake-objectql',
+      version: '1.0.0',
+      async init(ctx: PluginContext) {
+        (ctx as unknown as { registerService(name: string, svc: unknown): void }).registerService('objectql', {
+          registry: {
+            getObject: (name: string) =>
+              name === 'library_loan'
+                ? { name, fields: { due_date: { type: 'date', required: true } } }
+                : undefined,
+          },
+        });
+      },
+    });
+    kernel.use(new AutomationServicePlugin());
+    await kernel.bootstrap();
+    engine = kernel.getService('automation') as AutomationEngine;
+    ran = 0;
+    engine.registerNodeExecutor({ type: 'probe_mark', async execute() { ran++; return { success: true }; } } as never);
+  });
+
+  afterEach(async () => {
+    stdoutSpy.mockRestore();
+    await kernel.shutdown();
+    vi.useRealTimers();
+  });
+
+  /** Register the flow, run it on one loan row, and say what happened. */
+  const fire = async (name: string, condition: string, due: string) => {
+    expect(() => engine.registerFlow(name, loanFlow(name, condition)), condition).not.toThrow();
+    ran = 0;
+    const row = { id: 'loan_1', due_date: due };
+    const result = await engine.execute(name, { object: 'library_loan', record: row, previous: row } as never);
+    return { success: result.success, skipped: (result.output as { skipped?: boolean } | undefined)?.skipped === true, ran };
+  };
+
+  it('⭐ LIT — the addDays spellings fire on the loan they name, exactly as the daysFromNow spellings do', async () => {
+    for (const [condition, control, due] of [
+      ['record.due_date < addDays(today(), 30)', 'record.due_date < daysFromNow(30)', '2026-07-01'],
+      ['addDays(today(), 30) > record.due_date', 'daysFromNow(30) > record.due_date', '2026-07-01'],
+      ['record.due_date == addDays(today(), 1)', 'record.due_date == daysFromNow(1)', '2026-06-21'],
+    ] as const) {
+      const got = await fire('loan_add_days', condition, due);
+      expect(got, condition).toEqual({ success: true, skipped: false, ran: 1 });
+      expect(await fire('loan_days_from_now', control, due), control).toEqual(got);
+    }
+  });
+
+  it('CONTROL — a loan outside the bound is skipped, not failed', async () => {
+    expect(await fire('loan_late', 'record.due_date < addDays(today(), 30)', '2026-08-01'))
+      .toEqual({ success: true, skipped: true, ran: 0 });
+    expect(await fire('loan_not_tomorrow', 'record.due_date == addDays(today(), 1)', '2026-06-22'))
+      .toEqual({ success: true, skipped: true, ran: 0 });
+  });
+
+  it('registerFlow accepts the spellings without a date advisory, as it accepts the today() one', () => {
+    for (const condition of ['record.due_date < addDays(today(), 30)', 'record.due_date == addDays(today(), 1)', 'record.due_date < today()']) {
+      stdout.length = 0;
+      expect(() => engine.registerFlow('loan_advisory', loanFlow('loan_advisory', condition)), condition).not.toThrow();
+      expect(stdout.join(''), condition).not.toMatch(/date arithmetic|is a date field/);
+    }
+  });
+});
