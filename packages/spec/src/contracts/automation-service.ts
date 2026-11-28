@@ -600,8 +600,10 @@ export interface AutomationResult {
      *    **403**.
      *  - `'INVALID_SIGNAL'` — the resume signal tried to write variables the
      *    flow engine reserves for itself (a `$…` name, or one carrying a `.$`
-     *    segment: `$runId`, `<nodeId>.$mapItemDone`, …). A transport maps it to
-     *    **400**.
+     *    segment: `$runId`, `<nodeId>.$mapItemDone`, …), or named a key in
+     *    `output` or `variables` whose name, or any dot-separated part of it,
+     *    is `__proto__`, `constructor` or `prototype`. Nothing is applied and
+     *    the run stays suspended. A transport maps it to **400**.
      *  - `'RUN_NOT_FOUND'` — no suspension exists for the run id, in the hot
      *    cache or the durable store. The run is unresumable *for good*: it
      *    already resumed, was cancelled, or paused in a process whose state was

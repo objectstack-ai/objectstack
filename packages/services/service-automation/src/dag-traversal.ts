@@ -68,7 +68,7 @@ import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
 import { stampFlowRunSlot } from './flow-slots.js';
 import { stampRootRun } from './root-run.js';
-import { isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
+import { copyForScopeDescent, copyHeldValue, isSkippedScopeKey, scopeContainer } from './scope-key-segments.js';
 
 /**
  * The value the flow CEL scope binds as `current_user` for a run (#19939 —
@@ -1052,17 +1052,28 @@ export function celScope(
 ): { extra: Record<string, unknown> } {
     // No variable key reaches a prototype (`./scope-key-segments.ts`):
     // prototype-free containers, and a key with a skipped segment binds
-    // nothing. A dotted tail whose head names a value the run holds is still
-    // written into that value.
+    // nothing. And no key writes into a value the run holds: a dotted tail
+    // whose head names one descends into a copy the scope owns
+    // (`copyForScopeDescent`), so the scope reads the write and the held
+    // value — a flow's default, the trigger's record, a value `$record`
+    // shares — keeps what it was.
     const vars = scopeContainer();
+    const owned = new WeakSet<object>([vars]);
     for (const [key, value] of variables) {
         // Convert "step.result" keys into nested object paths.
         const segs = key.split('.');
         if (isSkippedScopeKey(segs)) continue;
         let cursor = vars;
         for (let i = 0; i < segs.length - 1; i++) {
-            if (typeof cursor[segs[i]] !== 'object' || cursor[segs[i]] === null) {
-                cursor[segs[i]] = scopeContainer();
+            const next = cursor[segs[i]];
+            if (typeof next !== 'object' || next === null) {
+                const container = scopeContainer();
+                owned.add(container);
+                cursor[segs[i]] = container;
+            } else if (!owned.has(next)) {
+                const copy = copyForScopeDescent(next);
+                owned.add(copy);
+                cursor[segs[i]] = copy;
             }
             cursor = cursor[segs[i]] as Record<string, unknown>;
         }
@@ -1262,7 +1273,10 @@ export function seedDeclaredVariables(
         if (supplied !== undefined) {
             variables.set(v.name, supplied);
         } else if (v.defaultValue !== undefined) {
-            variables.set(v.name, v.defaultValue);
+            // The default is the registered flow's; the run gets its own copy
+            // (`copyHeldValue`), so nothing one run does to it — a node that
+            // changes it in place included — reaches the flow or the next run.
+            variables.set(v.name, copyHeldValue(v.defaultValue));
         }
     }
     return variables;
@@ -1278,13 +1292,21 @@ export function seedRunVariables(
 ): Map<string, unknown> {
     const variables = this.seedDeclaredVariables(flow, context);
     if (context?.record) {
-        variables.set('$record', context.record);
-        variables.set('record', context.record);
-        for (const [k, v] of Object.entries(context.record)) {
+        // The run's own copy of a plain record it was handed (`copyHeldValue`):
+        // nothing the run does to `record` / `$record` — a node that changes
+        // it in place included — reaches the trigger's object. A record that
+        // is not a plain object is not copied: it is itself the object bound
+        // as `record` / `$record`. A record that contains itself throws
+        // `HeldValueCycleError`.
+        const record = copyHeldValue(context.record) as Record<string, unknown>;
+        variables.set('$record', record);
+        variables.set('record', record);
+        for (const [k, v] of Object.entries(record)) {
             if (!variables.has(k)) variables.set(k, v);
         }
     }
-    variables.set('previous', context?.previous ?? null);
+    // `previous` is the run's own copy too, by the same rule as the record.
+    variables.set('previous', copyHeldValue(context?.previous ?? null));
     variables.set('$runId', runId);
     variables.set('$flowName', flowName);
     variables.set('$flowLabel', flow.label ?? flowName);
@@ -1378,7 +1400,6 @@ export async function executeWithoutRetry(
     // to its author — and a pausing node on a retry attempt had no `$runId`
     // to map its external state back to this run with (ADR-0019).
     const runId = this.nextRunId();
-    const variables = this.seedRunVariables(flow, flowName, context, runId);
     const startedAt = new Date().toISOString();
     const steps: StepLogEntry[] = [];
 
@@ -1387,6 +1408,10 @@ export async function executeWithoutRetry(
     // `flowRunId` is stamped here too (#3456). [#31696] And the slot, as
     // `execute()` stamps it.
     const runContext = await this.resolveRunContext(flow, context, runId);
+    // Seeded AFTER the context resolves, from the resolved context: its record
+    // is the run's own copy, carrying the lookups the start node declares
+    // (`expand`, grafted while the context resolves).
+    const variables = this.seedRunVariables(flow, flowName, runContext, runId);
     stampFlowRunSlot(runContext, flowName, runPackage);
     // [ADR-0162 item 7] Each attempt is a run of its own, and its own root
     // when it has no parent, as `execute()` stamps it.

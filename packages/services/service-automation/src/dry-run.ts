@@ -796,9 +796,12 @@ export async function dryRun(this: DryRunHost, definition: unknown, options: Flo
         ...(options.params !== undefined ? { params: options.params } : {}),
         ...(options.locale !== undefined ? { locale: options.locale } : {}),
     };
-    const variables: Map<string, unknown> = this.seedRunVariables(flow, flow.name, start, '');
-    variables.delete('$runId');
     const runContext = await this.resolveRunContext({ ...flow, runAs: 'user' }, start);
+    // Seeded after the context resolves, from the resolved context, as a run
+    // is: its record is the run's own copy, carrying the lookups its start
+    // node declares.
+    const variables: Map<string, unknown> = this.seedRunVariables(flow, flow.name, runContext, '');
+    variables.delete('$runId');
 
     const startNode = flow.nodes.find((n) => n.type === 'start')!;
     const condition = (startNode.config as { condition?: unknown } | undefined)?.condition;
