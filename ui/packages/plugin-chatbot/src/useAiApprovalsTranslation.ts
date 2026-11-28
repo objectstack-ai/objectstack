@@ -65,6 +65,9 @@ export const AI_APPROVALS_DEFAULT_TRANSLATIONS: Record<string, string> = {
   'aiApprovals.statusExecuted': 'Executed',
   'aiApprovals.statusFailed': 'Failed',
   'aiApprovals.statusRejected': 'Rejected',
+  'aiApprovals.statusExpired': 'Expired',
+  'aiApprovals.expiredDetail':
+    'Not answered in time, or the person who asked for it lost access.',
   'aiApprovals.colTool': 'Tool',
   'aiApprovals.colAction': 'Action',
   'aiApprovals.colObject': 'Object',

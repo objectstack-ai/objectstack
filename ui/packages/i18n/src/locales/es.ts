@@ -4578,6 +4578,8 @@ const es = {
     statusExecuted: "Ejecutada",
     statusFailed: "Fallida",
     statusRejected: "Rechazada",
+    statusExpired: "Caducada",
+    expiredDetail: "No se respondió a tiempo, o la persona que la solicitó perdió el acceso.",
     colTool: "Herramienta",
     colAction: "Acción",
     colObject: "Objeto",

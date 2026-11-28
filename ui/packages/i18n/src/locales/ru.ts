@@ -4681,6 +4681,8 @@ const ru = {
     statusExecuted: "Выполнено",
     statusFailed: "Не выполнено",
     statusRejected: "Отклонено",
+    statusExpired: "Истекло",
+    expiredDetail: "Не рассмотрено вовремя, или запросивший пользователь потерял доступ.",
     colTool: "Инструмент",
     colAction: "Действие",
     colObject: "Объект",

@@ -14,7 +14,8 @@ import { z } from 'zod';
  * the four have since been REMOVED per ADR-0056 D8 (declared-but-never-enforced;
  * see system/index.ts notes) — only encryption survives, marked experimental:
  * - **Audit** (audit.zod.ts — REMOVED): the live audit path is plugin-audit's
- *   always-on capture + object/field `trackHistory` + lifecycle `audit` retention
+ *   always-on capture (an object's `enable.trackHistory` shows its field
+ *   changes on the record page) + lifecycle `audit` retention
  * - **Encryption** (encryption.zod.ts): Field-level encryption and key management
  * - **Compliance** (compliance.zod.ts — REMOVED): GDPR/HIPAA/SOX/PCI-DSS configs
  * - **Masking** (masking.zod.ts — REMOVED): PII data masking and tokenization

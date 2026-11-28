@@ -4486,6 +4486,8 @@ const ja = {
     statusExecuted: "実行済み",
     statusFailed: "失敗",
     statusRejected: "却下",
+    statusExpired: "期限切れ",
+    expiredDetail: "期限内に対応されなかったか、依頼した人がアクセス権を失いました。",
     colTool: "ツール",
     colAction: "アクション",
     colObject: "オブジェクト",

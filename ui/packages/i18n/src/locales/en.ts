@@ -5412,6 +5412,8 @@ const en = {
     statusExecuted: 'Executed',
     statusFailed: 'Failed',
     statusRejected: 'Rejected',
+    statusExpired: 'Expired',
+    expiredDetail: 'Not answered in time, or the person who asked for it lost access.',
     colTool: 'Tool',
     colAction: 'Action',
     colObject: 'Object',

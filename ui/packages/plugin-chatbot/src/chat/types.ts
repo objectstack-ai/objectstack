@@ -602,11 +602,19 @@ export interface ChatbotEnhancedProps extends React.HTMLAttributes<HTMLDivElemen
  * (the spec's `held` approve outcome). Both cards draw "waiting for
  * approval" for it, never success wording; `result` is what the host
  * answered about the hold.
+ *
+ * `expired`: the pending action lapsed before the decision reached it (nobody
+ * decided it in time, or the proposer lost access; the server answered `409`
+ * with `details.reason: 'pending_action_lapsed'`, objectstack#34255). Nothing
+ * was written and nobody rejected it, so both cards draw "Expired", never the
+ * rejection or the generic conflict error. `decision` is the button that was
+ * pressed.
  */
 export type ToolDecisionState =
   | { state: 'pending'; message?: string; decision?: 'approved' | 'rejected' }
   | { state: 'success'; message?: string; decision?: 'approved' | 'rejected'; result?: unknown }
   | { state: 'held'; message?: string; decision?: 'approved'; result?: unknown }
+  | { state: 'expired'; message?: string; decision?: 'approved' | 'rejected' }
   | { state: 'error'; message: string; decision?: 'approved' | 'rejected' };
 
 export interface ChatbotModelOption {

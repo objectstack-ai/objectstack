@@ -4858,6 +4858,8 @@ const ar = {
     statusExecuted: "تم التنفيذ",
     statusFailed: "فشل",
     statusRejected: "مرفوض",
+    statusExpired: "منتهي الصلاحية",
+    expiredDetail: "لم تتم الإجابة في الوقت المحدد، أو فقد صاحب الطلب صلاحية الوصول.",
     colTool: "الأداة",
     colAction: "الإجراء",
     colObject: "الكائن",
