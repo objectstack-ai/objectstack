@@ -626,3 +626,46 @@ describe('the notices proven absent leave ③ for one counting line, and --all l
     }
   });
 });
+
+/**
+ * #38217 — the one knowledge source the rename's "no index is rebuilt" does not
+ * cover. The conversion copies an id that begins with an underscore as it is,
+ * so the report shows the edit, the D3 entry that judges it beside it (whose
+ * replacement names the new name and `dropSource`), and in ① the refusal of
+ * that `name`. A plain id beside it converts with no refusal.
+ */
+describe('a knowledge source whose id begins with an underscore (#38217)', () => {
+  const ID_TO_NAME = 'knowledge-source-id-to-name';
+  const KS_JUDGE = 'knowledge-source-registration-governed';
+  const ks = (id: string) => ({
+    id,
+    label: 'FAQ',
+    adapter: 'memory',
+    source: { kind: 'object', object: 'ks_faq', content: ['answer'] },
+  });
+  const KS_STACK = {
+    manifest: { id: 'com.example.ks-underscore', name: 'KS Underscore', version: '1.0.0', type: 'app' },
+    objects: [{ name: 'ks_faq', label: 'FAQ', fields: { answer: { type: 'text', label: 'Answer' } } }],
+    knowledgeSources: [ks('_legacy_faq'), ks('support_faq')],
+  };
+
+  it('prints both edits, the judge beside them naming the remedy, and a refusal for the underscore-led name only', () => {
+    const { report, result, lines } = run(KS_STACK, MIGRATION_SUPPORT_FLOOR, TERMINUS);
+
+    const edits = result.applied.filter((a) => a.conversionId === ID_TO_NAME);
+    expect(edits.map((a) => a.path)).toEqual(['knowledgeSources[0].name', 'knowledgeSources[1].name']);
+
+    const judge = todoOf(result, KS_JUDGE);
+    const { last, length } = runOf(lines, ID_TO_NAME);
+    expect(length).toBe(2);
+    const review = reviewLine(judge, length);
+    expect(reviewsUnder(lines, last)).toContain(review);
+    expect(review).toContain('underscore takes a new name');
+    expect(review).toContain('`dropSource({ source })`');
+
+    const ksRefusals = report.refusals.filter((r) => r.path[0] === 'knowledgeSources');
+    expect(ksRefusals.map((r) => r.path.join('.'))).toEqual(['knowledgeSources.0.name']);
+    expect(ksRefusals[0]!.message).toContain('A leading "_" is reserved');
+    for (const line of refusalLines({ ...report, refusals: ksRefusals })) expect(lines).toContain(line);
+  });
+});
