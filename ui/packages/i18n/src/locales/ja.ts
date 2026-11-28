@@ -2253,6 +2253,8 @@ const ja = {
         ctaUpgrade: "アップグレードして続行",
         ctaTopUp: "クレジットを追加して続行",
         ariaLabel: "AI 使用状況: {{status}}",
+        tierPersonal: "個人の割り当て",
+        tierTeamPool: "チーム共有枠",
       },
       openChats: "チャットを開く",
       chats: "チャット",

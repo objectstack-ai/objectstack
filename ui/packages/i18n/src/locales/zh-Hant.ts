@@ -2596,6 +2596,8 @@ const zhHant = {
         ctaUpgrade: '升級以繼續使用',
         ctaTopUp: '購買額度包以繼續',
         ariaLabel: 'AI 用量：{{status}}',
+        tierPersonal: '個人額度',
+        tierTeamPool: '團隊共享額度',
       },
       openChats: '開啟對話列表',
       chats: '對話',
