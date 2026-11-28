@@ -9,6 +9,7 @@ import type {
   AIRequestOptions,
   AIConversation,
   IAIConversationService,
+  IActionConfirmationService,
   PendingActionStatus,
 } from './ai-service';
 import type {
@@ -427,7 +428,7 @@ type Eq<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1
 /** Compile error when the argument is not `true`. */
 type Assert<T extends true> = T;
 
-type ApproveOutcomeStatus = Awaited<ReturnType<NonNullable<IAIService['approvePendingAction']>>>['status'];
+type ApproveOutcomeStatus = Awaited<ReturnType<IActionConfirmationService['approve']>>['status'];
 
 // Exported deliberately: an unread alias is TS6196, and a pin no program compiles is no pin.
 
@@ -435,56 +436,90 @@ type ApproveOutcomeStatus = Awaited<ReturnType<NonNullable<IAIService['approvePe
 export type PendingActionStatusHasHeld = Assert<Eq<Extract<PendingActionStatus, 'held'>, 'held'>>;
 export type ApproveOutcomeIsExecutedHeldOrFailed = Assert<Eq<ApproveOutcomeStatus, 'executed' | 'held' | 'failed'>>;
 
-describe('approvePendingAction held outcome', () => {
+/** The in-app queue left `IAIService`: none of its four members is declared there any more. */
+export type IAIServiceHasNoPendingActionMember = Assert<
+  Eq<Extract<keyof IAIService, 'proposePendingAction' | 'approvePendingAction' | 'rejectPendingAction' | 'listPendingActions'>, never>
+>;
+/** The pending-confirmation service carries the whole lifecycle, every member required. */
+export type ConfirmationServiceLifecycle = Assert<
+  Eq<keyof IActionConfirmationService, 'submit' | 'list' | 'get' | 'approve' | 'reject'>
+>;
+
+/** A full pending-confirmation service, the in-app door's items included. */
+function confirmationService(overrides: Partial<IActionConfirmationService> = {}): IActionConfirmationService {
+  return {
+    submit: async () => ({ pendingId: 'pc_1' }),
+    list: async () => [],
+    get: async () => null,
+    approve: async () => ({ status: 'executed' }),
+    reject: async () => undefined,
+    ...overrides,
+  };
+}
+
+describe('IActionConfirmationService approve held outcome', () => {
   it('lets an implementation answer held, with the hold as its result', async () => {
-    const service: IAIService = {
-      chat: async () => ({ content: '' }),
-      complete: async () => ({ content: '' }),
-      approvePendingAction: async () => ({ status: 'held', result: { code: 'AI_WRITE_HELD' } }),
-    };
-    const outcome = await service.approvePendingAction!('pa_1', 'user_1');
+    const service = confirmationService({
+      approve: async () => ({ status: 'held', result: { code: 'AI_WRITE_HELD' } }),
+    });
+    const outcome = await service.approve('pc_1', { userId: 'user_1' });
     expect(outcome.status).toBe('held');
     const status: PendingActionStatus = outcome.status;
     expect(status).toBe('held');
   });
+
+  it('records an in-app item through submit, with the tool call and the conversation it was made in', async () => {
+    const recorded: unknown[] = [];
+    const service = confirmationService({
+      submit: async (handOff) => {
+        recorded.push(handOff);
+        return { pendingId: 'pc_inapp' };
+      },
+    });
+    await expect(service.submit({
+      actionName: 'delete_account', objectName: 'account', recordId: 'a1', params: { id: 'a1' },
+      door: 'assistant', toolName: 'action_account_delete_account', conversationId: 'conv_1', messageId: 'msg_1',
+    }, { userId: 'user_1' })).resolves.toEqual({ pendingId: 'pc_inapp' });
+    expect(recorded).toHaveLength(1);
+    // Control: the MCP hand-off shape, with no in-app field, is still a hand-off.
+    await expect(service.submit({ actionName: 'archive_account', params: {}, door: 'mcp' }, { userId: 'user_1' }))
+      .resolves.toEqual({ pendingId: 'pc_inapp' });
+  });
+
+  it('refuses a submit-only service: the lifecycle members are not optional', () => {
+    // @ts-expect-error — a delivery-only service no longer satisfies the contract.
+    const deliveryOnly: IActionConfirmationService = { submit: async () => ({ pendingId: 'pc_1' }) };
+    expect(typeof deliveryOnly.submit).toBe('function');
+  });
 });
 
 /**
- * The in-app assistant door's three points, stated on the pending-action
- * members themselves (#33689 Q1, ruled B: one rule for every AI door, the
- * in-app queue kept as its own channel). The members' signatures do not move,
- * so what is pinned is the docblock text an implementer reads beside them:
- * who decides, which credential, and as whom the approved action runs.
+ * The deciding points, stated on the pending-confirmation service's members
+ * themselves (#33689 Q1 ruled one rule for every AI door; #33806 ruled the
+ * in-app queue merged into this service). What is pinned is the docblock text
+ * an implementer reads beside them: who decides, which credential, and as
+ * whom the approved call runs.
  */
-describe('IAIService pending-action members state the in-app door\'s three points', () => {
+describe('IActionConfirmationService members state the deciding points', () => {
   const HERE = dirname(fileURLToPath(import.meta.url));
   const SOURCE = readFileSync(join(HERE, 'ai-service.ts'), 'utf8');
+  const SERVICE = SOURCE.slice(SOURCE.indexOf('export interface IActionConfirmationService {'));
 
-  /** The docblock above `    <member>?(`, comment gutters folded into spaces. */
+  /** The docblock above `    <member>(` inside the service, comment gutters folded into spaces. */
   function memberDoc(member: string): string {
-    const at = SOURCE.indexOf(`    ${member}?(`);
+    const at = SERVICE.indexOf(`    ${member}(`);
     expect(at, `\`${member}\` moved — re-anchor this pin`).toBeGreaterThan(-1);
-    const open = SOURCE.lastIndexOf('/**', at);
-    const close = SOURCE.indexOf('*/', open);
+    const open = SERVICE.lastIndexOf('/**', at);
+    const close = SERVICE.indexOf('*/', open);
     expect(close, `\`${member}\` has no docblock directly above it`).toBeLessThan(at);
-    return SOURCE.slice(open, close).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
+    return SERVICE.slice(open, close).replace(/\n\s*\*\s?/g, ' ').replace(/\s+/g, ' ');
   }
 
-  it('proposePendingAction names the channel and binds all three points from the moment it is recorded', () => {
-    const doc = memberDoc('proposePendingAction');
-    expect(doc).toMatch(/in-app assistant door's channel of the confirmation rule/);
-    expect(doc).toMatch(/\*\*Who decides:\*\* only the person the call ran as, recorded as `proposedBy`; no other user decides it, whatever permission they hold, `ai:approve` included/);
-    expect(doc).toMatch(/\*\*Which credential:\*\* the item is decided on that person's signed-in session to the app, never on an API key, token or AI identity/);
-    expect(doc).toMatch(/\*\*As whom it runs:\*\* once approved, as that person, every gate and permission re-checked/);
-    // A declared-gated action is queued, not only the destructive heuristic.
-    expect(doc).toMatch(/declares `ai\.requiresConfirmation: true`/);
-  });
-
-  it('approvePendingAction refuses another user and a non-session credential, and runs as the person', () => {
-    const doc = memberDoc('approvePendingAction');
-    expect(doc).toMatch(/`actorId` must be the person the call ran as \(the row's `proposed_by`\)\. Another user is refused whatever permission they hold, `ai:approve` included/);
+  it('approve refuses another user and a non-session credential, and runs as the person', () => {
+    const doc = memberDoc('approve');
+    expect(doc).toMatch(/`context` must be the person the call ran as \(the row's `proposed_by`\)\. Another user is refused whatever permission they hold, `ai:approve` included/);
     expect(doc).toMatch(/admits only a person's signed-in session to the app; an API key, a delegated or OAuth token, any other service credential and an AI identity are refused/);
-    expect(doc).toMatch(/the re-dispatch runs as that person, through the same admitted sequence as any action call, every gate and permission re-checked at this moment/);
+    expect(doc).toMatch(/the call runs as that person, through the same admitted sequence as any action call, every gate and permission re-checked at this moment/);
     // The second-person path is `held`, never a second decider.
     expect(doc).toMatch(/second person to approve the write does not let that person decide the item: it uses `held`/);
     // Control: the held outcome text this pin sits beside is still there, so
@@ -492,19 +527,31 @@ describe('IAIService pending-action members state the in-app door\'s three point
     expect(doc).toMatch(/`held` is the third outcome/);
   });
 
-  it('rejectPendingAction binds the deciding points and runs nothing', () => {
-    const doc = memberDoc('rejectPendingAction');
+  it('reject binds the deciding points and runs nothing', () => {
+    const doc = memberDoc('reject');
     expect(doc).toMatch(/Nothing runs\./);
-    expect(doc).toMatch(/`actorId` must be the person the call ran as \(the row's `proposed_by`\), whatever permission another user holds, `ai:approve` included/);
+    expect(doc).toMatch(/`context` must be the person the call ran as \(the row's `proposed_by`\), whatever permission another user holds, `ai:approve` included/);
     expect(doc).toMatch(/admits only that person's signed-in session to the app, never an API key, token or AI identity/);
   });
 
-  it('the read member is not a deciding door: listPendingActions carries none of the three points', () => {
+  it('the read members are not deciding doors: list and get carry none of the points', () => {
     // Control leg: the helper does not answer every member with the same
-    // text. Listing is not deciding, and the ruling moved no read.
-    const doc = memberDoc('listPendingActions');
-    expect(doc).toMatch(/Inbox query/);
-    expect(doc).not.toMatch(/Who decides/);
-    expect(doc).not.toMatch(/signed-in session/);
+    // text. Listing and reading are not deciding.
+    for (const member of ['list', 'get']) {
+      const doc = memberDoc(member);
+      expect(doc).toMatch(/Reading is not deciding/);
+      expect(doc).not.toMatch(/Who decides/);
+      expect(doc).not.toMatch(/signed-in session/);
+    }
+  });
+
+  it('IAIService no longer declares the pending-action queue', () => {
+    const iai = SOURCE.slice(SOURCE.indexOf('export interface IAIService {'), SOURCE.indexOf('export type PendingActionStatus'));
+    expect(iai.length, 'IAIService not found').toBeGreaterThan(1000);
+    for (const member of ['proposePendingAction', 'approvePendingAction', 'rejectPendingAction', 'listPendingActions']) {
+      expect(iai, `IAIService declares \`${member}\` again`).not.toContain(`    ${member}?(`);
+    }
+    // Control: the slice holds IAIService's members, so an absence above is real.
+    expect(iai).toContain('    chatWithTools?(');
   });
 });

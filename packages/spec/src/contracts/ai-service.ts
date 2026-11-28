@@ -573,32 +573,40 @@ export interface ActionConfirmationRequiredDetails {
  * above it is. A hand-off is not a refusal: it is the successful answer
  * {@link ActionConfirmationPending}.
  *
- * ## The in-app assistant door: the same rule, its own channel
+ * ## The in-app assistant door: the same rule, the same channel
  *
  * Ruled on #33689 (record 6893484458, 「B 同一规则，两套流程暂留」): the rule
- * binds every AI door, the in-app assistant included, and the in-app door
- * keeps its own channel. Merging the two channels was not ruled.
+ * binds every AI door, the in-app assistant included. Ruled on #33806 (record
+ * 7237978621, option A): the in-app door's pending-action queue is merged into
+ * the pending-confirmation service. Every AI door that cannot have the person
+ * answer on the spot hands the call to ONE service
+ * ({@link IActionConfirmationService}, registered under
+ * {@link ACTION_CONFIRMATION_SERVICE}) and answers ONE pending literal
+ * ({@link ActionConfirmationPending}); the doors differ only in how the person
+ * is shown the item.
  *
- * The in-app assistant asks through the pending-action queue of
- * {@link IAIService}: the call is recorded as a pending action
- * ({@link IAIService.proposePendingAction}), the tool answers the model
- * `pending_approval`, and the person is shown the item as an inline
- * pending-approval card in the conversation and in the inbox. Nothing runs
- * until the item is decided. When that channel is not wired (no AI service
- * that records pending actions, or the host has not turned the queue on),
- * the door does not offer a declared-gated action as a tool at all: it is
- * neither run unconfirmed nor offered and then refused. Three points bind the
- * in-app door, the same three that bind a hand-off:
+ * The in-app assistant asks through that service: the call is handed off
+ * ({@link IActionConfirmationService.submit}, with `door: 'assistant'` and the
+ * conversation it was made in), the tool answers the model
+ * {@link ActionConfirmationPending} (`pending_confirmation` and the item's
+ * `pendingId`), and the person is shown the item as an inline pending card in
+ * the conversation and in the inbox. Nothing runs until the item is decided.
+ * When that channel is not wired (no service registered under
+ * {@link ACTION_CONFIRMATION_SERVICE}, or the host has not turned confirmation
+ * on for the assistant), the door does not offer a declared-gated action as a
+ * tool at all: it is neither run unconfirmed nor offered and then refused.
+ * Three points bind the in-app door, the same three that bind a hand-off from
+ * any other door (rule 4):
  *
  * 1. **Who decides.** Only the person the call ran as (the conversation's
  *    user, the person an agent acts for) approves or rejects the item. Holding
  *    `ai:approve`, or any other permission, does not let another user decide
  *    it. A host that wants a second person to approve the write uses the
- *    existing `held` outcome of {@link IAIService.approvePendingAction}: the
+ *    existing `held` outcome of {@link IActionConfirmationService.approve}: the
  *    person approves, and the write waits on the approvals engine.
  * 2. **Which credential.** The approve and reject doors take a person's
- *    signed-in session to the app and nothing else, exactly as the
- *    pending-confirmation service's doors do (rule 4): an API key, a delegated
+ *    signed-in session to the app and nothing else, as the pending-confirmation
+ *    service's doors do for every item (rule 4): an API key, a delegated
  *    or OAuth token and any other service credential are refused, whoever it
  *    resolves to, and so is an AI identity (an agent principal, with or
  *    without `onBehalfOf`, and any call that arrives through an AI door).
@@ -607,16 +615,27 @@ export interface ActionConfirmationRequiredDetails {
  *    call, every gate and permission re-checked at the moment of approval. A
  *    refusal there runs nothing and is recorded on the item as `failed`.
  *
- * The three points bind EVERY item in the in-app queue, whichever trigger
- * queued it: an action declaring `ai.requiresConfirmation: true`, or one the
- * destructive heuristic gates (ADR-0011's confirmation table). A pending row
- * does not record why it was queued, and the queue has one decider rule; an
+ * The three points bind EVERY item the in-app door hands off, whichever trigger
+ * gated it: an action declaring `ai.requiresConfirmation: true`, or one the
+ * destructive heuristic gates (ADR-0011's confirmation table). A pending item
+ * does not record why it was gated, and the service has one decider rule; an
  * administrator who is to approve as well does so through `held`, never by
  * deciding the person's item.
  *
  * Neither the model's own confirmation nor the caller's `confirm` counts
  * (rule 5): the item waits for the person. An approval proves what an approved
  * hand-off proves, that a signed-in session to the app answered.
+ *
+ * ## A stored `pending_approval` answer
+ *
+ * Before the merge the in-app door answered the model
+ * `{ status: 'pending_approval', pendingActionId }`. That answer is retired: no
+ * door gives it. Conversations stored before the merge still carry it, and a
+ * reader that re-draws a pending item from stored history reads it through
+ * the SAME recogniser that reads {@link ActionConfirmationPending}, taking
+ * `pendingActionId` as the `pendingId`; ⛔ there is no second reader of the
+ * retired literal. A host that moves its queue's items into the service keeps
+ * their ids, so a stored answer still names its item.
  *
  * ## What an answer proves
  *
@@ -640,9 +659,10 @@ export interface ActionConfirmationRequiredDetails {
  *   actions: they read the member, as {@link AIActionConfirmation} describes,
  *   until a decision moves them.
  * - REST `/actions` stays outside the gate for a person, as before.
- * - The in-app door's pending-action queue and the pending-confirmation
- *   service ({@link IActionConfirmationService}) stay two seams; the rule
- *   that binds them is one.
+ * - Every AI door hands off to one pending-confirmation service
+ *   ({@link IActionConfirmationService}); how the person is shown an item (an
+ *   inline card in the conversation, the inbox, a notification) stays each
+ *   surface's own.
  *
  * ## When it binds
  *
@@ -660,6 +680,15 @@ export interface ActionConfirmationRequiredDetails {
  * whatever credential they authenticate, and an approved item is re-dispatched
  * through the pre-registered dispatcher of ADR-0011's invocation flow. That
  * reading is the FROM half for the in-app door's three points.
+ *
+ * The merge of the two seams is the contract from 19.0.0. `IAIService` no
+ * longer declares the pending-action queue (its `proposePendingAction`,
+ * `approvePendingAction`, `rejectPendingAction` and `listPendingActions`
+ * members are retired), the pending-confirmation service carries the whole
+ * lifecycle (record, list, read, approve, reject), and the in-app door answers
+ * `pending_confirmation`. A host whose in-app door still records on its own
+ * queue and answers `pending_approval` runs the FROM half of that breaking
+ * note until its implementing change ships.
  *
  * Measured at the amendment: the long-lived stdio server keeps the client's
  * `initialize` capabilities and can send a request to the client while a call
@@ -714,10 +743,27 @@ export interface ActionConfirmationHandOff {
     namespace?: string;
     /** The record the action runs on, when it takes one. */
     recordId?: string;
-    /** The action params the call carried, after the door's own checks. */
+    /**
+     * The action params the call carried, after the door's own checks. For an
+     * in-app item, the input of the tool call it records ({@link toolName}).
+     */
     params: Record<string, unknown>;
-    /** The AI door the call arrived through, e.g. `mcp`. */
+    /**
+     * The AI door the call arrived through: `mcp` for the MCP `run_action` and
+     * `resume_run` tools, `assistant` for the in-app assistant's tools.
+     */
     door: string;
+    /**
+     * The tool whose call the item records, as the model called it: present on
+     * an in-app item (`door: 'assistant'`), where approving it runs that tool
+     * call with {@link params} as the person. Absent on an MCP hand-off, whose
+     * tool is the door itself.
+     */
+    toolName?: string;
+    /** The in-app conversation the call was made in, on an in-app item. */
+    conversationId?: string;
+    /** The conversation message whose tool call the item records, on an in-app item. */
+    messageId?: string;
     /**
      * The parked run a `resume_run` call continues: present exactly when the
      * call is a `resume_run`, absent for `run_action`. Approval resumes this
@@ -770,23 +816,38 @@ export interface ActionConfirmationPending {
 export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
 
 /**
- * The host's pending-confirmation service: the hand-off seam of the amended
- * contract ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, step 2), registered
- * under {@link ACTION_CONFIRMATION_SERVICE}. OPTIONAL — a host without one
- * refuses, reason `no_confirmation_service` (step 3), which is the case of a
- * bare open-source deployment.
+ * The host's pending-confirmation service: the ONE seam every AI door hands a
+ * gated call to (the amended contract, {@link AI_ACTION_CONFIRMATION_CAPABILITY},
+ * step 2, and the in-app assistant door, "The in-app assistant door" there),
+ * registered under {@link ACTION_CONFIRMATION_SERVICE}. OPTIONAL — a host
+ * without one refuses an MCP call it cannot elicit, reason
+ * `no_confirmation_service` (step 3), and its in-app door offers no
+ * declared-gated action as a tool, which is the case of a bare open-source
+ * deployment.
  *
- * The service owns what happens after the hand-off: it stores the pending
- * item, shows it to the person the call ran as in the app and notifies them,
- * and serves the approve and reject doors. Only that person decides the item.
- * Those doors take a person's signed-in session and nothing else: they refuse
- * an AI identity (an agent principal, with or without `onBehalfOf`, and any
- * call through an AI door) and an API key, token or other service credential,
- * whoever it resolves to. On approval the action runs as the approving person
- * through the same admitted sequence, every gate and permission re-checked; a
- * hand-off that carries a run ({@link ActionConfirmationHandOff.run}) resumes
- * that run instead of starting one. On rejection nothing runs. When an item
- * lapses, and how the caller learns its outcome, are the host's to define.
+ * It carries the item's whole lifecycle, so the doors and the surfaces that
+ * show an item read one contract: it records the hand-off ({@link submit}),
+ * lists and reads the items ({@link list}, {@link get}), and decides them
+ * ({@link approve}, {@link reject}). An item's state is its
+ * {@link PendingActionStatus}, and {@link PendingActionRow} is the row
+ * {@link list} and {@link get} answer, whichever door handed the item off.
+ *
+ * The service shows the item to the person the call ran as in the app and
+ * notifies them. Only that person decides the item: {@link approve} and
+ * {@link reject} refuse a `context` whose user is anyone else, whatever
+ * permission they hold, `ai:approve` included, and the item stays `pending`.
+ * The doors that call them take a person's signed-in session and nothing else:
+ * they refuse an AI identity (an agent principal, with or without
+ * `onBehalfOf`, and any call through an AI door) and an API key, token or
+ * other service credential, whoever it resolves to; an implementation refuses
+ * a `context` that carries an AI identity whichever door called it. On
+ * approval the call runs as the approving person through the same admitted
+ * sequence, every gate and permission re-checked; a hand-off that carries a
+ * run ({@link ActionConfirmationHandOff.run}) resumes that run instead of
+ * starting one, and an in-app item runs the tool call it records
+ * ({@link ActionConfirmationHandOff.toolName}). On rejection nothing runs.
+ * When an item lapses, and how the caller learns its outcome, are the host's
+ * to define.
  *
  * The approval leg runs through the framework's host doors, so a host keeps
  * no copy of the admission rules (`@objectstack/runtime`):
@@ -804,20 +865,119 @@ export const ACTION_CONFIRMATION_SERVICE = 'ai.actionConfirmation';
  * resumes whatever screen the run is on with the values given. Deciding a
  * pending item once is the host's.
  *
- * A host may build it over its own pending-action store; the
- * `held` outcome of {@link IAIService.approvePendingAction} is the existing
- * precedent for a write that waits on a person outside the conversation.
+ * Merged from the in-app assistant's pending-action queue, which `IAIService`
+ * declared until 19.0.0 (ruled on #33806, record 7237978621): `submit` takes
+ * what `proposePendingAction` recorded, and `list`, `approve` and `reject`
+ * take over `listPendingActions`, `approvePendingAction` and
+ * `rejectPendingAction`.
  */
 export interface IActionConfirmationService {
     /**
      * Record `handOff` for the person the caller acts for, notify them, and
-     * return the pending item's id. Runs nothing.
+     * return the pending item's id. Runs nothing. The item starts `pending`.
      *
      * @param handOff - The call to confirm
      * @param context - The caller's execution context: who is asked, and as
      *                whose call the item is recorded
      */
     submit(handOff: ActionConfirmationHandOff, context: ExecutionContext): Promise<{ pendingId: string }>;
+
+    /**
+     * The inbox read: the items matching `filter`, newest first. Reading is
+     * not deciding, so none of the deciding points binds it.
+     *
+     * @param filter - Status, conversation, object and row-count filters; all
+     *               items the caller is admitted to when omitted
+     * @param context - The caller's execution context. The implementation
+     *                passes it unchanged as the `context` of the engine read
+     *                it makes (`BaseEngineOptions.context`), so the read runs
+     *                as that caller. Whether a caller is admitted to an item
+     *                depends on the stored object's access and sharing, which
+     *                this contract does not declare.
+     */
+    list(filter: ActionConfirmationListFilter | undefined, context: ExecutionContext): Promise<PendingActionRow[]>;
+
+    /**
+     * One item's state: its row, or `null` when no item with that id is
+     * visible to the caller. Reading is not deciding.
+     *
+     * @param pendingId - The item's id, as {@link submit} returned it
+     * @param context - The caller's execution context, as {@link list} takes it
+     */
+    get(pendingId: string, context: ExecutionContext): Promise<PendingActionRow | null>;
+
+    /**
+     * Approve a `pending` item and run the call it records, as the person.
+     *
+     * The three deciding points bind it ("The in-app assistant door" of
+     * {@link AI_ACTION_CONFIRMATION_CAPABILITY}, and rule 4 there):
+     *
+     * 1. **Who decides:** `context` must be the person the call ran as (the
+     *    row's `proposed_by`). Another user is refused whatever permission
+     *    they hold, `ai:approve` included, and the item stays `pending`.
+     * 2. **Which credential:** the door that calls this member admits only a
+     *    person's signed-in session to the app; an API key, a delegated or
+     *    OAuth token, any other service credential and an AI identity are
+     *    refused before it is called, whoever they resolve to.
+     * 3. **As whom it runs:** the call runs as that person, through the same
+     *    admitted sequence as any action call, every gate and permission
+     *    re-checked at this moment. A refusal there runs nothing and the
+     *    item is `failed`.
+     *
+     * A host that wants a second person to approve the write does not let
+     * that person decide the item: it uses `held`, below.
+     *
+     * `held` is the third outcome: the confirmation was accepted, and the
+     * write waits on an approval outside the conversation, because a host
+     * policy held it for a human approver. Nothing has been written yet,
+     * so the item is `held`, never `executed`; `result` carries whatever the
+     * host returned about the hold. The host that held the call moves it
+     * on: when that approval resolves, it writes the item's final state
+     * (`executed`, `rejected` or `failed`).
+     *
+     * @param pendingId - The item to approve
+     * @param context - The deciding person's execution context; the call runs as them
+     */
+    approve(pendingId: string, context: ExecutionContext): Promise<ActionConfirmationApproveOutcome>;
+
+    /**
+     * Reject a `pending` item. The item becomes `rejected` and the optional
+     * `reason` is stored, so the conversation that handed it off can surface
+     * it. Nothing runs.
+     *
+     * The deciding points bind it as they bind {@link approve}: `context` must
+     * be the person the call ran as (the row's `proposed_by`), whatever
+     * permission another user holds, `ai:approve` included; and the door that
+     * calls this member admits only that person's signed-in session to the
+     * app, never an API key, token or AI identity.
+     *
+     * @param pendingId - The item to reject
+     * @param context - The deciding person's execution context
+     * @param reason - Why the person rejected it, if they said
+     */
+    reject(pendingId: string, context: ExecutionContext, reason?: string): Promise<void>;
+}
+
+/** The filter {@link IActionConfirmationService.list} takes. */
+export interface ActionConfirmationListFilter {
+    /** One status, or any of several. */
+    status?: PendingActionStatus | PendingActionStatus[];
+    /** The in-app conversation the items were handed off from. */
+    conversationId?: string;
+    /** The object the items' calls operate on. */
+    objectName?: string;
+    /** The most rows to answer. */
+    limit?: number;
+}
+
+/** What {@link IActionConfirmationService.approve} answers. */
+export interface ActionConfirmationApproveOutcome {
+    /** `executed`, `held` for an approval outside the conversation (nothing written yet), or `failed`. */
+    status: 'executed' | 'held' | 'failed';
+    /** The call's result when executed; what the host returned about the hold when held. */
+    result?: unknown;
+    /** Why the call failed, when it did. */
+    error?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -979,136 +1139,26 @@ export interface IAIService {
      * @returns Final AI result after all tool calls have been resolved
      */
     chatWithTools?(messages: ModelMessage[], options?: ChatWithToolsOptions): Promise<AIResult>;
-
-    /**
-     * Persist a proposed AI-initiated action that requires human approval
-     * before execution. Used by the actions-as-tools runtime when the
-     * picked action is dangerous (delete / danger variant / has
-     * `confirmText`) or declares `ai.requiresConfirmation: true`, and
-     * `enableActionApproval` is on.
-     *
-     * Implementations write a row to `ai_pending_actions` and return
-     * its id. The caller (the tool handler) immediately returns a
-     * `{ status: 'pending_approval' }` envelope to the LLM.
-     *
-     * This is the in-app assistant door's channel of the confirmation rule
-     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}, "The in-app assistant
-     * door"), and its three points bind the item from the moment it is
-     * recorded:
-     *
-     * 1. **Who decides:** only the person the call ran as, recorded as
-     *    `proposedBy`; no other user decides it, whatever permission they
-     *    hold, `ai:approve` included.
-     * 2. **Which credential:** the item is decided on that person's signed-in
-     *    session to the app, never on an API key, token or AI identity.
-     * 3. **As whom it runs:** once approved, as that person, every gate and
-     *    permission re-checked.
-     */
-    proposePendingAction?(input: ProposePendingActionInput): Promise<{ id: string }>;
-
-    /**
-     * Approve a previously-proposed pending action and re-dispatch it
-     * via the same handler that would have run had approval not been
-     * required. Updates the row to `executed` (or `failed`) and returns
-     * the outcome.
-     *
-     * The three points of the in-app assistant door
-     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) bind it:
-     *
-     * 1. **Who decides:** `actorId` must be the person the call ran as (the
-     *    row's `proposed_by`). Another user is refused whatever permission
-     *    they hold, `ai:approve` included, and the row stays `pending`.
-     * 2. **Which credential:** the door that calls this member admits only a
-     *    person's signed-in session to the app; an API key, a delegated or
-     *    OAuth token, any other service credential and an AI identity are
-     *    refused before it is called, whoever they resolve to.
-     * 3. **As whom it runs:** the re-dispatch runs as that person, through
-     *    the same admitted sequence as any action call, every gate and
-     *    permission re-checked at this moment. A refusal there runs nothing
-     *    and the row is `failed`.
-     *
-     * A host that wants a second person to approve the write does not let
-     * that person decide the item: it uses `held`, below.
-     *
-     * `held` is the third outcome: the confirmation was accepted, and the
-     * write waits on an approval outside the conversation, because a host
-     * policy held it for a human approver. Nothing has been written yet,
-     * so the row is `held`, never `executed`; `result` carries whatever the
-     * host returned about the hold. The host that held the action moves it
-     * on: when that approval resolves, it writes the row's final state
-     * (`executed`, `rejected` or `failed`). This service does not.
-     */
-    approvePendingAction?(
-        id: string,
-        actorId: string,
-    ): Promise<{ status: 'executed' | 'held' | 'failed'; result?: unknown; error?: string }>;
-
-    /**
-     * Reject a pending action. The row transitions to `rejected` and the
-     * optional `reason` is stored so the next LLM turn can surface it.
-     * Nothing runs.
-     *
-     * The deciding points of the in-app assistant door
-     * ({@link AI_ACTION_CONFIRMATION_CAPABILITY}) bind it as they bind
-     * {@link IAIService.approvePendingAction}: `actorId` must be the person
-     * the call ran as (the row's `proposed_by`), whatever permission another
-     * user holds, `ai:approve` included; and the door that calls this member
-     * admits only that person's signed-in session to the app, never an API
-     * key, token or AI identity.
-     */
-    rejectPendingAction?(id: string, actorId: string, reason?: string): Promise<void>;
-
-    /**
-     * Inbox query: list pending (or filtered) action proposals. Used by
-     * Studio's pending-actions view.
-     *
-     * @param filter - Status, conversation, object and row-count filters
-     * @param context - The caller's execution context, the trailing
-     *                parameter the other store contracts take. When it is
-     *                supplied, the implementation passes it unchanged as the
-     *                `context` of the engine read it makes
-     *                (`BaseEngineOptions.context`), so the read runs as that
-     *                caller: under ADR-0096 D5 strict mode an engine read
-     *                with no principal is refused with 403, so without it an
-     *                implementation can only read as system. When it is
-     *                omitted, the read is the one the implementation made
-     *                before this parameter existed. Whether a caller is
-     *                admitted to the rows depends on the stored object's
-     *                access and sharing, which this contract does not declare.
-     */
-    listPendingActions?(
-        filter?: {
-            status?: PendingActionStatus | PendingActionStatus[];
-            conversationId?: string;
-            objectName?: string;
-            limit?: number;
-        },
-        context?: ExecutionContext,
-    ): Promise<PendingActionRow[]>;
 }
 
 /**
- * Lifecycle of a pending action proposal.
+ * Lifecycle of a pending item of the pending-confirmation service
+ * ({@link IActionConfirmationService}), whichever AI door handed it off.
  *
  * `held`: the confirmation was accepted, and the write waits on an approval
  * outside the conversation. It is not a final state; the host that held it
  * writes `executed`, `rejected` or `failed` when that approval resolves
- * (see {@link IAIService.approvePendingAction}).
+ * (see {@link IActionConfirmationService.approve}). When an item lapses, and
+ * how a lapse is recorded, are the host's to define.
  */
 export type PendingActionStatus = 'pending' | 'approved' | 'held' | 'executed' | 'failed' | 'rejected';
 
-/** Input for {@link IAIService.proposePendingAction}. */
-export interface ProposePendingActionInput {
-    objectName: string;
-    actionName: string;
-    toolName: string;
-    toolInput: Record<string, unknown>;
-    conversationId?: string;
-    messageId?: string;
-    proposedBy?: string;
-}
-
-/** Stored row shape returned by {@link IAIService.listPendingActions}. */
+/**
+ * A pending item as the pending-confirmation service stores and answers it
+ * ({@link IActionConfirmationService.list} and
+ * {@link IActionConfirmationService.get}): the persisted row, snake_case
+ * because that is the wire shape the inbox routes serialise.
+ */
 export interface PendingActionRow {
     id: string;
     object_name: string;
@@ -1121,6 +1171,7 @@ export interface PendingActionRow {
     rejection_reason?: string;
     conversation_id?: string;
     message_id?: string;
+    /** The person the call ran as: the one person who decides the item. */
     proposed_by?: string;
     decided_by?: string;
     proposed_at: string;
