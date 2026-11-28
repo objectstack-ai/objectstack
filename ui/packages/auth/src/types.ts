@@ -530,8 +530,12 @@ export interface AuthClient {
   setInitialPassword: (newPassword: string) => Promise<void>;
   /** Whether the current user has a local credential password configured. */
   hasLocalPassword: () => Promise<boolean>;
-  /** Update user profile */
-  updateUser: (data: Partial<AuthUser>) => Promise<AuthUser>;
+  /**
+   * Update the signed-in user's profile. Resolves with nothing: the server
+   * answers a `{ status: true }` receipt, not the user, so re-read the session
+   * (`getSession`) for the stored fields. A refusal rejects (objectstack#36987).
+   */
+  updateUser: (data: Partial<AuthUser>) => Promise<void>;
 
   /** Fetch the public auth configuration from the server (providers, features) */
   getConfig: () => Promise<AuthPublicConfig>;

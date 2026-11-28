@@ -290,20 +290,18 @@ describe('createAuthClient', () => {
     await expect(client.signIn({ email: 'x', password: 'y' })).rejects.toThrow();
   });
 
-  it('updateUser sends POST to /update-user and returns user', async () => {
+  it('updateUser sends POST to /update-user and resolves with nothing (objectstack#36987)', async () => {
     const { mockFn, calls } = createMockFetch({
-      '/update-user': {
-        body: { user: { id: '1', name: 'Updated', email: 'test@test.com' } },
-      },
+      // better-auth's real answer on this route: a receipt, not the user.
+      '/update-user': { body: { status: true } },
     });
     const client = createAuthClient({ baseURL: 'http://localhost/api/auth', fetchFn: mockFn });
 
-    const result = await client.updateUser({ name: 'Updated' });
+    await expect(client.updateUser({ name: 'Updated' })).resolves.toBeUndefined();
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain('/api/auth/update-user');
     expect(calls[0].method).toBe('POST');
-    expect(result.name).toBe('Updated');
   });
 });
 

@@ -1129,17 +1129,21 @@ export function createAuthClient(config: AuthClientConfig): AuthClient {
       }
     },
 
-    async updateUser(userData: Partial<AuthUser>) {
+    async updateUser(userData: Partial<AuthUser>): Promise<void> {
       const { data, error } = await betterAuth.updateUser(userData);
       if (error) {
         throw new Error(error.message ?? `Auth request failed with status ${error.status}`);
       }
       if (!data) {
+        // Kept although nothing is returned: an empty 2xx is still an anomaly
+        // a caller should hear about, not a silent success.
         throw new Error('Update user returned no data');
       }
-      // The server response may wrap the user in a `user` key or return it directly
-      const raw = data as unknown as Record<string, unknown>;
-      return (raw && typeof raw === 'object' && 'user' in raw ? raw.user : raw) as AuthUser;
+      // better-auth's `/update-user` answers the receipt `{ status: true }`,
+      // never the user (`dist/api/routes/update-user.mjs`), so nothing is
+      // passed on. It used to be cast to `AuthUser` and returned, and the
+      // provider installed it as the session user (objectstack#36972,
+      // objectstack#36987). Re-read the session for the stored fields.
     },
 
     /**
