@@ -61,9 +61,14 @@
  */
 
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
-import { ObjectKernel } from '@objectstack/core';
+import { ObjectKernel, ServiceLifecycle } from '@objectstack/core';
 import type { PluginContext } from '@objectstack/core';
-import { assertEngineDeleteDispatch, assertEngineUpdateDispatch } from '@objectstack/metadata-core';
+import {
+    assertEngineDeleteDispatch,
+    assertEngineUpdateDispatch,
+    authoredKnowledgeSourceRefusal,
+    knowledgeServiceNotInScope,
+} from '@objectstack/metadata-core';
 import { EMAIL_SEND_CAPABILITY } from './email-routes.js';
 // Pays `@objectstack/objectql`'s first load at collection, never inside a clocked case
 // (the route modules import it lazily).
@@ -337,7 +342,7 @@ type Mount = 'scoped' | 'hostname';
 
 interface Door {
     provider: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'PUT';
     /** Path below the base, scoped or unscoped. */
     path: string;
     params: (env: string) => Record<string, string>;
@@ -1418,5 +1423,182 @@ describe('a single kernel with no security service keeps serving every door, as 
             POSTURE_DOORS.export, 'hostname', 'host');
         expect(out.status, JSON.stringify(out.body)).toBe(200);
         expect(h.reached).toEqual([{ env: 'host', op: 'findData' }]);
+    }, 60_000);
+});
+
+/**
+ * [ADR-0161 K4, guard two] The `knowledge_source` save's source admission reads
+ * the `knowledge` service IN the request's environment, and tells a scoped
+ * factory's miss apart from a deployment with no knowledge service.
+ *
+ * A host can register `knowledge` as a `SCOPED` factory that serves an
+ * instance for some environments only. Measured on this file's single-kernel
+ * shape before the change, `PUT /environments/env_alpha/meta/knowledge_source/faq`
+ * answered `503 SERVICE_UNAVAILABLE` "this deployment runs no knowledge
+ * service" both for a factory serving another environment AND for one serving
+ * `env_alpha`: the provider read the slot with `ctx.getService`, which cannot
+ * construct a factory, and named no scope. The runtime dispatcher's save doors
+ * answer the miss with its own sentence (`knowledgeServiceNotInScope`), so the
+ * expected message here is that predicate's answer for the same input: both
+ * transports answer one miss with one sentence.
+ *
+ * Every case boots real kernels with the real REST plugin. The identity is the
+ * real resolution, with the save door's two capabilities added.
+ */
+describe('[ADR-0161 K4] the knowledge_source save reads a scoped knowledge factory in the request\'s environment', () => {
+    const SOURCE = { name: 'faq', label: 'FAQ', adapter: 'memory', source: { kind: 'object', object: 'article', content: ['body'] } };
+    const SAVE: Door = {
+        provider: 'knowledge', method: 'PUT', path: '/meta/:type/:name',
+        params: () => ({ type: 'knowledge_source', name: 'faq' }), body: SOURCE,
+        op: 'protocol.saveMetaItem', answeredBy: () => undefined, absent: { status: 503 },
+    };
+    const SAVE_CAPABILITIES = ['manage_metadata', 'manage_knowledge_sources'];
+
+    /** The sentence the dispatcher's save doors answer for the same miss. */
+    async function scopeMissSentence(env: string): Promise<string> {
+        const refusal = await authoredKnowledgeSourceRefusal({
+            type: 'knowledge_source', item: SOURCE, executionContext: { userId: 'u_any' },
+            resolveKnowledgeService: () => knowledgeServiceNotInScope(env),
+        });
+        return refusal!.message;
+    }
+
+    interface Knowledge { admit: ReturnType<typeof vi.fn>; saves: string[] }
+
+    /** `knowledge` as the host registers it: a factory serving `served` only, or a plain instance. */
+    function knowledgePlugin(k: Knowledge, how: { scopedServing: string } | 'plain' | 'none'): unknown {
+        return {
+            name: 'test.knowledge.registration',
+            version: '1.0.0',
+            init: async (ctx: PluginContext) => {
+                const service = { admitAuthoredSource: k.admit };
+                if (how === 'none') return;
+                if (how === 'plain') { ctx.registerService('knowledge', service); return; }
+                ctx.registerServiceFactory(
+                    'knowledge',
+                    (_ctx: unknown, scopeId?: string) => (scopeId === how.scopedServing ? service : undefined),
+                    ServiceLifecycle.SCOPED,
+                );
+            },
+        };
+    }
+
+    function saveProtocol(env: string, k: Knowledge): unknown {
+        return {
+            ...(envProtocol(env) as object),
+            saveMetaItem: async ({ name }: { name: string }) => { k.saves.push(`${env}:${name}`); return { success: true, name }; },
+        };
+    }
+
+    function withSaveCapabilities(h: Hosted): void {
+        const real = h.server.resolveExecCtx.bind(h.server);
+        h.server.resolveExecCtx = async (environmentId: string | undefined, req: any) => {
+            const ctx = await real(environmentId, req);
+            return ctx ? { ...ctx, systemPermissions: [...(ctx.systemPermissions ?? []), ...SAVE_CAPABILITIES] } : ctx;
+        };
+    }
+
+    /** One kernel carrying everything, the REST plugin on it, scoping on. */
+    async function bootSingle(how: { scopedServing: string } | 'plain' | 'none'): Promise<Hosted & Knowledge> {
+        const k: Knowledge = { admit: vi.fn(async () => ({ admitted: true })), saves: [] };
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const kernel = await bootKernel('test.single.knowledge', {
+            'http.server': http,
+            protocol: saveProtocol('host', k),
+            auth: authServiceFor('u_host'),
+            objectql: emptyQl(),
+        }, [knowledgePlugin(k, how), createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
+        expect(captured.servers).toHaveLength(1);
+        const h: Hosted = { table: http.table, reached: [], km: hostKernelManager({}), resolver: hostKernelResolver(), server: captured.servers[0], kernels: [kernel] };
+        withSaveCapabilities(h);
+        return { ...h, ...k };
+    }
+
+    const booted: ObjectKernel[] = [];
+    afterAll(async () => { for (const kernel of booted) await kernel.shutdown(); });
+
+    it('single kernel: a factory serving another environment is refused 503 with the scope sentence, the dispatcher\'s, and nothing is saved', async () => {
+        const h = await bootSingle({ scopedServing: ENV_B });
+        booted.push(...h.kernels);
+        const out = await drive(h, SAVE, 'scoped', ENV_A);
+        expect(out.status, JSON.stringify(out.body)).toBe(503);
+        expect(out.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(out.body?.error?.message).toMatch(
+            /^The knowledge source 'faq' was not saved: the knowledge service registered on this deployment serves no instance for environment 'env_alpha'/,
+        );
+        expect(out.body?.error?.message).toBe(await scopeMissSentence(ENV_A));
+        expect(out.body?.error?.message).not.toContain('runs no knowledge service');
+        expect(h.admit).not.toHaveBeenCalled();
+        expect(h.saves).toEqual([]);
+    }, 60_000);
+
+    it('single kernel CONTROL: the factory serving this environment, and a plain instance, admit the save', async () => {
+        const served = await bootSingle({ scopedServing: ENV_A });
+        booted.push(...served.kernels);
+        const out = await drive(served, SAVE, 'scoped', ENV_A);
+        expect(out.status, JSON.stringify(out.body)).toBe(200);
+        expect(served.admit).toHaveBeenCalledTimes(1);
+        expect(served.saves).toEqual(['host:faq']);
+
+        const plain = await bootSingle('plain');
+        booted.push(...plain.kernels);
+        for (const mount of ['scoped', 'hostname'] as const) {
+            const res = await drive(plain, SAVE, mount, ENV_A);
+            expect(res.status, `${mount}: ${JSON.stringify(res.body)}`).toBe(200);
+        }
+        expect(plain.admit).toHaveBeenCalledTimes(2);
+        expect(plain.saves).toEqual(['host:faq', 'host:faq']);
+    }, 60_000);
+
+    it('single kernel CONTROL: nothing registered under `knowledge` keeps the no-service sentence', async () => {
+        const h = await bootSingle('none');
+        booted.push(...h.kernels);
+        const out = await drive(h, SAVE, 'scoped', ENV_A);
+        expect(out.status, JSON.stringify(out.body)).toBe(503);
+        expect(out.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(out.body?.error?.message).toMatch(/^The knowledge source 'faq' was not saved: this deployment runs no knowledge service/);
+        expect(h.saves).toEqual([]);
+    }, 60_000);
+
+    it('single kernel: a request naming no environment reads a scoped registration loudly, as a lookup that could not be made', async () => {
+        // No environment, no scope: `Scope ID required …` is true about this
+        // caller, and the dispatcher's lookup keeps it loud too.
+        const h = await bootSingle({ scopedServing: ENV_A });
+        booted.push(...h.kernels);
+        const out = await drive(h, SAVE, 'hostname', 'host');
+        expect(out.status, JSON.stringify(out.body)).toBe(503);
+        expect(out.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(out.body?.error?.message).toMatch(/^The knowledge source was not saved: whether its author may search what it would index could not be judged/);
+        expect(h.saves).toEqual([]);
+    }, 60_000);
+
+    it('hosted: each environment\'s own scoped factory is read in that environment; a miss gets the scope sentence, a served one is admitted', async () => {
+        const k: Knowledge = { admit: vi.fn(async () => ({ admitted: true })), saves: [] };
+        const envKernel = (env: string) => bootKernel(`test.env.${env}`, {
+            auth: authServiceFor(`u_${env}`), objectql: emptyQl(), protocol: saveProtocol(env, k),
+        }, [knowledgePlugin(k, { scopedServing: ENV_A })]);
+        const kernels = { [ENV_A]: await envKernel(ENV_A), [ENV_B]: await envKernel(ENV_B) };
+        const http = recordingHttp();
+        captured.servers.length = 0;
+        const host = await bootKernel('test.host.knowledge', {
+            'http.server': http, protocol: envProtocol('host'), 'kernel-manager': hostKernelManager(kernels),
+            'kernel-resolver': hostKernelResolver(),
+        }, [createRestApiPlugin({ api: { api: { enableProjectScoping: true, projectResolution: 'auto' } }, enforceProjectMembership: MEMBERSHIP_NOT_MODELLED } as any)]);
+        booted.push(host, ...Object.values(kernels));
+        expect(captured.servers).toHaveLength(1);
+        const h: Hosted = { table: http.table, reached: [], km: hostKernelManager(kernels), resolver: hostKernelResolver(), server: captured.servers[0], kernels: [] };
+        withSaveCapabilities(h);
+
+        const miss = await drive(h, SAVE, 'scoped', ENV_B);
+        expect(miss.status, JSON.stringify(miss.body)).toBe(503);
+        expect(miss.body?.error?.code).toBe('SERVICE_UNAVAILABLE');
+        expect(miss.body?.error?.message).toBe(await scopeMissSentence(ENV_B));
+        expect(k.saves).toEqual([]);
+
+        const served = await drive(h, SAVE, 'scoped', ENV_A);
+        expect(served.status, JSON.stringify(served.body)).toBe(200);
+        expect(k.admit).toHaveBeenCalledTimes(1);
+        expect(k.saves).toEqual([`${ENV_A}:faq`]);
     }, 60_000);
 });

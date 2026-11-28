@@ -105,6 +105,8 @@ import {
     // [ADR-0161 K4, guard two] The service name the save door's source admission
     // resolves (`resolveKnowledgeService`).
     KNOWLEDGE_SOURCE_ADMISSION_SERVICE,
+    // …and the answer its lookup gives for a scoped-factory miss.
+    knowledgeServiceNotInScope,
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 import { presentedForwardCredential, redeemForwardCredential } from './forward-credential.js';
@@ -1279,6 +1281,26 @@ export async function createXlsxStream(res: any, useStyles = false): Promise<{
 }
 
 /**
+ * [ADR-0161 K4, guard two] What the composition root's classified by-name
+ * lookup answers: the three non-fault outcomes of a service read made in the
+ * request's environment, the ones the runtime dispatcher's `classifyService`
+ * answers for the same read (typed locally for the package-cycle reason
+ * {@link RestKernelManager} gives).
+ *
+ *  - `resolved`: an instance.
+ *  - `never-registered`: nothing is registered under the name.
+ *  - `no-instance-in-scope`: a registration exists, and the read made in this
+ *    environment produced no instance (a host's scoped factory).
+ *
+ * A fault (a registered factory that threw, a scoped registration read with
+ * no environment) is a rejection, never one of these.
+ */
+export type ClassifiedKernelServiceLookup =
+    | { readonly outcome: 'resolved'; readonly value: unknown }
+    | { readonly outcome: 'never-registered' }
+    | { readonly outcome: 'no-instance-in-scope'; readonly scopeId: string };
+
+/**
  * Structural subset of `KernelManager` that RestServer needs in order to
  * resolve a per-project protocol at request time. Typed locally to avoid
  * an @objectstack/runtime → @objectstack/rest → @objectstack/runtime
@@ -2139,6 +2161,12 @@ export class RestServer {
      * that name.
      */
     private kernelServiceProvider?: (name: string, environmentId?: string) => Promise<unknown>;
+    /**
+     * [ADR-0161 K4, guard two] The same by-name lookup made in the request's
+     * environment, answering {@link ClassifiedKernelServiceLookup} — read by
+     * {@link resolveKnowledgeService} only.
+     */
+    private classifiedKernelServiceProvider?: (name: string, environmentId?: string) => Promise<ClassifiedKernelServiceLookup>;
     /** Whether {@link computeExecCtx} asks the environment-membership judgment. */
     private readonly environmentMembershipEnforced: boolean;
     /**
@@ -2213,6 +2241,14 @@ export class RestServer {
          * by the host's own switch.
          */
         environmentMembership?: { enforced: boolean },
+        /**
+         * [ADR-0161 K4, guard two] Appended LAST for the #15256 reason above:
+         * the by-name lookup made in the request's environment, with its two
+         * quiet misses told apart ({@link ClassifiedKernelServiceLookup}), for
+         * the `knowledge_source` save's source admission. Absent, that
+         * admission reads {@link kernelServiceProvider} as before.
+         */
+        classifiedKernelServiceProvider?: (name: string, environmentId?: string) => Promise<ClassifiedKernelServiceLookup>,
     ) {
         this.protocol = protocol;
         this.config = this.normalizeConfig(config);
@@ -2236,6 +2272,7 @@ export class RestServer {
         this.tenancyServiceProvider = tenancyServiceProvider;
         this.auditServiceProvider = auditServiceProvider;
         this.kernelServiceProvider = kernelServiceProvider;
+        this.classifiedKernelServiceProvider = classifiedKernelServiceProvider;
         this.environmentMembershipEnforced = environmentMembership?.enforced === true;
     }
 
@@ -6219,15 +6256,36 @@ export class RestServer {
      * refuses `503`, never proceeds). `unknown`, deliberately: the door reads
      * the one member it asks structurally.
      *
-     * A server built with no `kernelServiceProvider` answers `undefined`,
-     * quietly: `RestApiPlugin` always passes one, and a hand-built server
-     * without it reaches no kernel service at all (its security and audit
-     * lookups read the same way), so no knowledge service serves it either.
+     * A `knowledge` registration that serves no instance in the request's
+     * environment (a host's scoped factory) answers
+     * `knowledgeServiceNotInScope`, and the door refuses with that miss's own
+     * sentence: the deployment does run a knowledge service, so "runs none"
+     * and the stack's `requires` would both be false. Read through
+     * {@link classifiedKernelServiceProvider}, which tells that miss apart —
+     * the same three outcomes the runtime dispatcher's save doors read
+     * (`resolveKnowledgeServiceForSave` in `@objectstack/runtime`), so the two
+     * transports answer one miss with one sentence. The platform's
+     * `KnowledgeServicePlugin` registers a plain instance, so its own service
+     * never reaches that branch.
+     *
+     * A server built with neither provider answers `undefined`, quietly:
+     * `RestApiPlugin` always passes both, and a hand-built server without
+     * them reaches no kernel service at all (its security and audit lookups
+     * read the same way), so no knowledge service serves it either. A server
+     * handed only `kernelServiceProvider` reads it as before, and both misses
+     * are then the no-service answer.
      */
     private async resolveKnowledgeService(
         environmentId?: string,
         req?: any,
     ): Promise<unknown> {
+        if (this.classifiedKernelServiceProvider) {
+            const envId = await this.resolveRequestEnvironmentId(environmentId, req);
+            const answer = await this.classifiedKernelServiceProvider(KNOWLEDGE_SOURCE_ADMISSION_SERVICE, envId);
+            if (answer.outcome === 'resolved') return answer.value;
+            if (answer.outcome === 'no-instance-in-scope') return knowledgeServiceNotInScope(answer.scopeId);
+            return undefined;
+        }
         if (!this.kernelServiceProvider) return undefined;
         try {
             return await this.kernelServiceProvider(

@@ -2,6 +2,7 @@
 
 import { Plugin, PluginContext, IHttpServer, isServiceNotRegisteredError, resolveEnvironmentMembershipEnforcement } from '@objectstack/core';
 import { RestServer, RestKernelManager, RestProtocol, RestRequestEnvResolver, RestEnvRegistry } from './rest-server.js';
+import type { ClassifiedKernelServiceLookup } from './rest-server.js';
 import { RestServerConfig } from '@objectstack/spec/api';
 import { mountAndRecordDirectRoutes } from './direct-mount-composition.js';
 import type { ResolvedSettingValue } from '@objectstack/spec/system';
@@ -576,6 +577,68 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
             const kernelServiceProvider = (name: string, environmentId?: string): Promise<unknown> =>
                 environmentScopedProvider<unknown>(name)(environmentId);
 
+            // [ADR-0161 K4, guard two] The same by-name lookup, made IN the
+            // request's environment and with its two quiet misses told apart,
+            // for the one door whose answer differs between them: the
+            // `knowledge_source` save, whose "this deployment runs no knowledge
+            // service" is false where a host registers `knowledge` as a scoped
+            // factory. The runtime dispatcher's save doors read the same
+            // three outcomes (`HttpDispatcher#classifyService`), so both
+            // transports answer one miss with one sentence.
+            //
+            // The legs are `environmentScopedProvider`'s, with the environment
+            // id handed to the read as its scope id (a plain instance ignores
+            // it), and the own-kernel leg read through `getServiceAsync`, as
+            // `objectQLOnOwnKernel` reads it: `ctx.getService` cannot construct
+            // a factory, so it folded a scoped registration into "nothing is
+            // registered" whatever the scope. ⛔ No fall back to this plugin's
+            // occupant for an environment whose kernel carries none.
+            //
+            //  - a value → `resolved`;
+            //  - the branded "never registered" rejection → `never-registered`;
+            //  - a registration that produced no instance → `no-instance-in-scope`
+            //    when the read named a scope, else `never-registered`;
+            //  - any other rejection (a factory that threw, a scoped
+            //    registration read with no scope) → re-raised: the door
+            //    answers it as a lookup that could not be made.
+            const classifiedKernelServiceProvider = async (
+                name: string,
+                environmentId?: string,
+            ): Promise<ClassifiedKernelServiceLookup> => {
+                const read = async (get: () => Promise<unknown>): Promise<ClassifiedKernelServiceLookup> => {
+                    let svc: unknown;
+                    try {
+                        svc = await get();
+                    } catch (err) {
+                        if (isServiceNotRegisteredError(err)) return { outcome: 'never-registered' };
+                        throw err;
+                    }
+                    if (svc != null) return { outcome: 'resolved', value: svc };
+                    return environmentId === undefined
+                        ? { outcome: 'never-registered' }
+                        : { outcome: 'no-instance-in-scope', scopeId: environmentId };
+                };
+                // A kernel this lookup reads in a scope. `RestKernelManager`
+                // declares the one-argument read the other seams make; the
+                // kernels a host's manager hands out (`ObjectKernel`) take the
+                // scope id as the second.
+                type ScopedRead = { getServiceAsync(name: string, scopeId?: string): Promise<unknown> };
+                if (kernelManager && environmentId && environmentId !== 'platform') {
+                    const kernel = (await kernelManager.getOrCreate(environmentId)) as ScopedRead;
+                    return read(() => kernel.getServiceAsync(name, environmentId));
+                }
+                const own = (typeof ctx.getKernel === 'function' ? ctx.getKernel() : undefined) as Partial<ScopedRead> | undefined;
+                if (own && typeof own.getServiceAsync === 'function') {
+                    return read(() => own.getServiceAsync!(name, environmentId));
+                }
+                // A `KernelBase`-shaped host (`LiteKernel`) has no service
+                // factories, so "not registered" is the only miss it has.
+                try {
+                    const svc = ctx.getService<unknown>(name);
+                    return svc != null ? { outcome: 'resolved', value: svc } : { outcome: 'never-registered' };
+                } catch { return { outcome: 'never-registered' }; }
+            };
+
             if (!server) {
                 ctx.logger.warn(`RestApiPlugin: HTTP Server service '${serverService}' not found. REST routes skipped.`);
                 return;
@@ -615,7 +678,7 @@ export function createRestApiPlugin(config: RestApiPluginConfig = {}): Plugin {
                         enforceProjectMembership: config.enforceProjectMembership,
                         enableProjectScoping: config.api?.api?.enableProjectScoping,
                     }),
-                });
+                }, classifiedKernelServiceProvider);
                 restServer.registerRoutes();
 
                 ctx.logger.info('REST API successfully registered');
