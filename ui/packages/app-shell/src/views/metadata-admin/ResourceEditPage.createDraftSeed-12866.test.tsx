@@ -24,6 +24,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { z } from 'zod';

@@ -21,6 +21,11 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
+// …and `anchors.ts`'s dynamic `@object-ui/plugin-detail` import, the same way.
+import '@object-ui/plugin-detail';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { MetadataClient } from '@object-ui/data-objectstack';

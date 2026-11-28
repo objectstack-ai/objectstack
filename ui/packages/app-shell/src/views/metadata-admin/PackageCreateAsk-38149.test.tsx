@@ -22,6 +22,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import type { PkgEntry } from '../studio-design/packages-io';
 

@@ -14,6 +14,9 @@
 import '@testing-library/jest-dom/vitest';
 import * as React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MetadataClient } from '@object-ui/data-objectstack';
 
@@ -51,7 +54,8 @@ vi.mock('../../views/studio-design/packages-io.js', async (importOriginal) => ({
 }));
 
 /** The wizard, cut to its last step: Finish hands the app to `saveApp`. */
-vi.mock('@object-ui/plugin-designer', () => ({
+vi.mock('@object-ui/plugin-designer', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   CreateAppPage: ({ saveApp }: { saveApp?: (name: string, app: Record<string, unknown>) => Promise<boolean> }) => {
     const [answer, setAnswer] = React.useState<string>('');
     return (

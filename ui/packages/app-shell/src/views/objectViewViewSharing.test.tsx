@@ -16,6 +16,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+// The source under test reaches `celAuthoring`'s dynamic `@objectstack/lint`
+// import; its first load is paid here, at collection (`check:test-source-alias`).
+import '@objectstack/lint';
 import { renderHook, act } from '@testing-library/react';
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }));
