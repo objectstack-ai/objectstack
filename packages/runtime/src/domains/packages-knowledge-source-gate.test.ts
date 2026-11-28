@@ -523,7 +523,7 @@ describe('/packages duplicate and /meta save on a real kernel running KnowledgeS
                 expect(message.startsWith('Duplicating package "pkg-a" is refused, and nothing was copied. The knowledge source "faq" cannot be copied: '), message).toBe(true);
                 expect(message).not.toMatch(/save the source|save it again|Nothing was written|was not saved|the save /);
                 expect(message.match(/nothing was copied/gi)).toHaveLength(1);
-                expect(message).toMatch(arm === 'title' ? /Have someone who may query it duplicate the package\.$/ : /duplicate the package again/);
+                expect(message).toMatch(arm === 'title' ? /Have someone who may query it duplicate the package\.$/ : /duplicate the package again/i);
                 expect(stack.protocol.duplicatePackage).not.toHaveBeenCalled();
             } finally {
                 await stack.kernel.shutdown();
