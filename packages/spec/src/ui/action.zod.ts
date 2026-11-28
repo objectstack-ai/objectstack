@@ -18,7 +18,8 @@
  */
 
 import { z } from 'zod';
-import { retiredKey } from '../shared/retired-key';
+import { enumWithRetiredValues, retiredKey } from '../shared/retired-key';
+import { ASK_AI_RETIRED } from './action-ask-ai-retired';
 import { FieldType } from '../data/field.zod';
 // #6970 — the authoring gate on `defaultValue` runs the SAME value contract the
 // dispatcher runs at submit, through the shared `defaultValue` discriminator
@@ -691,74 +692,28 @@ export const ActionParamSchema = lazySchema(() => strictObject(
  * contract-first split (spec now, executor halves downstream) must not carry —
  * and a member would be a second spelling of the bulk def's `operation`.
  *
- * `ask_ai` (ADR-0160 D7) IS a member, and the coupling above is why it lands
- * with its executor: the spec member and the console executor ship in one PR,
- * so the console never compiles against a type it cannot run. It is an action
- * on one record that focuses the in-app assistant on that record. It names
- * nothing — a `target` beside it is refused at parse — and it is never an AI
- * tool: `ai.exposed: true` beside it is refused at parse, and no server
- * dispatch admits it (the runtime's headless predicate answers `false`), so
- * neither `list_actions`/`run_action` nor the `action_` tool family serves it.
- * A client draws it only where it draws the assistant's pin control (the
- * assistant surface on, and the AI service advertising that it honours a
- * conversation focus); elsewhere the action is absent, not disabled.
+ * `ask_ai` was a member on the 19 prerelease line only and is RETIRED (ADR-0160
+ * D7, seventh amendment): the shell's 「问 AI」 entry is the one way into the
+ * assistant. It is declared with `enumWithRetiredValues`, so writing it is
+ * answered with the prescription (`action-ask-ai-retired.ts`) rather than with
+ * zod's list of members; no authoring surface converts it. Stored rows and
+ * built artifacts are read without the action (the ADR-0087 conversion
+ * `action-type-ask-ai-removed`), and `os migrate meta --from 18` deletes from
+ * sources an `ask_ai` action that nothing names.
  */
-export const ActionType = z.enum(['script', 'url', 'modal', 'flow', 'api', 'form', 'ask_ai']);
+const ACTION_TYPE_VALUES = ['script', 'url', 'modal', 'flow', 'api', 'form'] as const;
+export const ActionType = enumWithRetiredValues(ACTION_TYPE_VALUES, { ask_ai: ASK_AI_RETIRED });
 export type ActionType = z.input<typeof ActionType>;
 
 /**
- * Action types whose dispatch names nothing, so a `target` is not required:
- * `script` (an inline `body` may stand in for it) and `ask_ai` (ADR-0160 D7:
- * it focuses the assistant on the record it runs on, and a `target` beside it
- * is refused — see {@link refuseAskAiContradictions}).
- */
-const TARGETLESS_TYPES: ReadonlySet<string> = new Set(['script', 'ask_ai']);
-
-/**
  * Action types that require a `target` field.
- * Derived from ActionType, excluding the targetless types above.
+ * Derived from ActionType, excluding 'script' which allows inline handlers.
  * These types reference an external resource (URL, flow, modal, or API endpoint)
  * and cannot function without a target binding.
  */
 const TARGET_REQUIRED_TYPES: ReadonlySet<string> = new Set(
-  ActionType.options.filter((t) => !TARGETLESS_TYPES.has(t)),
+  ActionType.options.filter((t) => t !== 'script'),
 );
-
-/**
- * ADR-0160 D7 — the two things an `ask_ai` action may not declare.
- *
- * - `target`: the action names nothing. The context pack the assistant reads
- *   is chosen by the pack-selection rule of `get_record_context`, never by the
- *   action, so a `target` here would be a declaration no runtime reads.
- * - `ai.exposed: true` (registered actions only — the inline shape has no
- *   `ai` key): an `ask_ai` action has no server dispatch, so no agent could
- *   ever run it; exposing it would advertise a tool that cannot exist.
- */
-function refuseAskAiContradictions(
-  data: { type?: string; target?: unknown; ai?: { exposed?: boolean } | undefined },
-  ctx: z.RefinementCtx,
-): void {
-  if (data.type !== 'ask_ai') return;
-  if (data.target !== undefined) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['target'],
-      message:
-        "A `type: 'ask_ai'` action takes no `target`: it focuses the in-app assistant on the record it "
-        + "runs on, and the material the assistant reads about that record is chosen by the record's "
-        + 'context pack, not by the action. Drop `target`.',
-    });
-  }
-  if (data.ai?.exposed === true) {
-    ctx.addIssue({
-      code: 'custom',
-      path: ['ai', 'exposed'],
-      message:
-        "A `type: 'ask_ai'` action is never an AI tool: it has no server dispatch (it only opens the "
-        + 'assistant in the console), so no agent could run it. Drop `ai.exposed`, or set it to `false`.',
-    });
-  }
-}
 
 /**
  * Action Schema
@@ -1492,7 +1447,8 @@ const actionObject = () => strictObject({
         + "`operation: 'update'` with a `patch: { … }` of static field values (the list view's "
         + "`bulkActionDefs` vocabulary, mirrored). Leave `type` at its default `'script'`: that is the "
         + 'platform action route the write is performed on.'
-      : undefined),
+      // ADR-0160 D7: the retired member answers here as it does on `ActionType`.
+      : issue.input === 'ask_ai' ? ASK_AI_RETIRED : undefined),
   }).default('script').describe("Action functionality type — the dispatch route. The declarative single-record field write is not a type: it is `operation: 'update'` + `patch` on the default `script` route."),
   
   /** 
@@ -3078,8 +3034,7 @@ export const ActionSchema = lazySchema(() => actionObject().refine((data) => {
 }, {
   message: "Action 'target' is required when type is 'url', 'flow', 'modal', 'api', or 'form'.",
   path: ['target'],
-}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`"))
-  .superRefine(refuseAskAiContradictions).refine((data) => {
+}).superRefine(refuseUnopenableUrlTarget("A `type: 'url'` action's `target`")).refine((data) => {
   // A `script` action must be *executable*: it needs either an inline `body`
   // (the runtime invokes it in the sandbox) or a `target` naming a registered
   // bundle function. With neither, AppPlugin registers no engine handler and
@@ -3497,7 +3452,7 @@ export const InlineActionSchema = lazySchema(() => z.preprocess(
     CONFIRM_BESIDE_PARAMS_REFUSAL,
   ).superRefine(refuseUnopenableUrlTarget(
     "An inline `type: 'url'` action's `target` (or its legacy spelling `to`)",
-  )).superRefine(refuseAskAiContradictions),
+  )),
 ));
 
 /**

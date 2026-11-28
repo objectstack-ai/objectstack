@@ -34,7 +34,7 @@ import {
   RecordHeaderBarContext,
   toast,
 } from '@object-ui/components';
-import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useDrawsAction, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
+import { SchemaRenderer, ActionCtxReact, useCapabilityGate, useCondition, toPredicateInput, useSettledSchema, useFilterScope, useResolvedFilter, usePredicateScope, classifyLoadError, answeredLoadFailure, declaredUserMessage, extractWriteErrorMessage, isExternalWriteRefusal, type LoadErrorKind, type RelatedRowActionDef } from '@object-ui/react';
 import {
   Plus,
   ExternalLink,
@@ -86,7 +86,6 @@ import {
   resolveAffordance,
   isDeadlineSettled,
   isActionSwitchedOff,
-  isAskAiAction,
   ActionRunner,
   type ActionDef,
   type ActionResult,
@@ -1574,14 +1573,9 @@ export const RelatedList: React.FC<RelatedListProps> = ({
    * and can only ever hide more than before.
    */
   const mayInvoke = useCapabilityGate();
-  // [ADR-0160 D7] An `ask_ai` action is absent where the provider has no
-  // in-app assistant.
-  const drawsAction = useDrawsAction();
   const permittedToolbarActions = React.useMemo(
-    // [ADR-0160 D7] The toolbar holds no single record (a launch from it runs
-    // on the parent), so an `ask_ai` action is absent here; its rows draw it.
-    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a) && drawsAction(a) && !isAskAiAction(a)),
-    [toolbarActions, mayInvoke, drawsAction],
+    () => (toolbarActions ?? []).filter((a) => mayInvoke(a?.requiredPermissions) && !isActionSwitchedOff(a)),
+    [toolbarActions, mayInvoke],
   );
 
   // In the record page's related column (objectstack#26678) the list is a

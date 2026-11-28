@@ -187,7 +187,7 @@ describe('the removed `currencyConfig.precision` at rest: a stored row carrying 
     const notices: string[] = [];
     const converted = applyConversionsToStoredItem('object', storedRow, {
       onNotice: (n) => notices.push(`${n.conversionId}@${n.path}`),
-    });
+    })!;
     expect(converted.fields.amount.currencyConfig).toEqual({ currencyMode: 'fixed', defaultCurrency: 'USD' });
     // The baked `'CNY'` on the dynamic config goes too, by the later major-18
     // entry `currency-config-dynamic-default-currency-removed` (#27157).

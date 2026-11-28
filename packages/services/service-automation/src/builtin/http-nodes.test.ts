@@ -5,7 +5,7 @@ import { AutomationEngine } from '../engine.js';
 import { registerHttpNodes } from './http-nodes.js';
 import { registerTryCatchNode } from './index.js';
 import { stubbedFetchEgress } from './stubbed-fetch-egress.testkit.js';
-import { egressRefusalText } from '@objectstack/core/egress';
+import { createEgressGuard, createEnvEgressPolicy, egressRefusalText, type EgressGuard } from '@objectstack/core/egress';
 
 function createTestLogger() {
     return {
@@ -261,15 +261,36 @@ describe('http (canonical node)', () => {
 
 describe('http (canonical node) — a failed call names its host and cause', () => {
     // Real fetches against real failures: the cause shape is undici's, not a mock's.
-    async function run(config: Record<string, unknown>, egress?: ReturnType<typeof stubbedFetchEgress>) {
+    // Only the host lookup is stubbed. `.invalid` never resolves (RFC 6761), but a
+    // real lookup of it is still a DNS round-trip, and on a slow resolver that
+    // outlasts the test's timeout — so the guard is the real one, handed a resolver
+    // that answers ENOTFOUND for the one unknown host this suite names. An IP
+    // literal never reaches the resolver; any other name is a mistake here.
+    const lookups: string[] = [];
+    beforeEach(() => { lookups.length = 0; });
+    function stubbedLookupEgress(): EgressGuard {
+        return createEgressGuard({
+            policy: createEnvEgressPolicy({ allowedTargets: '127.0.0.1' }),
+            resolve: async (hostname) => {
+                lookups.push(hostname);
+                if (hostname === 'no-such-host.invalid') {
+                    throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND', hostname });
+                }
+                throw new Error(`unexpected lookup of ${hostname}: this suite resolves no real host name`);
+            },
+        });
+    }
+
+    async function run(config: Record<string, unknown>, egress: EgressGuard = stubbedLookupEgress()) {
         const engine = new AutomationEngine(createTestLogger());
-        registerHttpNodes(engine, createCtx(), egress ? { egress } : {});
+        registerHttpNodes(engine, createCtx(), { egress });
         engine.registerFlow('http_flow', httpFlow('http', config));
         return engine.execute('http_flow');
     }
 
     it('an unknown host reads the refusal a non-public target reads, naming the host and nothing of the lookup', async () => {
         const result = await run({ url: 'http://no-such-host.invalid/path' });
+        expect(lookups, 'the stubbed resolver answered the lookup').toEqual(['no-such-host.invalid']);
         expect(result.success).toBe(false);
         expect(result.error).toMatch(/http: EGRESS_REFUSED: /);
         expect(result.error!.endsWith(`http: ${egressRefusalText('no-such-host.invalid')}`)).toBe(true);
@@ -291,6 +312,7 @@ describe('http (canonical node) — a failed call names its host and cause', () 
     it('never names the path, query secret or userinfo of the url', async () => {
         // A query secret on a url that fails to connect.
         const q = await run({ url: 'http://no-such-host.invalid/hook/PATHSECRET?token=QUERYSECRET' });
+        expect(lookups, 'the stubbed resolver answered the lookup').toEqual(['no-such-host.invalid']);
         expect(q.error).toContain('no-such-host.invalid');
         expect(q.error).not.toContain('QUERYSECRET');
         expect(q.error).not.toContain('PATHSECRET');

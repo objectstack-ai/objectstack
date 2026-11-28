@@ -585,14 +585,16 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
             name: request.name,
             packageId: request.packageId,
         }, { otherSpelling: true });
-        if (served) {
+        // ADR-0160 D7: a row the stored seam yields no item of (an action row
+        // of the retired type) is no overlay: the read answers as with no row.
+        const servedItem = served
+            ? host.convertStoredItem(String(served.row.type ?? request.type), storedRowDocument(served.row))
+            : undefined;
+        if (served && servedItem !== undefined) {
             const rec = served.row;
             overlayRow = rec as ServedOverrideRow;
             overlayBinding = served.overrideOf ?? (rec as { package_id?: unknown }).package_id;
-            overlay = host.convertStoredItem(
-                String(rec.type ?? request.type),
-                storedRowDocument(rec),
-            );
+            overlay = servedItem;
             overlayScope = 'env';
         }
     } catch (error) {
@@ -727,11 +729,11 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                 };
                 return rank(a) - rank(b) || String(boundTo(a)).localeCompare(String(boundTo(b)));
             })[0];
-        if (orphan !== undefined) {
-            overlay = host.convertStoredItem(
-                String((orphan as { type?: unknown }).type ?? request.type),
-                storedRowDocument(orphan),
-            );
+        const orphanItem = orphan !== undefined
+            ? host.convertStoredItem(String((orphan as { type?: unknown }).type ?? request.type), storedRowDocument(orphan))
+            : undefined;
+        if (orphanItem !== undefined) {
+            overlay = orphanItem;
             overlayScope = 'env';
             orphaned = true;
         }
@@ -779,11 +781,13 @@ export async function getMetaItemLayered(host: Pick<ProtocolHost, 'artifactLockL
                     ...memberOption(member),
                 }))?.row;
             }
-            if (draftRow) {
-                draft = host.convertStoredItem(
-                    String(draftRow.type ?? request.type),
-                    storedRowDocument(draftRow),
-                );
+            // ADR-0160 D7: a draft row the stored seam yields no item of (an
+            // action row of the retired type) is no pending draft.
+            const draftItem = draftRow
+                ? host.convertStoredItem(String(draftRow.type ?? request.type), storedRowDocument(draftRow))
+                : undefined;
+            if (draftRow && draftItem !== undefined) {
+                draft = draftItem;
                 // [#32568, ADR-0150 D4, epic ruling 6817768147] At an exact
                 // address the layer is the draft the strict draft read serves
                 // there, judged as that read judges it: a sealed type's

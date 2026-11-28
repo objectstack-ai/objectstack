@@ -385,7 +385,9 @@ const BINDINGS = [
     id: 'action-types',
     file: 'skills/objectstack-ui/SKILL.md',
     heading: '### Action Types',
-    symbol: 'ActionType',
+    // [#37856] `ActionType` is an `enumWithRetiredValues` call this gate does
+    // not read whole; its live members are the `ACTION_TYPE_VALUES` array it wraps.
+    symbol: 'ACTION_TYPE_VALUES',
     source: 'packages/spec/src/ui/action.zod.ts',
     why: 'The complete action-type table. A different skill documents a deliberate 3-of-6 subset of the same enum, which is exactly why the binding names THIS section and not that one.',
   },
