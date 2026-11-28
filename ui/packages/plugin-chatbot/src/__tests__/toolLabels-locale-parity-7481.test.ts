@@ -147,9 +147,12 @@ describe('humanizeToolName resolves the newer tools through the pack (objectui#7
     expect(humanizeToolName('get_authoring_rules', ttFrom('zh-Hans'))).not.toBe('Get authoring rules');
   });
 
-  it('zh: the other four newly-mapped tools resolve too', () => {
+  it('zh: every graduated tool resolves to its pack label too', () => {
+    // Iterates GRADUATED, not AHEAD_OF_PIN: the hand-held list is empty at
+    // this pin, and a loop over it would assert nothing.
     const tt = ttFrom('zh-Hans');
-    for (const name of AHEAD_OF_PIN) {
+    expect(GRADUATED.length).toBeGreaterThan(0);
+    for (const name of GRADUATED) {
       expect(humanizeToolName(name, tt), name).toBe(toolsOf('zh-Hans')![name]);
     }
   });
