@@ -652,9 +652,9 @@ Root also exports: `defineStack`, `composeStacks`, `defineView`, `defineApp`, `d
 | `content/docs/<tree>/` — every tree except `references/` and `releases/` above | hand-written | ✅ Update that tree's own `meta.json` when adding a page: each is an explicit ordered `pages` array with no rest-spread, so a page you add but never list is absent from the nav. |
 
 **Volatile counts are deleted, not synced.** ⛔ Never write into user-facing output, `content/docs`, skills
-text or a test baseline a number that ordinary development changes (rule, file or registry-entry counts) unless a
-reader acts on it; a limit, quota or price is acted on and stays. Where you meet one, above all one a gate or test
-exists only to keep equal to a registry, delete the number, and that gate with it, instead of updating it.
+text or a test baseline a count that ordinary development moves (rules, files, registry entries) unless a reader
+acts on it, as on a limit, quota or price. Where you meet one, above all one a gate or test exists only to keep
+equal to a registry, delete the number and that gate instead of updating them.
 
 ### Touched `packages/spec`? Regenerate its artifacts BEFORE pushing
 
