@@ -2112,7 +2112,7 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
   useObjectGridDiagnostics(schema);
 
   // `generateColumns`, the column generator, in hook order (`./objectGridGenerateColumns`).
-  const { generateColumns } = useObjectGridGenerateColumns({
+  const { generateColumns, synthesizeFieldColumn } = useObjectGridGenerateColumns({
     schema, dataSource, data, dataConfig, hasInlineData, objectName, objectSchema, objectFields,
     objectTypesPending, schemaFields, schemaColumns, perms, navigation, executeAction, predicateScope,
     resolveFieldLabel, translateOptions, uiLanguage, recordLinkAdornment, rowOpensRecord,
@@ -4414,8 +4414,37 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
     // A WITHHELD column (objectui#10657: the object's field types are still
     // unknown, and the column has no type of its own) is handled the same way:
     // its `cell` draws the mask.
+    // objectstack#37891 — the card's BODY. When the object declares
+    // `highlightFields` (ADR-0085's "which fields matter most", in priority
+    // order) the card reads its amount and subtitle from that list, in that
+    // order, whether or not the view shows each field as a column: the wide
+    // table keeps its own columns and the phone card follows the object. A
+    // shown column is drawn through its own draft; a field no column shows is
+    // drawn through the draft the synthesized grid would give it
+    // (`synthesizeFieldColumn`: the field's renderer, its translated label, and
+    // field-level security, so a field the viewer may not read is left out).
+    // The fetches that feed this grid ask for those fields beside the name
+    // field. An object that declares none keeps the shown columns' order.
+    const highlightNames = Array.isArray((objectSchema as any)?.highlightFields)
+      ? [...new Set(((objectSchema as any).highlightFields as unknown[])
+          .filter((n): n is string => typeof n === 'string' && !!objectFields?.[n]))]
+      : [];
+    const followsHighlights = highlightNames.length > 0;
+    const cardColMap = new Map(colMap);
+    const highlightColumns = highlightNames
+      .filter((n) => n !== titleKey)
+      .map((n) => {
+        const shown = colMap.get(n);
+        if (shown) return shown;
+        const drafted = synthesizeFieldColumn(n);
+        if (drafted) cardColMap.set(n, drafted);
+        return drafted;
+      })
+      .filter((c): c is ObjectGridColumnDraft => c !== null && c !== undefined);
+    const cardBodyColumns = followsHighlights ? highlightColumns : bodyColumns;
+
     const isMaskedCardColumn = (key: string) =>
-      isMaskedGridColumn(colMap.get(key)?.type, objectFields?.[key]?.type, objectTypesPending);
+      isMaskedGridColumn(cardColMap.get(key)?.type, objectFields?.[key]?.type, objectTypesPending);
 
     // objectstack#28484 — a phone's card row is the board's list row: the
     // title, ONE subtitle line and ONE status chip at the right, with no
@@ -4450,12 +4479,31 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
       const def = objectFields?.[c.accessorKey];
       return def?.type === c.type && resolveFormulaValueType(def, 0) === 'currency';
     };
-    const amountCol = bodyColumns.find(
-      (c) => c !== statusCol && drawsAsMoney(c) && !isMaskedCardColumn(c.accessorKey),
+    // objectstack#37891 — read from the card body above: with `highlightFields`
+    // the amount is the first of them that draws as money (an order line
+    // declaring `['total_price', 'quantity', 'unit_price', 'discount']` shows
+    // its total, not the unit price its table happens to show first), and the
+    // subtitle takes the next three, in that order, each number, currency and
+    // percent part under its field label, so `2 · 10` reads as quantities.
+    const amountCol = cardBodyColumns.find(
+      (c) => c.accessorKey !== statusKey && drawsAsMoney(c) && !isMaskedCardColumn(c.accessorKey),
     );
-    const subtitleColumns = bodyColumns
-      .filter((c) => c !== statusCol && c !== amountCol && !titleReads.has(c.accessorKey))
-      .slice(0, 2);
+    const subtitleColumns = cardBodyColumns
+      .filter((c) => c.accessorKey !== statusKey && c !== amountCol && !titleReads.has(c.accessorKey))
+      .slice(0, followsHighlights ? 3 : 2);
+    const labelsSubtitlePart = (c: ObjectGridColumnDraft): boolean => {
+      if (!followsHighlights) return false;
+      if (c.type === 'number' || c.type === 'currency' || c.type === 'percent') return true;
+      if (c.type !== 'formula' && c.type !== 'summary') return false;
+      const def = objectFields?.[c.accessorKey];
+      if (def?.type !== c.type) return false;
+      const valueType = resolveFormulaValueType(def, 0);
+      return valueType === 'number' || valueType === 'currency' || valueType === 'percent';
+    };
+    const subtitlePartLabel = (c: ObjectGridColumnDraft): string | undefined => {
+      if (!labelsSubtitlePart(c)) return undefined;
+      return typeof c.header === 'string' && c.header !== '' ? c.header : undefined;
+    };
     const isEmptyCardValue = (value: unknown) => value == null || value === '';
     const cardCell = (col: ObjectGridColumnDraft, row: any): React.ReactNode => {
       const value = row[col.accessorKey];
@@ -4619,7 +4667,12 @@ export const ObjectGrid: React.FC<ObjectGridComponentProps> = ({
                 {subtitle.map((col, i) => (
                   <React.Fragment key={col.accessorKey}>
                     {i > 0 && <span className="shrink-0 whitespace-pre"> · </span>}
-                    <span data-testid="grid-card-subtitle-part" className="min-w-0 truncate">{cardCell(col, row)}</span>
+                    <span data-testid="grid-card-subtitle-part" className="min-w-0 truncate">
+                      {subtitlePartLabel(col) !== undefined && (
+                        <span data-testid="grid-card-subtitle-label">{subtitlePartLabel(col)} </span>
+                      )}
+                      {cardCell(col, row)}
+                    </span>
                   </React.Fragment>
                 ))}
               </div>
