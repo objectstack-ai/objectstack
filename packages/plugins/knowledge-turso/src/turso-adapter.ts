@@ -151,15 +151,22 @@ const VECTOR_RETRY_POOL = 10;
 /**
  * How many times the floor ({@link VECTOR_MIN_POOL} × topK) the first
  * approximate pass must be expected to keep in scope for a scope of record
- * terms alone to take that pass: the `topK × vectorIndexOverfetch`
- * candidates times the share of the passages in scope, which a count of the
- * rows in scope, served by the record index and stopped at the cut-over,
- * reads. A narrower scope goes straight to the exact scan, which the record
- * index serves from the rows in scope: the one-bit pass, which reads every
- * row of the table, would mostly leave a pool under the floor and be followed
- * by that scan anyway. PLACEHOLDER — placed by the bench.
+ * terms alone to take it: its `topK × vectorIndexOverfetch` candidates times
+ * the share of the passages in scope. A narrower scope goes straight to the
+ * exact scan, which the record index serves from the rows in scope; the
+ * one-bit pass reads every row of the table, and under such a scope it often
+ * leaves a pool under the floor, so the exact scan follows it anyway. With
+ * the default 40 candidates a hit, the cut-over is 25% of the passages in
+ * scope. Measured at 200,000 passages of 1,536 dimensions (clustered, topK
+ * 10), 50 queries a share, the p95 of the exact scan and of the search
+ * through the one-bit pass first: at 20% in scope 228 and 373 ms (48% of the
+ * queries ran both), at 25% 308 and 200 ms (2% ran both), at 10% 133 and
+ * 282, at 35% 435 and 188, at 50% 689 and 221.
  */
-const VECTOR_RECORD_SCOPE_POOL = 1.5;
+const VECTOR_RECORD_SCOPE_POOL = 1.25;
+
+/** At most how many of a record scope's ids the estimate of its passages counts ({@link VECTOR_RECORD_SCOPE_POOL}). */
+const VECTOR_SCOPE_SAMPLE = 256;
 
 /** How many passages one batch of a vector index's copy writes: each batch is a transaction of its own, so a search waits at most one batch. */
 const VECTOR_BACKFILL_BATCH = 2048;
@@ -322,7 +329,9 @@ function withTimeout<T>(work: Promise<T>, ms: number, commit = false): Promise<T
  *   `topK` hits, is run once more over {@link VECTOR_RETRY_POOL} times the
  *   candidates when its pool says that can clear the floor and its scope is
  *   not of record terms alone, and is run again exactly otherwise, or when
- *   that pass falls short too.
+ *   that pass falls short too. A scope of record terms alone that keeps too
+ *   few passages for the first pass to be expected to clear the floor
+ *   ({@link VECTOR_RECORD_SCOPE_POOL}) goes straight to the exact scan.
  * - The keyword leg: the query's terms ({@link keywordTerms}). A term of three
  *   characters or more is matched as one FTS5 phrase in the passage table's
  *   trigram index (so `X-200` is a phrase, never FTS5 syntax); a shorter one
@@ -708,6 +717,8 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     const where: string[] = [];
     // Whether the record index can serve the exact scan: a scope of record terms alone.
     let recordScope = false;
+    // The ids of the scope's record terms, each once.
+    const recordIds = new Set<string>();
     if (opts.organizationIds !== undefined) {
       args.push(JSON.stringify(opts.organizationIds));
       where.push(`organization_id IN (SELECT value FROM json_each(?${args.length}))`);
@@ -727,6 +738,7 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
         const ids = `(SELECT value FROM json_each(?${args.length}))`;
         if (term.kind === 'record') {
           scopeTerms.push(`source_record_id IN ${ids}`);
+          for (const id of term.ids) recordIds.add(id);
           continue;
         }
         parentTerm = true;
@@ -825,21 +837,10 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
       const instance = now.active.createdAt;
       if (vectorLeg && (await this.approximateSearchable(tableName, instance))) {
         const candidates = topK * this.vectorIndexOverfetch;
-        // A scope of record terms alone too narrow for the first pass to be
-        // expected to clear the floor (VECTOR_RECORD_SCOPE_POOL) goes straight
-        // to the exact scan, which the record index serves from the rows in
-        // scope. The count reads those rows' index entries, at most up to the cut-over.
-        if (recordScope) {
-          const cut = (VECTOR_RECORD_SCOPE_POOL * VECTOR_MIN_POOL) / this.vectorIndexOverfetch;
-          const counted = await client.execute({
-            sql: `WITH total AS (SELECT count(*) AS n FROM ${table})
-                    SELECT n, (SELECT count(*) FROM (SELECT 1 FROM ${table} WHERE ${inScope}
-                      LIMIT (SELECT CAST(n * ?${args.length + 1} AS INTEGER) + 1 FROM total))) AS k FROM total`,
-            args: [...args, cut] as InArgs,
-          });
-          const { n, k } = counted.rows[0];
-          if (Number(k) < Number(n) * cut) return client.execute(statement());
-        }
+        // A scope of record terms alone that the first pass is not expected
+        // to answer goes straight to the exact scan, which the record index
+        // serves from the rows in scope.
+        if (recordScope && (await this.recordScopeUnderCut(client, tableName, recordIds))) return client.execute(statement());
         // A failed approximate statement (its index gone under this process's
         // memory of it) forgets that memory and is answered by the exact scan.
         const approximate = (candidates: number) =>
@@ -1266,6 +1267,36 @@ export class TursoKnowledgeAdapter implements IKnowledgeAdapter {
     }
     if (!complete) return false;
     return (await this.organizationsIn(client, table)) <= 1;
+  }
+
+  /**
+   * Whether a scope of record terms alone, of the distinct `recordIds`, keeps
+   * fewer of the passages of `table` than the first approximate pass needs to
+   * be expected to keep {@link VECTOR_RECORD_SCOPE_POOL} × the floor in scope:
+   * a share under that many times {@link VECTOR_MIN_POOL} /
+   * `vectorIndexOverfetch`. The passages in scope are estimated from those of
+   * at most {@link VECTOR_SCOPE_SAMPLE} of the ids, spread evenly over them,
+   * counted through the record index (exactly, for a scope of no more ids),
+   * so a record of many passages counts as many and an id of no passage as
+   * none. The organization and metadata filters are not counted: the exact
+   * scan reads every row the record index finds for the scope. Runs inside
+   * the client's queue.
+   */
+  private async recordScopeUnderCut(db: Pick<Client, 'execute'>, table: string, recordIds: ReadonlySet<string>): Promise<boolean> {
+    const ids = [...recordIds];
+    const sample =
+      ids.length <= VECTOR_SCOPE_SAMPLE
+        ? ids
+        : Array.from({ length: VECTOR_SCOPE_SAMPLE }, (_, i) => ids[Math.floor((i * ids.length) / VECTOR_SCOPE_SAMPLE)]);
+    const t = quoted(table);
+    const counted = await db.execute({
+      sql: `SELECT (SELECT count(*) FROM ${t}) AS n,
+                   (SELECT count(*) FROM ${t} WHERE source_record_id IN (SELECT value FROM json_each(?1))) AS k`,
+      args: [JSON.stringify(sample)],
+    });
+    const n = Number(counted.rows[0].n);
+    const inScope = (Number(counted.rows[0].k) * ids.length) / Math.max(1, sample.length);
+    return inScope * this.vectorIndexOverfetch < VECTOR_RECORD_SCOPE_POOL * VECTOR_MIN_POOL * n;
   }
 
   /** Forgets what this process knew of the approximate vector index of every instance of the passage table `table`. */
