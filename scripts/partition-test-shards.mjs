@@ -191,6 +191,27 @@ const TIMINGS_PATH = path.join(REPO_ROOT, 'scripts', 'test-shard-timings.json');
 // FILE_SHARDED_PACKAGES entry), not an eleventh shard's. In the shard wall
 // model (whole sum / WHOLE_LEG_WALL_DIVISOR + slice) the slowest tests step
 // on that dataset goes ~1247s -> ~1095s, a CLI slice shard both times.
+//
+// TWELVE (#36646, 10 -> 12), together with the wall placement (placeByWall()):
+// the count is set by the slice shards' WALL, not by balance or the cap. On
+// full-plan merge_group runs at ten the slice shards were the slowest Test
+// Core jobs, their whole leg running before their serial slice. Placed by
+// wall, the whole packages leave the slice shards only while the slice-free
+// shards fit them under WHOLE_LEG_CAP_SECONDS, and at ten they do not fit
+// comfortably. On the 2026-11-23 dataset (whole packages 13711s):
+//
+//   10 shards, plain sums -> whole legs 89/1696/1698/1694/870/869/1696/1699/1699/1699s
+//   10 shards, by wall    -> whole legs on the seven slice-free shards 1866-1868s (the
+//                            density #25968 was reverted at; pin 3f refuses it)
+//   12 shards, by wall    -> whole legs 53/0/0 on the slice shards, 1515-1520s on the
+//                            nine others; bins max/mean 1.18x, within the 1.3x bound
+//
+// Replayed through planShards() on the 60 latest green merge_group runs
+// (2026-11-28), with a whole-leg fit from their own logs, the slowest Test
+// Core job of the 42 that started Test Core reads p50 19.2 -> 18.3 min
+// modelled, and the reader slice's shard -- its closure is serial wall -- is
+// then the heaviest. Bins are no longer equal sums: the slice shards carry
+// their slice and nothing else, which is the point.
 export const SHARD_COUNT = liveShardTotal('test');
 
 // The acceptance bound #10472 set: the slowest shard within ~1.3x the mean.
@@ -1403,12 +1424,106 @@ export function closureAllowance(items, shardCount) {
     : 0;
 }
 
-// The split a run actually runs: partition(), and -- only when the split
-// carries a slice -- refineToCap() against the density cap. A split with no
-// slice is the plain LPT split it always was, byte for byte.
+// ── A SLICE'S SHARD CARRIES NO WHOLE LEG WHILE THE OTHERS HAVE ROOM (#36646) ──
+//
+// partition() places a slice at its plain weight, so every bin comes out with
+// the same SUM -- and a slice shard's sum is not its wall. Its whole packages
+// run first, four at a time, and the slice runs after them as a serial leg of
+// its own (ci.yml, "Run this shard's tests"), so its tests step reads close to
+// wholeSum / WHOLE_LEG_WALL_DIVISOR + slice, while a shard with no slice reads
+// its whole leg alone. Measured on the 12 full-plan merge_group Test Core runs
+// sampled 2026-11-25..28 at ten shards (os-dev-report 7232799392 on #36646):
+// the slice shards' whole leg read p50 287 s and their slice leg p50 887 s, a
+// tests step of p50 1016 s against 722 s on the whole-only shards, and the
+// slowest shard of a full run was a slice shard. On the 2026-11-23 dataset the
+// plain-sum split left 870 s and 869 s of whole packages on two slice shards.
+//
+// So a split that carries a slice is placed by MODELLED WALL, wallOfBin():
+//
+//   1. the slice items first, heaviest first, each into the bin of least
+//      modelled wall that holds no slice of the same package (ties to the
+//      lowest index) -- with the riders of the reader slice beside it, as in
+//      partition();
+//   2. then the whole packages, heaviest first, each into the bin of least
+//      modelled wall among the bins it FITS: its whole leg stays within
+//      WHOLE_LEG_CAP_SECONDS and it does not join the other member of
+//      LOAD_SENSITIVE_APART. A package that fits no bin goes to the bin of
+//      least modelled wall that keeps the pair apart, and then to the least
+//      of all; pin 3d grades the committed dataset's split against both.
+//
+// A bin with no slice has wall wholeSum / divisor, so among those step 2 is
+// LPT on sums, as before; a bin with a slice starts a slice ahead, so a whole
+// package lands on one only once every slice-free bin it fits is heavier in
+// wall. ⛔ This is NOT #25968's wall-model placement, reverted by #26077: that
+// one moved the whole packages off the slice shards with no cap and left four
+// shards at ~2141 s of whole packages; here the cap bounds every whole leg
+// first, and the matrix width is what makes the slice-free bins roomy (the
+// SHARD_COUNT docblock's twelve). A split with no slice is the plain LPT split
+// it always was, byte for byte; the density-cap repair (refineToCap) still
+// runs after either placement.
+export function wallOfBin(bin, weightOf, divisor = WHOLE_LEG_WALL_DIVISOR) {
+  let whole = 0;
+  let serial = 0;
+  for (const name of bin.names) {
+    const it = weightOf.get(name);
+    if (it.slice) serial += it.weight + (it.closure ?? 0) / divisor;
+    else whole += it.weight;
+  }
+  return whole / divisor + serial;
+}
+
+export function placeByWall(
+  items,
+  shardCount,
+  { legCap = WHOLE_LEG_CAP_SECONDS, apart = LOAD_SENSITIVE_APART, divisor = WHOLE_LEG_WALL_DIVISOR } = {}
+) {
+  const present = new Set(items.map((i) => i.name));
+  const byName = new Map(items.map((i) => [i.name, i]));
+  const rides = (it) => it.rideWith !== undefined && present.has(it.rideWith);
+  const byWeight = (a, b) => packedWeight(b) - packedWeight(a) || a.name.localeCompare(b.name, 'en');
+  const riders = items.filter(rides).sort(byWeight);
+  const slices = items.filter((i) => i.slice && !rides(i)).sort(byWeight);
+  const wholes = items.filter((i) => !i.slice && !rides(i)).sort(byWeight);
+  const bins = Array.from({ length: shardCount }, () => ({ total: 0, names: [], whole: 0, pkgs: new Set(), wall: 0 }));
+  const put = (it, at) => {
+    const bin = bins[at];
+    bin.names.push(it.name);
+    bin.total += packedWeight(it);
+    if (it.slice) bin.pkgs.add(it.pkg);
+    else bin.whole += it.weight;
+    bin.wall = wallOfBin(bin, byName, divisor);
+  };
+  const least = (candidates) => {
+    let best = -1;
+    for (const i of candidates) if (best === -1 || bins[i].wall < bins[best].wall) best = i;
+    return best;
+  };
+  const all = bins.map((_, i) => i);
+  const placeWithRiders = (it, at) => {
+    put(it, at);
+    for (const r of riders) if (r.rideWith === it.name) put(r, at);
+  };
+  for (const it of slices) {
+    const spread = all.filter((i) => !bins[i].pkgs.has(it.pkg));
+    placeWithRiders(it, least(spread.length > 0 ? spread : all));
+  }
+  const apartOf = (it) => (apart.includes(it.name) ? apart.filter((n) => n !== it.name) : []);
+  for (const it of wholes) {
+    const others = apartOf(it);
+    const keepsApart = all.filter((i) => !others.some((n) => bins[i].names.includes(n)));
+    const fits = keepsApart.filter((i) => bins[i].whole + it.weight <= legCap);
+    placeWithRiders(it, least(fits.length > 0 ? fits : keepsApart.length > 0 ? keepsApart : all));
+  }
+  return bins.map(({ total, names }) => ({ total, names }));
+}
+
+// The split a run actually runs: a split with no slice is partition(), the
+// plain LPT split it always was, byte for byte; a split that carries one is
+// placeByWall(), then refineToCap() against the density cap.
 export function placeItems(items, shardCount, cap = Infinity) {
-  const bins = partition(items, shardCount);
-  return Number.isFinite(cap) && items.some((i) => i.slice) ? refineToCap(bins, items, cap) : bins;
+  if (!items.some((i) => i.slice)) return partition(items, shardCount);
+  const bins = placeByWall(items, shardCount);
+  return Number.isFinite(cap) ? refineToCap(bins, items, cap) : bins;
 }
 
 // ── WHETHER THIS RUN SLICES: THE RUN'S OWN PACKAGE LIST (#22075) ─────────────
@@ -1983,6 +2098,8 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // both document shapes, 11 are fixtures (7 of the three spellings, 3 of the
   // placement, 1 of the cap repair).
   'the declaration-reading slice carries the closure (#25870)': 16,
+  // 3 grade the committed dataset as CI splits it, 5 are fixtures.
+  'a split that carries a slice is placed by wall (#36646)': 8,
   'predicted-vs-measured drift (#16173)': 9,
   'drift warning tier under the red (#16465)': 12,
   'file-level slice items (#16173)': 20,
@@ -2004,7 +2121,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 18;
+const SELF_TEST_BATTERY_FLOOR = 19;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -2604,21 +2721,22 @@ function selfTest() {
       }
     }
   });
-  // A literal, not the charge: a charge refreshed to nothing must red here.
-  // 300s is well under the ~780s today's charge makes room for.
-  const ROOM_SECONDS = 300;
+  // Placed by wall (placeByWall(), #36646), the reader slice's shard carries
+  // its riders and no other whole package while the slice-free shards have
+  // room, and its closure makes room for itself in the wall model: at a spill,
+  // where whole packages must land on slice shards, they land on the other
+  // slice shards first. The fixture in pin 3f holds the spill; this case holds
+  // the committed dataset, where nothing spills.
   check(() => {
     for (const name of Object.keys(DECLARATION_READER_SLICES)) {
       const at = binOf(real, readerLabel(name));
-      const others = real
-        .map((b, i) => ({ i, sliced: b.names.some((n) => parseShardItem(n).name === name) }))
-        .filter((b) => b.sliced && b.i !== at)
-        .map((b) => wholeLeg.sums[b.i]);
-      if (others.length === 0 || !(wholeLeg.sums[at] + ROOM_SECONDS < Math.min(...others))) {
+      const strays = real[at].names.filter(
+        (n) => !parseShardItem(n).slice && !DECLARATION_READER_PACKAGES.includes(n)
+      );
+      if (strays.length > 0) {
         throw new Error(
-          `declaration closure: ${readerLabel(name)}'s shard carries ${wholeLeg.sums[at].toFixed(0)}s of whole packages ` +
-            `against [${others.map((s) => s.toFixed(0)).join(', ')}]s on the other slice shards, not ${ROOM_SECONDS}s less -- ` +
-            'the closure it builds alone is not making room for itself'
+          `declaration closure: ${readerLabel(name)}'s shard carries ${wholeLeg.sums[at].toFixed(0)}s of whole packages, ` +
+            `${strays.join(', ')} among them, beside its riders -- the closure it builds alone is not making room for itself`
         );
       }
     }
@@ -2754,6 +2872,119 @@ function selfTest() {
       throw new Error('declaration closure: a document that states its own slicing was charged the declaration closure');
     }
   });
+
+  // 3f. A SPLIT THAT CARRIES A SLICE IS PLACED BY WALL (#36646) -- see
+  //     placeByWall(). The committed dataset as CI splits it first: no slice
+  //     shard carries a whole package beyond the reader slice's riders, its
+  //     modelled wall beats the plain-sum split of the same items, and no
+  //     whole leg comes near the cap (#25968's density); then fixtures for the
+  //     spill order, the pair, the spread and the no-slice identity.
+  battery('a split that carries a slice is placed by wall (#36646)');
+  const wallOf = (bins, items) => {
+    const byName = new Map(items.map((i) => [i.name, i]));
+    return bins.map((b) => wallOfBin(b, byName));
+  };
+  check(() => {
+    const strays = real.flatMap((b, i) =>
+      b.names.some((n) => parseShardItem(n).slice)
+        ? b.names.filter((n) => !parseShardItem(n).slice && !DECLARATION_READER_PACKAGES.includes(n)).map((n) => `${n} on shard ${i + 1}`)
+        : []
+    );
+    if (strays.length > 0) {
+      throw new Error(
+        `wall placement: the committed dataset at ${SHARD_COUNT} shards puts whole packages beside a slice (${strays.join(', ')}) ` +
+          `while slice-free shards have room under the ${WHOLE_LEG_CAP_SECONDS}s cap -- the slice shard then runs that ` +
+          'whole leg before its serial slice and sets the Test Core wall'
+      );
+    }
+  });
+  check(() => {
+    // The reader slice's shard is the heaviest in both splits (its closure is
+    // 270s of serial wall), so the gain is read on the OTHER slice shards: their
+    // heaviest wall falls, and the split's heaviest does not rise.
+    const plainBins = partition(datasetItems, SHARD_COUNT);
+    const otherSliceWall = (bins) => {
+      const walls = wallOf(bins, datasetItems);
+      return Math.max(0, ...bins.map((b, i) => (b.names.some((n) => parseShardItem(n).slice && !datasetItems.find((it) => it.name === n).closure) ? walls[i] : 0)));
+    };
+    const [placed, plain] = [otherSliceWall(real), otherSliceWall(plainBins)];
+    const [placedMax, plainMax] = [Math.max(...wallOf(real, datasetItems)), Math.max(...wallOf(plainBins, datasetItems))];
+    if (!(placed < plain) || placedMax > plainMax) {
+      throw new Error(
+        `wall placement: the non-reader slice shards' heaviest modelled wall is ${placed.toFixed(0)}s against the plain-sum ` +
+          `split's ${plain.toFixed(0)}s, and the split's heaviest ${placedMax.toFixed(0)}s against ${plainMax.toFixed(0)}s`
+      );
+    }
+  });
+  // A literal, not the cap: 95% of it. #25968 went red with whole legs at the
+  // cap's neighbourhood; a refresh that brings this split there asks for a
+  // wider matrix or a finer slice (the WHOLE_LEG_CAP_SECONDS rule), and this
+  // case says so before the queue does.
+  const NEAR_CAP = 0.95 * WHOLE_LEG_CAP_SECONDS;
+  check(() => {
+    const near = wholeLeg.sums.map((s, i) => ({ s, i })).filter(({ s }) => s >= NEAR_CAP);
+    if (near.length > 0) {
+      throw new Error(
+        `wall placement: at ${SHARD_COUNT} shards ${near.length} whole leg(s) sit within 5% of the ${WHOLE_LEG_CAP_SECONDS}s cap ` +
+          `(${near.map(({ s, i }) => `shard ${i + 1}: ${s.toFixed(0)}s`).join(', ')}) -- the density #25968 was reverted at. ` +
+          'Widen the Test Core matrix or slice a heavier package; never a denser shard.'
+      );
+    }
+  });
+  {
+    // Three shards, `c` cut in two with its first half the reader slice, and
+    // four 60s whole packages under a 130s cap: two fit the slice-free bin, and
+    // the two that spill land on the other slice's shard, none on the reader's,
+    // whose closure is 270s of serial wall in the model.
+    const spill = expandSlices(
+      [{ name: 'c', weight: 200, sliceCount: 2 }, mk('w', 60), mk('x', 60), mk('y', 60), mk('z', 60)],
+      { slices: { c: 1 }, packages: [] }
+    );
+    check(() => {
+      const bins = placeByWall(spill, 3, { legCap: 130, apart: [] });
+      const at = (n) => bins.findIndex((b) => b.names.includes(n));
+      const reader = at('c 1/2');
+      const other = at('c 2/2');
+      const free = [0, 1, 2].find((i) => i !== reader && i !== other);
+      const onOther = bins[other].names.filter((n) => !parseShardItem(n).slice).length;
+      const onReader = bins[reader].names.filter((n) => !parseShardItem(n).slice).length;
+      const onFree = bins[free].names.length;
+      if (reader === other || onFree !== 2 || onOther !== 2 || onReader !== 0) {
+        throw new Error(`wall placement: the spill fixture split as [${bins.map((b) => b.names.join(',')).join(' | ')}]`);
+      }
+    });
+    check(() => {
+      // Same items, the pair x/y apart: x and y never share a bin even where
+      // the cheapest wall would put them together.
+      const bins = placeByWall(spill, 3, { legCap: 1000, apart: ['x', 'y'] });
+      const both = bins.findIndex((b) => b.names.includes('x') && b.names.includes('y'));
+      if (both !== -1) throw new Error(`wall placement: the load-sensitive pair shares shard ${both + 1} (${bins[both].names.join(', ')})`);
+    });
+    check(() => {
+      // A whole package no bin fits still lands -- on the least wall -- and
+      // the cap pin names it, rather than the package going missing.
+      const bins = placeByWall(spill, 3, { legCap: 10, apart: [] });
+      const placedNames = bins.flatMap((b) => b.names).sort();
+      if (placedNames.join() !== spill.map((i) => i.name).sort().join()) {
+        throw new Error(`wall placement: a split past every cap placed [${placedNames.join(', ')}]`);
+      }
+      if (wholeLegProblems(bins, spill, { cap: 10, apart: [] }).problems.length === 0) {
+        throw new Error('wall placement: whole legs past a 10s cap were not named by wholeLegProblems()');
+      }
+    });
+    check(() => {
+      // Two packages cut three ways on four shards: no bin holds two slices of one.
+      const cut = expandSlices([{ name: 'p', weight: 90, sliceCount: 3 }, { name: 'q', weight: 90, sliceCount: 3 }, mk('w', 5)], NO_DECLARATION_READERS);
+      assertSlicesSpread(placeByWall(cut, 4, { apart: [] }));
+    });
+    check(() => {
+      // No slice, no change: placeItems() of a whole-only list IS partition().
+      const whole = [mk('a', 50), mk('b', 40), mk('c', 30), mk('d', 20)].map((p) => ({ ...p, slice: null, pkg: p.name }));
+      if (JSON.stringify(placeItems(whole, 3, 100)) !== JSON.stringify(partition(whole, 3))) {
+        throw new Error('wall placement: a split with no slice was not the plain LPT split');
+      }
+    });
+  }
 
   // -- PREDICTED VS MEASURED (#16173) -------------------------------------
   //
@@ -3519,10 +3750,14 @@ function selfTest() {
   });
   check(() => {
     // The allowance widens the cap and does not lift it: the carried split
-    // against a cap one second short of admitting it is refused, by name.
+    // against a cap whose widened figure sits a second under the split's own
+    // mean -- which no placement and no repair can reach -- is refused, by
+    // name. (Not "a second under the densest shard taken": the repair starts
+    // from the wall placement since #36646 and can descend further.)
     const shape = refreshedShape(2);
-    const [taken] = planShards(shape, 8, { cap: densityCap(shape, 8), readers: refreshedReaders }).decisions;
-    const short = taken.densest - taken.allowance - 1;
+    const takenPlan = planShards(shape, 8, { cap: densityCap(shape, 8), readers: refreshedReaders });
+    const [taken] = takenPlan.decisions;
+    const short = balanceOf(takenPlan.bins).mean - taken.allowance - 1;
     const [d] = planShards(shape, 8, { cap: short, readers: refreshedReaders }).decisions;
     if (d.count !== 1 || d.withinCap || !renderSliceDecision(d).includes('declaration-closure allowance')) {
       throw new Error(`closure allowance: a split past the cap plus its allowance was taken: ${renderSliceDecision(d)}`);
